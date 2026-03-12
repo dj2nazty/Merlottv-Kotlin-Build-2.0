@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +42,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,7 +52,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -253,15 +264,11 @@ fun SettingsScreen(
                     var newProfileName by remember { mutableStateOf("") }
                     var selectedColor by remember { mutableIntStateOf(0) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
+                        DpadTextField(
                             value = newProfileName,
                             onValueChange = { newProfileName = it },
                             placeholder = { Text("Profile name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            colors = settingsFieldColors(),
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                            modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -338,27 +345,19 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 var playlistName by remember { mutableStateOf("") }
                 var playlistUrl by remember { mutableStateOf("") }
-                OutlinedTextField(
+                DpadTextField(
                     value = playlistName,
                     onValueChange = { playlistName = it },
                     placeholder = { Text("Playlist name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                    colors = settingsFieldColors(),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    DpadTextField(
                         value = playlistUrl,
                         onValueChange = { playlistUrl = it },
                         placeholder = { Text("https://playlist-url.m3u", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                        colors = settingsFieldColors(),
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                        modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
@@ -424,26 +423,18 @@ fun SettingsScreen(
                 var epgUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        OutlinedTextField(
+                        DpadTextField(
                             value = epgName,
                             onValueChange = { epgName = it },
                             placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            colors = settingsFieldColors(),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                            modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedTextField(
+                        DpadTextField(
                             value = epgUrl,
                             onValueChange = { epgUrl = it },
                             placeholder = { Text("https://epg-source.xml", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            colors = settingsFieldColors(),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
@@ -491,15 +482,11 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 var addonInput by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    DpadTextField(
                         value = addonInput,
                         onValueChange = { addonInput = it },
                         placeholder = { Text("https://addon.example.com/manifest.json", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                        colors = settingsFieldColors(),
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                        modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
@@ -517,14 +504,11 @@ fun SettingsScreen(
         item(key = "torbox") {
             SettingsSection(title = "Torbox", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 var torboxInput by remember { mutableStateOf(uiState.torboxKey) }
-                OutlinedTextField(
+                DpadTextField(
                     value = torboxInput,
                     onValueChange = { torboxInput = it },
                     label = { Text("Torbox API Key", color = MerlotColors.TextMuted) },
-                    colors = settingsFieldColors(),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
@@ -576,3 +560,83 @@ private fun settingsFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = MerlotColors.Accent,
     unfocusedBorderColor = MerlotColors.Border
 )
+
+/**
+ * D-pad friendly text field that only opens the keyboard when the user
+ * explicitly presses the center/OK button. Navigating over it with
+ * D-pad arrows will NOT trigger the soft keyboard.
+ */
+@Composable
+private fun DpadTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: @Composable (() -> Unit)? = null,
+    label: @Composable (() -> Unit)? = null,
+    singleLine: Boolean = true
+) {
+    var isEditing by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+    // Use interaction source to detect click/press (center button on D-pad)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    // When interaction source gets a press, enter editing mode
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            if (interaction is PressInteraction.Release) {
+                isEditing = true
+            }
+        }
+    }
+
+    // When entering editing mode, request focus on the actual text field
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    if (isEditing) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = placeholder,
+            label = label,
+            colors = settingsFieldColors(),
+            modifier = modifier
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent { keyEvent ->
+                    // Back button exits editing mode
+                    if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Back) {
+                        isEditing = false
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .onFocusChanged { state ->
+                    if (!state.isFocused && !state.hasFocus) {
+                        isEditing = false
+                    }
+                },
+            singleLine = singleLine,
+            shape = RoundedCornerShape(8.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+        )
+    } else {
+        // Read-only appearance — focusable box that looks like a text field
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            placeholder = placeholder,
+            label = label,
+            colors = settingsFieldColors(),
+            modifier = modifier,
+            singleLine = singleLine,
+            readOnly = true,
+            shape = RoundedCornerShape(8.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
+            interactionSource = interactionSource
+        )
+    }
+}
