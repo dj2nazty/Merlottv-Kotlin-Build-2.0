@@ -5,9 +5,12 @@ import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.ChannelGroup
 import com.merlottv.kotlin.domain.repository.ChannelRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -35,6 +38,29 @@ class ChannelRepositoryImpl @Inject constructor(
                 e.printStackTrace()
                 emptyList()
             }
+        }
+    }
+
+    override suspend fun loadMultipleChannels(playlistUrls: List<String>): List<Channel> {
+        return withContext(Dispatchers.IO) {
+            val allChannels = supervisorScope {
+                playlistUrls.map { url ->
+                    async {
+                        try {
+                            val request = Request.Builder().url(url).build()
+                            val response = okHttpClient.newCall(request).execute()
+                            val body = response.body?.string() ?: ""
+                            m3uParser.parse(body)
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                }.awaitAll().flatten()
+            }
+            // De-duplicate by stream URL
+            val deduplicated = allChannels.distinctBy { it.streamUrl }
+            _channels.value = deduplicated
+            deduplicated
         }
     }
 

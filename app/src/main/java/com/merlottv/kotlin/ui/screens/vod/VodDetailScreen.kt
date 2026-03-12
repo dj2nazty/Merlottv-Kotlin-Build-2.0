@@ -53,7 +53,7 @@ fun VodDetailScreen(
     type: String,
     id: String,
     onBack: () -> Unit,
-    onPlay: (String, String) -> Unit,
+    onPlay: (streamUrl: String, title: String, contentId: String, poster: String, contentType: String) -> Unit,
     viewModel: VodDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -61,7 +61,14 @@ fun VodDetailScreen(
     // Auto-navigate to player when stream is selected
     LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
         if (uiState.autoPlayTriggered && uiState.selectedStreamUrl != null) {
-            onPlay(uiState.selectedStreamUrl!!, uiState.selectedStreamTitle ?: "")
+            val meta = uiState.meta
+            onPlay(
+                uiState.selectedStreamUrl!!,
+                uiState.selectedStreamTitle ?: "",
+                meta?.id ?: id,
+                meta?.poster ?: "",
+                type
+            )
             viewModel.clearPlayback()
         }
     }

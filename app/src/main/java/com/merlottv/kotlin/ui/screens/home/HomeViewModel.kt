@@ -2,6 +2,8 @@ package com.merlottv.kotlin.ui.screens.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.merlottv.kotlin.data.local.WatchProgressDataStore
+import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,13 +26,15 @@ data class CatalogRow(
 data class HomeUiState(
     val isLoading: Boolean = true,
     val featuredItem: MetaPreview? = null,
+    val continueWatching: List<WatchProgressItem> = emptyList(),
     val catalogRows: List<CatalogRow> = emptyList(),
     val error: String? = null
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val addonRepository: AddonRepository
+    private val addonRepository: AddonRepository,
+    private val watchProgressDataStore: WatchProgressDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -38,6 +42,15 @@ class HomeViewModel @Inject constructor(
 
     init {
         loadCatalogs()
+        loadContinueWatching()
+    }
+
+    private fun loadContinueWatching() {
+        viewModelScope.launch {
+            watchProgressDataStore.getContinueWatchingItems().collect { items ->
+                _uiState.value = _uiState.value.copy(continueWatching = items)
+            }
+        }
     }
 
     private fun loadCatalogs() {
@@ -46,30 +59,37 @@ class HomeViewModel @Inject constructor(
             try {
                 val addons = addonRepository.getAllAddons().first()
 
-                // Fetch all manifests in parallel
                 val manifests = supervisorScope {
                     addons.map { addon ->
                         async {
                             try {
                                 addonRepository.fetchManifest(addon.url) ?: addon
-                            } catch (e: Exception) {
+                            } catch (_: Exception) {
                                 addon
                             }
                         }
                     }.awaitAll()
                 }
 
-                // Build catalog fetch jobs in parallel
-                data class CatalogJob(val addonName: String, val catalogName: String, val type: String, val catalogId: String, val addonUrl: String)
+                data class CatalogJob(
+                    val addonName: String,
+                    val catalogName: String,
+                    val catalogId: String,
+                    val type: String,
+                    val addonUrl: String
+                )
 
                 val jobs = mutableListOf<CatalogJob>()
                 for (manifest in manifests) {
-                    for (catalog in manifest.catalogs.take(3)) {
-                        jobs.add(CatalogJob(manifest.name, catalog.name, catalog.type, catalog.id, manifest.url))
+                    for (catalog in manifest.catalogs) {
+                        val requiresSpecial = catalog.extra.any {
+                            it.isRequired && it.name != "genre" && it.name != "search"
+                        }
+                        if (requiresSpecial) continue
+                        jobs.add(CatalogJob(manifest.name, catalog.name, catalog.id, catalog.type, manifest.url))
                     }
                 }
 
-                // Fetch catalogs in parallel (max ~6 at a time via supervisorScope)
                 val rows = supervisorScope {
                     jobs.map { job ->
                         async {
@@ -77,27 +97,52 @@ class HomeViewModel @Inject constructor(
                                 val addon = manifests.find { it.url == job.addonUrl } ?: return@async null
                                 val items = addonRepository.getCatalog(addon, job.type, job.catalogId)
                                 if (items.isNotEmpty()) {
+                                    val typeLabel = when (job.type) {
+                                        "movie" -> "Movies"
+                                        "series" -> "Series"
+                                        else -> job.type
+                                    }
                                     CatalogRow(
-                                        title = "${job.catalogName} — ${job.addonName}",
+                                        title = "${job.catalogName} $typeLabel — ${job.addonName}",
                                         items = items
                                     )
                                 } else null
-                            } catch (e: Exception) {
+                            } catch (_: Exception) {
                                 null
                             }
                         }
                     }.awaitAll().filterNotNull()
                 }
 
-                val featured = rows.firstOrNull()?.items?.firstOrNull()
+                // Sort: Popular/New first, then streaming platforms
+                val sorted = rows.sortedWith(compareBy { row ->
+                    val t = row.title.lowercase()
+                    when {
+                        "popular" in t -> 0
+                        "new" in t -> 1
+                        "featured" in t -> 2
+                        "netflix" in t -> 3
+                        "disney" in t -> 4
+                        "prime" in t -> 5
+                        "hbo" in t -> 6
+                        "apple" in t -> 7
+                        "paramount" in t -> 8
+                        "peacock" in t -> 9
+                        "imdb" in t -> 10
+                        else -> 15
+                    }
+                })
 
-                _uiState.value = HomeUiState(
+                val featured = sorted.firstOrNull()?.items?.firstOrNull()
+
+                _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     featuredItem = featured,
-                    catalogRows = rows
+                    catalogRows = sorted,
+                    error = null
                 )
             } catch (e: Exception) {
-                _uiState.value = HomeUiState(
+                _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = e.message
                 )

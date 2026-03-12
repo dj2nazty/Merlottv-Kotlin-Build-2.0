@@ -2,7 +2,9 @@ package com.merlottv.kotlin.core.di
 
 import android.content.Context
 import com.merlottv.kotlin.data.local.FavoritesDataStore
+import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.SettingsDataStore
+import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -24,5 +26,17 @@ object AppModule {
     @Singleton
     fun provideSettingsDataStore(@ApplicationContext context: Context): SettingsDataStore {
         return SettingsDataStore(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideWatchProgressDataStore(@ApplicationContext context: Context): WatchProgressDataStore {
+        return WatchProgressDataStore(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideProfileDataStore(@ApplicationContext context: Context): ProfileDataStore {
+        return ProfileDataStore(context)
     }
 }

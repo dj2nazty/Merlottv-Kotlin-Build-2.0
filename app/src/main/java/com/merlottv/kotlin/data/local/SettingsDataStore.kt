@@ -8,14 +8,31 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+
+data class PlaylistEntry(
+    val name: String,
+    val url: String,
+    val enabled: Boolean = true
+)
+
+data class EpgSourceEntry(
+    val name: String,
+    val url: String,
+    val isDefault: Boolean = false,
+    val enabled: Boolean = true
+)
 
 class SettingsDataStore(private val context: Context) {
 
     companion object {
         val PLAYLIST_URL = stringPreferencesKey("playlist_url")
+        val PLAYLISTS = stringPreferencesKey("playlists_json")
         val EPG_URLS = stringPreferencesKey("epg_urls")
+        val CUSTOM_EPG_SOURCES = stringPreferencesKey("custom_epg_sources")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
 
@@ -23,10 +40,87 @@ class SettingsDataStore(private val context: Context) {
         const val DEFAULT_TORBOX_KEY = "50c74a49-a6bc-40e9-931e-1cee1943e87b"
     }
 
+    // ─── Legacy single playlist (backward compat) ───
     val playlistUrl: Flow<String> = context.settingsDataStore.data.map { prefs ->
         prefs[PLAYLIST_URL] ?: DEFAULT_PLAYLIST
     }
 
+    // ─── Multiple Playlists ───
+    val playlists: Flow<List<PlaylistEntry>> = context.settingsDataStore.data.map { prefs ->
+        val json = prefs[PLAYLISTS]
+        if (json != null) {
+            parsePlaylistsJson(json)
+        } else {
+            // Migrate from single URL
+            val singleUrl = prefs[PLAYLIST_URL] ?: DEFAULT_PLAYLIST
+            listOf(PlaylistEntry("Merlot TV", singleUrl, true))
+        }
+    }
+
+    suspend fun setPlaylists(entries: List<PlaylistEntry>) {
+        val jsonArray = JSONArray()
+        entries.forEach { entry ->
+            val obj = JSONObject()
+            obj.put("name", entry.name)
+            obj.put("url", entry.url)
+            obj.put("enabled", entry.enabled)
+            jsonArray.put(obj)
+        }
+        context.settingsDataStore.edit { it[PLAYLISTS] = jsonArray.toString() }
+    }
+
+    private fun parsePlaylistsJson(json: String): List<PlaylistEntry> {
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                PlaylistEntry(
+                    name = obj.optString("name", "Playlist ${i + 1}"),
+                    url = obj.optString("url", ""),
+                    enabled = obj.optBoolean("enabled", true)
+                )
+            }
+        } catch (_: Exception) {
+            listOf(PlaylistEntry("Merlot TV", DEFAULT_PLAYLIST, true))
+        }
+    }
+
+    // ─── Custom EPG Sources ───
+    val customEpgSources: Flow<List<EpgSourceEntry>> = context.settingsDataStore.data.map { prefs ->
+        val json = prefs[CUSTOM_EPG_SOURCES]
+        if (json != null) parseEpgSourcesJson(json) else emptyList()
+    }
+
+    suspend fun setCustomEpgSources(entries: List<EpgSourceEntry>) {
+        val jsonArray = JSONArray()
+        entries.forEach { entry ->
+            val obj = JSONObject()
+            obj.put("name", entry.name)
+            obj.put("url", entry.url)
+            obj.put("enabled", entry.enabled)
+            jsonArray.put(obj)
+        }
+        context.settingsDataStore.edit { it[CUSTOM_EPG_SOURCES] = jsonArray.toString() }
+    }
+
+    private fun parseEpgSourcesJson(json: String): List<EpgSourceEntry> {
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                EpgSourceEntry(
+                    name = obj.optString("name", "EPG ${i + 1}"),
+                    url = obj.optString("url", ""),
+                    isDefault = false,
+                    enabled = obj.optBoolean("enabled", true)
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // ─── Existing settings ───
     val torboxKey: Flow<String> = context.settingsDataStore.data.map { prefs ->
         prefs[TORBOX_KEY] ?: DEFAULT_TORBOX_KEY
     }

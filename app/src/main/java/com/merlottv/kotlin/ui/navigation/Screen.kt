@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
@@ -23,12 +24,21 @@ sealed class Screen(
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 
+    // Profile picker
+    data object ProfilePicker : Screen("profile_picker", "Profiles", Icons.Default.Person)
+
     // Detail routes
     data object VodDetail : Screen("vod_detail/{type}/{id}", "Detail", Icons.Default.Movie) {
         fun createRoute(type: String, id: String) = "vod_detail/$type/$id"
     }
-    data object Player : Screen("player/{url}?title={title}", "Player", Icons.Default.LiveTv) {
-        fun createRoute(url: String, title: String = "") = "player/$url?title=$title"
+    data object Player : Screen("player/{url}?title={title}&contentId={contentId}&poster={poster}&contentType={contentType}", "Player", Icons.Default.LiveTv) {
+        fun createRoute(
+            url: String,
+            title: String = "",
+            contentId: String = "",
+            poster: String = "",
+            contentType: String = "movie"
+        ) = "player/$url?title=$title&contentId=$contentId&poster=$poster&contentType=$contentType"
     }
 
     companion object {

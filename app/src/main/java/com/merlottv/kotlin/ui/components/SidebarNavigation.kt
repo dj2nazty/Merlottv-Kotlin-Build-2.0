@@ -34,6 +34,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -123,6 +128,7 @@ private fun SidebarItem(
 
     val backgroundColor by animateColorAsState(
         targetValue = when {
+            isSelected && isFocused -> MerlotColors.AccentAlpha20
             isSelected -> MerlotColors.AccentAlpha10
             isFocused || isHovered -> MerlotColors.Hover
             else -> Color.Transparent
@@ -141,23 +147,42 @@ private fun SidebarItem(
         label = "iconColor"
     )
 
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            isFocused -> MerlotColors.Accent
+            isSelected -> MerlotColors.AccentAlpha20
+            else -> Color.Transparent
+        },
+        animationSpec = tween(150),
+        label = "borderColor"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(backgroundColor)
+            .border(
+                width = if (isFocused) 2.dp else if (isSelected) 1.dp else 0.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(8.dp)
+            )
             .clickable(interactionSource = interactionSource, indication = null) { onClick() }
             .focusable(interactionSource = interactionSource)
             .onFocusChanged { if (it.isFocused) onFocused() }
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .then(
-                if (isSelected) Modifier.border(
-                    width = 1.dp,
-                    color = MerlotColors.AccentAlpha20,
-                    shape = RoundedCornerShape(8.dp)
-                ) else Modifier
-            ),
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionCenter, Key.Enter -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(

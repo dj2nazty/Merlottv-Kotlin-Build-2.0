@@ -4,10 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -35,31 +39,35 @@ fun MerlotApp() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    var isLiveTvFullscreen by remember { mutableStateOf(false) }
 
-    // Hide sidebar on player screen
-    val showSidebar = currentRoute != Screen.Player.route
+    // Hide sidebar on player screen or when live TV is fullscreen
+    val showSidebar = currentRoute != Screen.Player.route && !isLiveTvFullscreen
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MerlotColors.Background)
     ) {
-        if (showSidebar) {
-            SidebarNavigation(
-                currentRoute = currentRoute,
-                onNavigate = { screen ->
-                    navController.navigate(screen.route) {
-                        popUpTo(Screen.Home.route) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
+        Row(modifier = Modifier.fillMaxSize()) {
+            if (showSidebar) {
+                SidebarNavigation(
+                    currentRoute = currentRoute,
+                    onNavigate = { screen ->
+                        navController.navigate(screen.route) {
+                            popUpTo(Screen.Home.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
-                }
+                )
+            }
+
+            MerlotNavHost(
+                navController = navController,
+                modifier = Modifier.weight(1f),
+                onLiveTvFullscreenChanged = { isLiveTvFullscreen = it }
             )
         }
-
-        MerlotNavHost(
-            navController = navController,
-            modifier = Modifier.weight(1f)
-        )
     }
 }

@@ -3,7 +3,11 @@ package com.merlottv.kotlin.ui.navigation
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -12,7 +16,9 @@ import androidx.navigation.navArgument
 import com.merlottv.kotlin.ui.screens.favorites.FavoritesScreen
 import com.merlottv.kotlin.ui.screens.home.HomeScreen
 import com.merlottv.kotlin.ui.screens.livetv.LiveTvScreen
+import com.merlottv.kotlin.ui.screens.livetv.LiveTvViewModel
 import com.merlottv.kotlin.ui.screens.player.PlayerScreen
+import com.merlottv.kotlin.ui.screens.profiles.ProfilePickerScreen
 import com.merlottv.kotlin.ui.screens.search.SearchScreen
 import com.merlottv.kotlin.ui.screens.settings.SettingsScreen
 import com.merlottv.kotlin.ui.screens.tvguide.TvGuideScreen
@@ -24,16 +30,31 @@ import java.net.URLEncoder
 @Composable
 fun MerlotNavHost(
     navController: NavHostController,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    startDestination: String = Screen.Home.route,
+    onLiveTvFullscreenChanged: (Boolean) -> Unit = {}
 ) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Home.route,
+        startDestination = startDestination,
         modifier = modifier,
         enterTransition = { fadeIn(animationSpec = androidx.compose.animation.core.tween(200)) },
         exitTransition = { fadeOut(animationSpec = androidx.compose.animation.core.tween(200)) }
     ) {
+        // Profile picker
+        composable(Screen.ProfilePicker.route) {
+            onLiveTvFullscreenChanged(false)
+            ProfilePickerScreen(
+                onProfileSelected = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.ProfilePicker.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable(Screen.Home.route) {
+            onLiveTvFullscreenChanged(false)
             HomeScreen(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
@@ -43,6 +64,7 @@ fun MerlotNavHost(
         }
 
         composable(Screen.Search.route) {
+            onLiveTvFullscreenChanged(false)
             SearchScreen(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
@@ -52,14 +74,28 @@ fun MerlotNavHost(
         }
 
         composable(Screen.LiveTv.route) {
-            LiveTvScreen()
+            val viewModel: LiveTvViewModel = hiltViewModel()
+            val uiState by viewModel.uiState.collectAsState()
+            onLiveTvFullscreenChanged(uiState.isFullscreen)
+
+            // Stop playback when leaving Live TV screen
+            DisposableEffect(Unit) {
+                viewModel.resumePlayback()
+                onDispose {
+                    viewModel.stopPlayback()
+                }
+            }
+
+            LiveTvScreen(viewModel = viewModel)
         }
 
         composable(Screen.TvGuide.route) {
+            onLiveTvFullscreenChanged(false)
             TvGuideScreen()
         }
 
         composable(Screen.Vod.route) {
+            onLiveTvFullscreenChanged(false)
             VodScreen(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
@@ -69,6 +105,7 @@ fun MerlotNavHost(
         }
 
         composable(Screen.Favorites.route) {
+            onLiveTvFullscreenChanged(false)
             FavoritesScreen(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
@@ -78,6 +115,7 @@ fun MerlotNavHost(
         }
 
         composable(Screen.Settings.route) {
+            onLiveTvFullscreenChanged(false)
             SettingsScreen()
         }
 
@@ -88,16 +126,27 @@ fun MerlotNavHost(
                 navArgument("id") { type = NavType.StringType }
             )
         ) { backStackEntry ->
+            onLiveTvFullscreenChanged(false)
             val type = backStackEntry.arguments?.getString("type") ?: "movie"
             val id = URLDecoder.decode(backStackEntry.arguments?.getString("id") ?: "", "UTF-8")
             VodDetailScreen(
                 type = type,
                 id = id,
                 onBack = { navController.popBackStack() },
-                onPlay = { streamUrl, title ->
+                onPlay = { streamUrl, title, contentId, poster, contentType ->
                     val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
                     val encodedTitle = URLEncoder.encode(title, "UTF-8")
-                    navController.navigate(Screen.Player.createRoute(encodedUrl, encodedTitle))
+                    val encodedContentId = URLEncoder.encode(contentId, "UTF-8")
+                    val encodedPoster = URLEncoder.encode(poster, "UTF-8")
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            url = encodedUrl,
+                            title = encodedTitle,
+                            contentId = encodedContentId,
+                            poster = encodedPoster,
+                            contentType = contentType
+                        )
+                    )
                 }
             )
         }
@@ -106,14 +155,24 @@ fun MerlotNavHost(
             route = Screen.Player.route,
             arguments = listOf(
                 navArgument("url") { type = NavType.StringType },
-                navArgument("title") { type = NavType.StringType; defaultValue = "" }
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                navArgument("contentId") { type = NavType.StringType; defaultValue = "" },
+                navArgument("poster") { type = NavType.StringType; defaultValue = "" },
+                navArgument("contentType") { type = NavType.StringType; defaultValue = "movie" }
             )
         ) { backStackEntry ->
+            onLiveTvFullscreenChanged(false)
             val url = URLDecoder.decode(backStackEntry.arguments?.getString("url") ?: "", "UTF-8")
             val title = URLDecoder.decode(backStackEntry.arguments?.getString("title") ?: "", "UTF-8")
+            val contentId = URLDecoder.decode(backStackEntry.arguments?.getString("contentId") ?: "", "UTF-8")
+            val poster = URLDecoder.decode(backStackEntry.arguments?.getString("poster") ?: "", "UTF-8")
+            val contentType = backStackEntry.arguments?.getString("contentType") ?: "movie"
             PlayerScreen(
                 streamUrl = url,
                 title = title,
+                contentId = contentId,
+                poster = poster,
+                contentType = contentType,
                 onBack = { navController.popBackStack() }
             )
         }

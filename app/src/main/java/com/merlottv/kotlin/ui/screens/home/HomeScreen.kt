@@ -1,7 +1,11 @@
 package com.merlottv.kotlin.ui.screens.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,14 +22,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
@@ -49,10 +65,14 @@ fun HomeScreen(
     ) {
         when {
             uiState.isLoading && uiState.catalogRows.isEmpty() -> {
-                CircularProgressIndicator(
+                Column(
                     modifier = Modifier.align(Alignment.Center),
-                    color = MerlotColors.Accent
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = MerlotColors.Accent)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Loading catalogs...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                }
             }
             else -> {
                 LazyColumn(
@@ -61,7 +81,7 @@ fun HomeScreen(
                 ) {
                     // Hero section
                     uiState.featuredItem?.let { featured ->
-                        item {
+                        item(key = "hero") {
                             HeroSection(
                                 meta = featured,
                                 onClick = { onNavigateToDetail(featured.type, featured.id) }
@@ -69,8 +89,20 @@ fun HomeScreen(
                         }
                     }
 
+                    // Continue Watching row (if any)
+                    if (uiState.continueWatching.isNotEmpty()) {
+                        item(key = "continue_watching") {
+                            ContinueWatchingRow(
+                                items = uiState.continueWatching,
+                                onItemClick = { item ->
+                                    onNavigateToDetail(item.type, item.id)
+                                }
+                            )
+                        }
+                    }
+
                     // Catalog rows
-                    items(uiState.catalogRows) { row ->
+                    items(uiState.catalogRows, key = { it.title }) { row ->
                         CatalogRowSection(
                             title = row.title,
                             items = row.items,
@@ -84,6 +116,125 @@ fun HomeScreen(
 }
 
 @Composable
+private fun ContinueWatchingRow(
+    items: List<WatchProgressItem>,
+    onItemClick: (WatchProgressItem) -> Unit
+) {
+    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = MerlotColors.Accent,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Continue Watching",
+                color = MerlotColors.Accent,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(items, key = { it.id }) { item ->
+                ContinueWatchingCard(item = item, onClick = { onItemClick(item) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContinueWatchingCard(item: WatchProgressItem, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    Column(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+            .focusable(interactionSource = interactionSource)
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                    onClick(); true
+                } else false
+            }
+    ) {
+        Box {
+            AsyncImage(
+                model = item.poster,
+                contentDescription = item.title,
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(90.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MerlotColors.Surface2)
+                    .then(
+                        if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                        else Modifier
+                    ),
+                contentScale = ContentScale.Crop
+            )
+
+            // Progress bar at bottom of thumbnail
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
+                    .background(MerlotColors.Surface2)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(item.progressPercent)
+                        .height(3.dp)
+                        .background(MerlotColors.Accent)
+                )
+            }
+
+            // Play icon overlay
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MerlotColors.Black.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = MerlotColors.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        Text(
+            text = item.title,
+            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        Text(
+            text = "${(item.progressPercent * 100).toInt()}% watched",
+            color = MerlotColors.TextMuted,
+            fontSize = 9.sp
+        )
+    }
+}
+
+@Composable
 private fun HeroSection(meta: MetaPreview, onClick: () -> Unit) {
     Box(
         modifier = Modifier
@@ -92,6 +243,7 @@ private fun HeroSection(meta: MetaPreview, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() }
+            .focusable()
     ) {
         AsyncImage(
             model = meta.poster,
@@ -103,7 +255,7 @@ private fun HeroSection(meta: MetaPreview, onClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                    Brush.verticalGradient(
                         colors = listOf(
                             MerlotColors.Transparent,
                             MerlotColors.Background.copy(alpha = 0.9f)
@@ -146,7 +298,7 @@ private fun CatalogRowSection(
         Text(
             text = title,
             color = MerlotColors.TextPrimary,
-            fontSize = 16.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
@@ -154,7 +306,7 @@ private fun CatalogRowSection(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(items) { item ->
+            items(items, key = { it.id }) { item ->
                 PosterCard(meta = item, onClick = { onItemClick(item) })
             }
         }
@@ -163,36 +315,63 @@ private fun CatalogRowSection(
 
 @Composable
 private fun PosterCard(meta: MetaPreview, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
     Column(
         modifier = Modifier
             .width(130.dp)
-            .clickable { onClick() }
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+            .focusable(interactionSource = interactionSource)
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                    onClick(); true
+                } else false
+            }
     ) {
-        AsyncImage(
-            model = meta.poster,
-            contentDescription = meta.name,
-            modifier = Modifier
-                .width(130.dp)
-                .height(195.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MerlotColors.Surface2),
-            contentScale = ContentScale.Crop
-        )
+        Box {
+            AsyncImage(
+                model = meta.poster,
+                contentDescription = meta.name,
+                modifier = Modifier
+                    .width(130.dp)
+                    .height(195.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MerlotColors.Surface2)
+                    .then(
+                        if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                        else Modifier
+                    ),
+                contentScale = ContentScale.Crop
+            )
+
+            if (meta.imdbRating.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MerlotColors.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "\u2B50 ${meta.imdbRating}",
+                        color = MerlotColors.Warn,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
         Text(
             text = meta.name,
-            color = MerlotColors.TextPrimary,
+            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
-        if (meta.imdbRating.isNotEmpty()) {
-            Text(
-                text = "\u2B50 ${meta.imdbRating}",
-                color = MerlotColors.TextMuted,
-                fontSize = 10.sp
-            )
-        }
     }
 }

@@ -3,31 +3,48 @@
 package com.merlottv.kotlin.ui.screens.vod
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,24 +67,53 @@ fun VodScreen(
             .fillMaxSize()
             .background(MerlotColors.Background)
     ) {
-        // Sub-tabs: Home, Movies, Series
+        // Tab row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf("Home", "Movies", "Series").forEach { tab ->
+            Text(
+                text = "VOD",
+                color = MerlotColors.TextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            listOf("All", "Movies", "Series").forEach { tab ->
                 FilterChip(
                     selected = uiState.selectedTab == tab,
                     onClick = { viewModel.onTabSelected(tab) },
-                    label = { Text(tab, fontSize = 12.sp) },
+                    label = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            when (tab) {
+                                "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp))
+                                "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp))
+                                else -> {}
+                            }
+                            if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
+                            Text(tab, fontSize = 12.sp)
+                        }
+                    },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MerlotColors.Accent,
                         selectedLabelColor = MerlotColors.Black,
                         containerColor = MerlotColors.Surface2,
                         labelColor = MerlotColors.TextPrimary
-                    )
+                    ),
+                    modifier = Modifier.focusable()
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            if (!uiState.isLoading && uiState.filteredSections.isNotEmpty()) {
+                Text(
+                    text = "${uiState.filteredSections.size} categories",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
                 )
             }
         }
@@ -75,18 +121,35 @@ fun VodScreen(
         when {
             uiState.isLoading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MerlotColors.Accent)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MerlotColors.Accent)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Loading catalogs...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                    }
+                }
+            }
+            uiState.error != null -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(uiState.error ?: "Failed to load", color = MerlotColors.Danger, fontSize = 13.sp)
+                }
+            }
+            uiState.filteredSections.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No content available", color = MerlotColors.TextMuted, fontSize = 14.sp)
                 }
             }
             else -> {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(130.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(uiState.items) { item ->
-                        VodCard(item = item, onClick = { onNavigateToDetail(item.type, item.id) })
+                LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+                    items(
+                        uiState.filteredSections,
+                        key = { "${it.addonName}_${it.catalogId}_${it.type}" }
+                    ) { section ->
+                        CatalogSectionRow(
+                            section = section,
+                            onItemClick = { item ->
+                                onNavigateToDetail(item.type, item.id)
+                            }
+                        )
                     }
                 }
             }
@@ -95,37 +158,173 @@ fun VodScreen(
 }
 
 @Composable
+private fun CatalogSectionRow(
+    section: CatalogSection,
+    onItemClick: (MetaPreview) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+    ) {
+        // Section header with brand logo
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Brand logo (streaming platform logo)
+            val logoUrl = section.brandLogo.ifEmpty { section.addonLogo }
+            if (logoUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = logoUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+
+            Text(
+                text = section.title,
+                color = MerlotColors.TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Type badge
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        if (section.type == "movie") MerlotColors.Accent.copy(alpha = 0.15f)
+                        else MerlotColors.Success.copy(alpha = 0.15f)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (section.type == "movie") "MOVIE" else "SERIES",
+                    color = if (section.type == "movie") MerlotColors.Accent else MerlotColors.Success,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Text(
+                text = "${section.items.size} titles",
+                color = MerlotColors.TextMuted,
+                fontSize = 10.sp
+            )
+        }
+
+        // Horizontal poster row
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(section.items, key = { it.id }) { item ->
+                VodCard(item = item, onClick = { onItemClick(item) })
+            }
+        }
+    }
+}
+
+@Composable
 private fun VodCard(item: MetaPreview, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
     Column(
         modifier = Modifier
             .width(130.dp)
-            .clickable { onClick() }
+            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+            .focusable(interactionSource = interactionSource)
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
     ) {
-        AsyncImage(
-            model = item.poster,
-            contentDescription = item.name,
-            modifier = Modifier
-                .width(130.dp)
-                .height(195.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MerlotColors.Surface2),
-            contentScale = ContentScale.Crop
-        )
+        Box {
+            AsyncImage(
+                model = item.poster,
+                contentDescription = item.name,
+                modifier = Modifier
+                    .width(130.dp)
+                    .height(195.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MerlotColors.Surface2)
+                    .then(
+                        if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                        else Modifier
+                    ),
+                contentScale = ContentScale.Crop
+            )
+
+            // Rating badge
+            if (item.imdbRating.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MerlotColors.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "\u2B50 ${item.imdbRating}",
+                        color = MerlotColors.Warn,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Focus overlay with title
+            if (isFocused) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(MerlotColors.Transparent, MerlotColors.Black.copy(alpha = 0.85f))
+                            )
+                        )
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.BottomStart
+                ) {
+                    Text(
+                        text = item.name,
+                        color = MerlotColors.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
         Text(
             text = item.name,
-            color = MerlotColors.TextPrimary,
+            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
-        if (item.imdbRating.isNotEmpty()) {
-            Text(
-                text = "\u2B50 ${item.imdbRating}",
-                color = MerlotColors.Warn,
-                fontSize = 10.sp
-            )
-        }
     }
 }
