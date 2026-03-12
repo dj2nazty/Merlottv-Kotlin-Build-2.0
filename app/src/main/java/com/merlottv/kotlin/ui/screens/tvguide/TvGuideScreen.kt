@@ -13,12 +13,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,7 +41,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.clip
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.EpgChannel
 import com.merlottv.kotlin.ui.theme.MerlotColors
 import kotlinx.coroutines.launch
@@ -191,15 +194,25 @@ fun TvGuideScreen(
                                 .fillMaxHeight()
                         ) {
                             items(uiState.channels, key = { it.id }) { channel ->
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(56.dp)
                                         .border(0.5.dp, MerlotColors.Border)
                                         .background(MerlotColors.Surface)
                                         .padding(horizontal = 8.dp),
-                                    contentAlignment = Alignment.CenterStart
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    if (channel.icon.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = channel.icon,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
                                     Text(
                                         text = channel.name,
                                         color = MerlotColors.TextPrimary,

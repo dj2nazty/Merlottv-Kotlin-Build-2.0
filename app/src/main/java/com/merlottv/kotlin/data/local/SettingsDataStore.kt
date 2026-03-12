@@ -40,6 +40,7 @@ class SettingsDataStore(private val context: Context) {
         val EPG_URLS = stringPreferencesKey("epg_urls")
         val CUSTOM_EPG_SOURCES = stringPreferencesKey("custom_epg_sources")
         val BACKUP_SOURCES = stringPreferencesKey("backup_sources_json")
+        val LAST_WATCHED_CHANNEL_ID = stringPreferencesKey("last_watched_channel_id")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
 
@@ -159,6 +160,15 @@ class SettingsDataStore(private val context: Context) {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    // ─── Last Watched Channel ───
+    val lastWatchedChannelId: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[LAST_WATCHED_CHANNEL_ID] ?: ""
+    }
+
+    suspend fun setLastWatchedChannelId(channelId: String) {
+        context.settingsDataStore.edit { it[LAST_WATCHED_CHANNEL_ID] = channelId }
     }
 
     // ─── Existing settings ───

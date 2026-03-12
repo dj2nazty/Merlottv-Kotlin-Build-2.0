@@ -46,7 +46,9 @@ data class LiveTvUiState(
     val currentChannelIndex: Int = -1,
     // Backup stream failover
     val isFailingOver: Boolean = false,
-    val failoverMessage: String = ""
+    val failoverMessage: String = "",
+    // Category sidebar visibility
+    val showCategories: Boolean = true
 )
 
 @HiltViewModel
@@ -99,7 +101,17 @@ class LiveTvViewModel @Inject constructor(
             } else {
                 emptyList()
             }
-            val groups = channels.map { it.group }.distinct().sorted()
+
+            // Sort groups: USA-related first, then alphabetically
+            val groups = channels.map { it.group }.distinct().sortedWith(
+                compareByDescending<String> { group ->
+                    val lower = group.lowercase()
+                    lower.contains("usa") || lower.contains("us ") ||
+                    lower.startsWith("us:") || lower.startsWith("us|") ||
+                    lower.contains("united states") || lower.contains("american")
+                }.thenBy { it.lowercase() }
+            )
+
             _uiState.value = _uiState.value.copy(
                 isLoading = false,
                 channels = channels,
@@ -107,6 +119,27 @@ class LiveTvViewModel @Inject constructor(
                 groups = groups,
                 totalChannels = channels.size
             )
+
+            // Auto-play last watched channel
+            autoPlayLastWatched(channels)
+        }
+    }
+
+    private suspend fun autoPlayLastWatched(channels: List<Channel>) {
+        val lastId = settingsDataStore.lastWatchedChannelId.first()
+        if (lastId.isNotEmpty()) {
+            val channel = channels.find { it.id == lastId }
+            if (channel != null) {
+                val index = channels.indexOf(channel)
+                _uiState.value = _uiState.value.copy(
+                    selectedChannel = channel,
+                    isFullscreen = true,
+                    showOverlay = false,
+                    currentChannelIndex = index
+                )
+                playChannel(channel)
+                loadEpgForChannel(channel)
+            }
         }
     }
 
@@ -137,8 +170,16 @@ class LiveTvViewModel @Inject constructor(
     }
 
     fun onGroupSelected(group: String?) {
-        _uiState.value = _uiState.value.copy(selectedGroup = group)
+        _uiState.value = _uiState.value.copy(selectedGroup = group, showCategories = false)
         applyFilters()
+    }
+
+    fun showCategories() {
+        _uiState.value = _uiState.value.copy(showCategories = true)
+    }
+
+    fun hideCategories() {
+        _uiState.value = _uiState.value.copy(showCategories = false)
     }
 
     fun onChannelSelected(channel: Channel) {
@@ -151,6 +192,10 @@ class LiveTvViewModel @Inject constructor(
         )
         playChannel(channel)
         loadEpgForChannel(channel)
+        // Persist last watched channel
+        viewModelScope.launch {
+            settingsDataStore.setLastWatchedChannelId(channel.id)
+        }
     }
 
     private fun playChannel(channel: Channel) {
@@ -250,6 +295,7 @@ class LiveTvViewModel @Inject constructor(
         )
         playChannel(channel)
         loadEpgForChannel(channel)
+        viewModelScope.launch { settingsDataStore.setLastWatchedChannelId(channel.id) }
     }
 
     fun channelDown() {
@@ -271,6 +317,7 @@ class LiveTvViewModel @Inject constructor(
         )
         playChannel(channel)
         loadEpgForChannel(channel)
+        viewModelScope.launch { settingsDataStore.setLastWatchedChannelId(channel.id) }
     }
 
     fun toggleOverlay() {

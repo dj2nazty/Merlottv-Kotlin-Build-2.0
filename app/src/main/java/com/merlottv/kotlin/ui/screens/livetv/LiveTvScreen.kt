@@ -7,6 +7,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -467,163 +469,305 @@ private fun ChannelListView(
     uiState: LiveTvUiState
 ) {
     val listState = rememberLazyListState()
+    val categoryFocusRequester = remember { FocusRequester() }
+    val channelFocusRequester = remember { FocusRequester() }
 
-    Row(
+    // Request focus on categories when they become visible
+    LaunchedEffect(uiState.showCategories) {
+        if (uiState.showCategories) {
+            try { categoryFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MerlotColors.Background)
+            .background(MerlotColors.Black)
     ) {
-        // Channel sidebar
-        Column(
-            modifier = Modifier
-                .width(280.dp)
-                .fillMaxHeight()
-                .background(MerlotColors.Surface)
-                .border(width = 1.dp, color = MerlotColors.Border)
-        ) {
-            // Search
-            OutlinedTextField(
-                value = uiState.searchQuery,
-                onValueChange = { viewModel.onSearchChanged(it) },
-                placeholder = { Text("Search channels...", color = MerlotColors.TextMuted, fontSize = 11.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp)) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = MerlotColors.TextPrimary,
-                    unfocusedTextColor = MerlotColors.TextPrimary,
-                    cursorColor = MerlotColors.Accent,
-                    focusedBorderColor = MerlotColors.Accent,
-                    unfocusedBorderColor = MerlotColors.Border
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
-                shape = RoundedCornerShape(8.dp)
+        // Full-screen player as background
+        if (uiState.selectedChannel != null) {
+            AndroidView(
+                factory = { context ->
+                    androidx.media3.ui.PlayerView(context).apply {
+                        useController = false
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = viewModel.player
+                },
+                modifier = Modifier.fillMaxSize()
             )
-
-            // Group selector — D-pad friendly scrollable chips
-            // Group selector — D-pad friendly scrollable chips
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(horizontal = 4.dp)
+        } else {
+            // Idle state
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                item {
-                    GroupChip(
-                        label = "All (${uiState.totalChannels})",
-                        isSelected = uiState.selectedGroup == null,
-                        onClick = { viewModel.onGroupSelected(null) }
-                    )
-                }
-                items(uiState.groups) { group ->
-                    GroupChip(
-                        label = group,
-                        isSelected = uiState.selectedGroup == group,
-                        onClick = { viewModel.onGroupSelected(group) }
-                    )
+                Icon(
+                    Icons.Default.LiveTv,
+                    contentDescription = null,
+                    tint = MerlotColors.TextMuted,
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("MERLOT TV", color = MerlotColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "Select a channel from the list to start watching",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+
+        // Category sidebar — slides in from left
+        AnimatedVisibility(
+            visible = uiState.showCategories,
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.CenterStart)
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(220.dp)
+                    .fillMaxHeight()
+                    .background(MerlotColors.Black.copy(alpha = 0.88f))
+                    .padding(vertical = 8.dp)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                            // Move focus to channel list if visible, or hide categories
+                            if (uiState.selectedGroup != null) {
+                                try { channelFocusRequester.requestFocus() } catch (_: Exception) {}
+                            }
+                            true
+                        } else false
+                    }
+            ) {
+                // Header
+                Text(
+                    text = "Categories",
+                    color = MerlotColors.Accent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+
+                // Search
+                OutlinedTextField(
+                    value = uiState.searchQuery,
+                    onValueChange = { viewModel.onSearchChanged(it) },
+                    placeholder = { Text("Search...", color = MerlotColors.TextMuted, fontSize = 10.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MerlotColors.TextMuted, modifier = Modifier.size(14.dp)) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MerlotColors.TextPrimary,
+                        unfocusedTextColor = MerlotColors.TextPrimary,
+                        cursorColor = MerlotColors.Accent,
+                        focusedBorderColor = MerlotColors.Accent,
+                        unfocusedBorderColor = MerlotColors.Border
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 10.sp),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Category list (vertical)
+                if (uiState.isLoading) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        item {
+                            CategoryItem(
+                                label = "All Channels (${uiState.totalChannels})",
+                                isSelected = uiState.selectedGroup == null,
+                                onClick = { viewModel.onGroupSelected(null) },
+                                focusRequester = categoryFocusRequester
+                            )
+                        }
+                        items(uiState.groups) { group ->
+                            CategoryItem(
+                                label = group,
+                                isSelected = uiState.selectedGroup == group,
+                                onClick = { viewModel.onGroupSelected(group) }
+                            )
+                        }
+                    }
                 }
             }
+        }
 
-            // Channel list
-            if (uiState.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
+        // Channel list — semi-transparent overlay, shows when a group is selected and categories are hidden
+        AnimatedVisibility(
+            visible = !uiState.showCategories && !uiState.isLoading,
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.CenterStart)
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(300.dp)
+                    .fillMaxHeight()
+                    .background(MerlotColors.Black.copy(alpha = 0.75f))
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                            viewModel.showCategories()
+                            true
+                        } else if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                            viewModel.showCategories()
+                            true
+                        } else false
+                    }
+            ) {
+                // Group name header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MerlotColors.Black.copy(alpha = 0.9f))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = uiState.selectedGroup ?: "All Channels",
+                        color = MerlotColors.Accent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${uiState.filteredChannels.size} ch",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 10.sp
+                    )
                 }
-            } else {
+
+                // Channel list
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(uiState.filteredChannels) { channel ->
+                    items(uiState.filteredChannels, key = { it.id }) { channel ->
+                        val isFirst = uiState.filteredChannels.indexOf(channel) == 0
                         ChannelItem(
                             channel = channel,
                             isSelected = channel.id == uiState.selectedChannel?.id,
                             isFavorite = uiState.favoriteIds.contains(channel.id),
                             onClick = { viewModel.onChannelSelected(channel) },
-                            onToggleFavorite = { viewModel.toggleFavorite(channel.id) }
+                            onToggleFavorite = { viewModel.toggleFavorite(channel.id) },
+                            focusRequester = if (isFirst) channelFocusRequester else null
                         )
                     }
                 }
-            }
-        }
 
-        // Player preview area (when not fullscreen, shows idle or small preview)
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .background(MerlotColors.Black)
-        ) {
-            if (uiState.selectedChannel != null) {
-                AndroidView(
-                    factory = { context ->
-                        androidx.media3.ui.PlayerView(context).apply {
-                            useController = true
-                        }
-                    },
-                    update = { playerView ->
-                        playerView.player = viewModel.player
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Channel info at bottom
-                uiState.selectedChannel?.let { ch ->
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .background(MerlotColors.Surface2.copy(alpha = 0.9f))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (ch.logoUrl.isNotEmpty()) {
-                            AsyncImage(
-                                model = ch.logoUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(ch.name, color = MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text(ch.group, color = MerlotColors.TextMuted, fontSize = 10.sp)
-                        }
-                        Text(
-                            "Press Enter for fullscreen",
-                            color = MerlotColors.TextMuted,
-                            fontSize = 9.sp
-                        )
-                    }
-                }
-            } else {
-                // Idle state
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                // Hint bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MerlotColors.Black.copy(alpha = 0.9f))
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        Icons.Default.LiveTv,
-                        contentDescription = null,
-                        tint = MerlotColors.TextMuted,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("MERLOT TV", color = MerlotColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                     Text(
-                        "Select a channel from the list to start watching",
-                        color = MerlotColors.TextMuted,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 4.dp)
+                        text = "\u25C0 Categories  \u25B6 Hide  \u25CF Select",
+                        color = MerlotColors.TextMuted.copy(alpha = 0.6f),
+                        fontSize = 9.sp
                     )
                 }
             }
         }
+
+        // Bottom bar showing current channel info (when channel list or categories visible)
+        if (uiState.selectedChannel != null && (uiState.showCategories || !uiState.showCategories)) {
+            uiState.selectedChannel?.let { ch ->
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MerlotColors.Black.copy(alpha = 0.8f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (ch.logoUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = ch.logoUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Column {
+                        Text(ch.name, color = MerlotColors.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("CH ${ch.number} • ${ch.group}", color = MerlotColors.TextMuted, fontSize = 9.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryItem(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                when {
+                    isFocused -> MerlotColors.Accent.copy(alpha = 0.25f)
+                    isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
+                    else -> MerlotColors.Transparent
+                }
+            )
+            .then(
+                if (isFocused) Modifier.border(1.5.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                else Modifier
+            )
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            color = when {
+                isFocused -> MerlotColors.Accent
+                isSelected -> MerlotColors.Accent
+                else -> MerlotColors.White
+            },
+            fontSize = 12.sp,
+            fontWeight = if (isSelected || isFocused) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -633,12 +777,16 @@ private fun ChannelItem(
     isSelected: Boolean,
     isFavorite: Boolean,
     onClick: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    focusRequester: FocusRequester? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier
+            )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
@@ -651,8 +799,8 @@ private fun ChannelItem(
             }
             .background(
                 when {
-                    isFocused -> MerlotColors.AccentAlpha20
-                    isSelected -> MerlotColors.AccentAlpha10
+                    isFocused -> MerlotColors.Accent.copy(alpha = 0.25f)
+                    isSelected -> MerlotColors.Accent.copy(alpha = 0.12f)
                     else -> MerlotColors.Transparent
                 }
             )
