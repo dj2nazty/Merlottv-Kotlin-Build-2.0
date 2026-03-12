@@ -1,6 +1,7 @@
 package com.merlottv.kotlin.ui.screens.livetv
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -17,11 +18,15 @@ import com.merlottv.kotlin.domain.repository.ChannelRepository
 import com.merlottv.kotlin.domain.repository.EpgRepository
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class LiveTvUiState(
@@ -67,10 +72,14 @@ class LiveTvViewModel @Inject constructor(
     // Failover tracking
     private var failoverAttempts = 0
     private val maxFailoverAttempts = 3
+    private var isPlayerReleased = false
+    private var failoverMessageJob: Job? = null
 
     val player: ExoPlayer = ExoPlayer.Builder(application).build().apply {
+        playWhenReady = true
         addListener(object : Player.Listener {
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (isPlayerReleased) return
                 val resolution = if (videoSize.width > 0 && videoSize.height > 0) {
                     "${videoSize.width}x${videoSize.height}"
                 } else ""
@@ -78,6 +87,8 @@ class LiveTvViewModel @Inject constructor(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (isPlayerReleased) return
+                Log.w("LiveTvVM", "Player error: ${error.errorCodeName}", error)
                 handlePlaybackError()
             }
         })
@@ -92,74 +103,93 @@ class LiveTvViewModel @Inject constructor(
     private fun loadChannels() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val playlists = settingsDataStore.playlists.first()
-            val enabledUrls = playlists.filter { it.enabled }.map { it.url }
-            val channels = if (enabledUrls.size == 1) {
-                channelRepository.loadChannels(enabledUrls.first())
-            } else if (enabledUrls.isNotEmpty()) {
-                channelRepository.loadMultipleChannels(enabledUrls)
-            } else {
-                emptyList()
+            try {
+                val playlists = settingsDataStore.playlists.first()
+                val enabledUrls = playlists.filter { it.enabled }.map { it.url }
+                val channels = withContext(Dispatchers.IO) {
+                    if (enabledUrls.size == 1) {
+                        channelRepository.loadChannels(enabledUrls.first())
+                    } else if (enabledUrls.isNotEmpty()) {
+                        channelRepository.loadMultipleChannels(enabledUrls)
+                    } else {
+                        emptyList()
+                    }
+                }
+
+                // Sort groups: USA-related first, then alphabetically
+                val groups = channels.map { it.group }.distinct().sortedWith(
+                    compareByDescending<String> { group ->
+                        val lower = group.lowercase()
+                        lower.contains("usa") || lower.contains("us ") ||
+                        lower.startsWith("us:") || lower.startsWith("us|") ||
+                        lower.contains("united states") || lower.contains("american")
+                    }.thenBy { it.lowercase() }
+                )
+
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    channels = channels,
+                    filteredChannels = channels,
+                    groups = groups,
+                    totalChannels = channels.size
+                )
+
+                // Auto-play last watched channel
+                autoPlayLastWatched(channels)
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "Failed to load channels", e)
+                _uiState.value = _uiState.value.copy(isLoading = false)
             }
-
-            // Sort groups: USA-related first, then alphabetically
-            val groups = channels.map { it.group }.distinct().sortedWith(
-                compareByDescending<String> { group ->
-                    val lower = group.lowercase()
-                    lower.contains("usa") || lower.contains("us ") ||
-                    lower.startsWith("us:") || lower.startsWith("us|") ||
-                    lower.contains("united states") || lower.contains("american")
-                }.thenBy { it.lowercase() }
-            )
-
-            _uiState.value = _uiState.value.copy(
-                isLoading = false,
-                channels = channels,
-                filteredChannels = channels,
-                groups = groups,
-                totalChannels = channels.size
-            )
-
-            // Auto-play last watched channel
-            autoPlayLastWatched(channels)
         }
     }
 
     private suspend fun autoPlayLastWatched(channels: List<Channel>) {
-        val lastId = settingsDataStore.lastWatchedChannelId.first()
-        if (lastId.isNotEmpty()) {
-            val channel = channels.find { it.id == lastId }
-            if (channel != null) {
-                val index = channels.indexOf(channel)
-                _uiState.value = _uiState.value.copy(
-                    selectedChannel = channel,
-                    isFullscreen = true,
-                    showOverlay = false,
-                    currentChannelIndex = index
-                )
-                playChannel(channel)
-                loadEpgForChannel(channel)
+        if (isPlayerReleased || channels.isEmpty()) return
+        try {
+            val lastId = settingsDataStore.lastWatchedChannelId.first()
+            if (lastId.isNotEmpty()) {
+                val channel = channels.find { it.id == lastId }
+                if (channel != null) {
+                    val index = channels.indexOf(channel)
+                    _uiState.value = _uiState.value.copy(
+                        selectedChannel = channel,
+                        isFullscreen = true,
+                        showOverlay = false,
+                        currentChannelIndex = index
+                    )
+                    safePlayChannel(channel)
+                    loadEpgForChannel(channel)
+                }
             }
+        } catch (e: Exception) {
+            Log.e("LiveTvVM", "Auto-play last watched failed", e)
         }
     }
 
     private fun loadEpgInBackground() {
         viewModelScope.launch {
             try {
-                // Merge default EPG sources + custom user EPG sources
                 val defaultUrls = DefaultData.EPG_SOURCES.map { it.url }
                 val customSources = settingsDataStore.customEpgSources.first()
                 val customUrls = customSources.filter { it.enabled }.map { it.url }
                 val allUrls = (defaultUrls + customUrls).distinct()
-                epgRepository.loadEpg(allUrls)
-            } catch (_: Exception) {}
+                withContext(Dispatchers.IO) {
+                    epgRepository.loadEpg(allUrls)
+                }
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "EPG load failed", e)
+            }
         }
     }
 
     private fun observeFavorites() {
         viewModelScope.launch {
-            favoritesRepository.getFavoriteChannelIds().collect { ids ->
-                _uiState.value = _uiState.value.copy(favoriteIds = ids)
+            try {
+                favoritesRepository.getFavoriteChannelIds().collect { ids ->
+                    _uiState.value = _uiState.value.copy(favoriteIds = ids)
+                }
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "Favorites observe failed", e)
             }
         }
     }
@@ -190,20 +220,27 @@ class LiveTvViewModel @Inject constructor(
             showOverlay = false,
             currentChannelIndex = index
         )
-        playChannel(channel)
+        safePlayChannel(channel)
         loadEpgForChannel(channel)
         // Persist last watched channel
         viewModelScope.launch {
-            settingsDataStore.setLastWatchedChannelId(channel.id)
+            try { settingsDataStore.setLastWatchedChannelId(channel.id) } catch (_: Exception) {}
         }
     }
 
-    private fun playChannel(channel: Channel) {
+    /** Safe wrapper that catches all player exceptions */
+    private fun safePlayChannel(channel: Channel) {
+        if (isPlayerReleased) return
         failoverAttempts = 0
-        player.stop()
-        player.setMediaItem(MediaItem.fromUri(channel.streamUrl))
-        player.prepare()
-        player.play()
+        try {
+            player.stop()
+            player.clearMediaItems()
+            player.setMediaItem(MediaItem.fromUri(channel.streamUrl))
+            player.prepare()
+            player.play()
+        } catch (e: Exception) {
+            Log.e("LiveTvVM", "Player error in safePlayChannel", e)
+        }
         _uiState.value = _uiState.value.copy(
             videoResolution = "",
             isFailingOver = false,
@@ -212,67 +249,89 @@ class LiveTvViewModel @Inject constructor(
     }
 
     private fun handlePlaybackError() {
+        if (isPlayerReleased) return
         val currentChannel = _uiState.value.selectedChannel ?: return
         if (failoverAttempts >= maxFailoverAttempts) {
             _uiState.value = _uiState.value.copy(
                 isFailingOver = false,
                 failoverMessage = "No working backup found"
             )
+            clearFailoverMessageAfterDelay()
             return
         }
 
         failoverAttempts++
         _uiState.value = _uiState.value.copy(
             isFailingOver = true,
-            failoverMessage = "Switching to backup... (attempt $failoverAttempts/$maxFailoverAttempts)"
+            failoverMessage = "Switching to backup... ($failoverAttempts/$maxFailoverAttempts)"
         )
 
         viewModelScope.launch {
             try {
-                val backupChannel = backupChannelRepository.findBackupStream(currentChannel.name)
+                val backupChannel = withContext(Dispatchers.IO) {
+                    backupChannelRepository.findBackupStream(currentChannel.name)
+                }
+                if (isPlayerReleased) return@launch
                 if (backupChannel != null && backupChannel.streamUrl != currentChannel.streamUrl) {
-                    // Swap to backup stream without resetting failoverAttempts
-                    player.stop()
-                    player.setMediaItem(MediaItem.fromUri(backupChannel.streamUrl))
-                    player.prepare()
-                    player.play()
+                    try {
+                        player.stop()
+                        player.clearMediaItems()
+                        player.setMediaItem(MediaItem.fromUri(backupChannel.streamUrl))
+                        player.prepare()
+                        player.play()
+                    } catch (e: Exception) {
+                        Log.e("LiveTvVM", "Backup play failed", e)
+                    }
                     _uiState.value = _uiState.value.copy(
                         isFailingOver = false,
                         failoverMessage = "Playing from backup source"
                     )
-                    // Clear the message after 3 seconds
-                    kotlinx.coroutines.delay(3000)
-                    _uiState.value = _uiState.value.copy(failoverMessage = "")
+                    clearFailoverMessageAfterDelay()
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isFailingOver = false,
-                        failoverMessage = "No backup available for this channel"
+                        failoverMessage = "No backup available"
                     )
+                    clearFailoverMessageAfterDelay()
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "Backup search failed", e)
                 _uiState.value = _uiState.value.copy(
                     isFailingOver = false,
                     failoverMessage = "Backup search failed"
                 )
+                clearFailoverMessageAfterDelay()
             }
+        }
+    }
+
+    private fun clearFailoverMessageAfterDelay() {
+        failoverMessageJob?.cancel()
+        failoverMessageJob = viewModelScope.launch {
+            delay(4000)
+            _uiState.value = _uiState.value.copy(failoverMessage = "")
         }
     }
 
     private fun loadEpgForChannel(channel: Channel) {
         viewModelScope.launch {
-            val epgId = channel.epgId.ifEmpty { channel.id }
-            val currentProgram = epgRepository.getCurrentProgram(epgId)
+            try {
+                val epgId = channel.epgId.ifEmpty { channel.id }
+                val currentProgram = epgRepository.getCurrentProgram(epgId)
 
-            val now = System.currentTimeMillis()
-            var nextProgram: EpgEntry? = null
-            epgRepository.getEpgForChannel(epgId).first().let { programs ->
-                nextProgram = programs.firstOrNull { it.startTime > now }
+                val now = System.currentTimeMillis()
+                var nextProgram: EpgEntry? = null
+                epgRepository.getEpgForChannel(epgId).first().let { programs ->
+                    nextProgram = programs.firstOrNull { it.startTime > now }
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    currentProgram = currentProgram,
+                    nextProgram = nextProgram
+                )
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "EPG for channel failed", e)
             }
-
-            _uiState.value = _uiState.value.copy(
-                currentProgram = currentProgram,
-                nextProgram = nextProgram
-            )
         }
     }
 
@@ -293,9 +352,11 @@ class LiveTvViewModel @Inject constructor(
             currentChannelIndex = newIndex,
             showOverlay = true
         )
-        playChannel(channel)
+        safePlayChannel(channel)
         loadEpgForChannel(channel)
-        viewModelScope.launch { settingsDataStore.setLastWatchedChannelId(channel.id) }
+        viewModelScope.launch {
+            try { settingsDataStore.setLastWatchedChannelId(channel.id) } catch (_: Exception) {}
+        }
     }
 
     fun channelDown() {
@@ -315,9 +376,11 @@ class LiveTvViewModel @Inject constructor(
             currentChannelIndex = newIndex,
             showOverlay = true
         )
-        playChannel(channel)
+        safePlayChannel(channel)
         loadEpgForChannel(channel)
-        viewModelScope.launch { settingsDataStore.setLastWatchedChannelId(channel.id) }
+        viewModelScope.launch {
+            try { settingsDataStore.setLastWatchedChannelId(channel.id) } catch (_: Exception) {}
+        }
     }
 
     fun toggleOverlay() {
@@ -329,22 +392,30 @@ class LiveTvViewModel @Inject constructor(
     }
 
     fun exitFullscreen() {
-        _uiState.value = _uiState.value.copy(isFullscreen = false, showOverlay = false)
+        _uiState.value = _uiState.value.copy(
+            isFullscreen = false,
+            showOverlay = false,
+            showCategories = true
+        )
     }
 
     fun stopPlayback() {
-        player.stop()
+        if (isPlayerReleased) return
+        try { player.stop() } catch (_: Exception) {}
     }
 
     fun resumePlayback() {
-        if (_uiState.value.selectedChannel != null && !player.isPlaying) {
-            player.play()
-        }
+        if (isPlayerReleased) return
+        try {
+            if (_uiState.value.selectedChannel != null && !player.isPlaying) {
+                player.play()
+            }
+        } catch (_: Exception) {}
     }
 
     fun toggleFavorite(channelId: String) {
         viewModelScope.launch {
-            favoritesRepository.toggleFavoriteChannel(channelId)
+            try { favoritesRepository.toggleFavoriteChannel(channelId) } catch (_: Exception) {}
         }
     }
 
@@ -357,9 +428,10 @@ class LiveTvViewModel @Inject constructor(
         }
 
         if (state.searchQuery.isNotBlank()) {
+            val query = state.searchQuery
             filtered = filtered.filter {
-                it.name.contains(state.searchQuery, ignoreCase = true) ||
-                it.group.contains(state.searchQuery, ignoreCase = true)
+                it.name.contains(query, ignoreCase = true) ||
+                it.group.contains(query, ignoreCase = true)
             }
         }
 
@@ -368,6 +440,8 @@ class LiveTvViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        player.release()
+        isPlayerReleased = true
+        failoverMessageJob?.cancel()
+        try { player.release() } catch (_: Exception) {}
     }
 }

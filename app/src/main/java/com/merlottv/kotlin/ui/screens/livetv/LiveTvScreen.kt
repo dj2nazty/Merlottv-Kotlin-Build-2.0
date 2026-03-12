@@ -3,13 +3,12 @@ package com.merlottv.kotlin.ui.screens.livetv
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,8 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -111,9 +110,10 @@ private fun FullscreenPlayer(
         }
     }
 
-    // Request focus for D-pad input
+    // Request focus for D-pad input — with safety delay
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        delay(100)
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
     }
 
     Box(
@@ -154,7 +154,7 @@ private fun FullscreenPlayer(
         AndroidView(
             factory = { context ->
                 androidx.media3.ui.PlayerView(context).apply {
-                    useController = false  // We handle our own overlay
+                    useController = false
                     player = viewModel.player
                 }
             },
@@ -238,7 +238,7 @@ private fun FullscreenPlayer(
 
 @Composable
 private fun ChannelInfoOverlay(uiState: LiveTvUiState) {
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val channel = uiState.selectedChannel ?: return
 
     Box(
@@ -312,7 +312,6 @@ private fun ChannelInfoOverlay(uiState: LiveTvUiState) {
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        // Show quality label
                         val qualityLabel = getQualityLabel(uiState.videoResolution)
                         if (qualityLabel.isNotEmpty()) {
                             Spacer(modifier = Modifier.width(6.dp))
@@ -379,7 +378,6 @@ private fun ChannelInfoOverlay(uiState: LiveTvUiState) {
                             color = MerlotColors.TextMuted,
                             fontSize = 10.sp
                         )
-                        // Progress bar
                         val now = System.currentTimeMillis()
                         val progress = ((now - program.startTime).toFloat() / (program.endTime - program.startTime).toFloat()).coerceIn(0f, 1f)
                         Box(
@@ -472,9 +470,10 @@ private fun ChannelListView(
     val categoryFocusRequester = remember { FocusRequester() }
     val channelFocusRequester = remember { FocusRequester() }
 
-    // Request focus on categories when they become visible
+    // Request focus on categories when they become visible — with safety delay
     LaunchedEffect(uiState.showCategories) {
         if (uiState.showCategories) {
+            delay(150)
             try { categoryFocusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
@@ -535,7 +534,6 @@ private fun ChannelListView(
                     .padding(vertical = 8.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
-                            // Move focus to channel list if visible, or hide categories
                             if (uiState.selectedGroup != null) {
                                 try { channelFocusRequester.requestFocus() } catch (_: Exception) {}
                             }
@@ -585,7 +583,7 @@ private fun ChannelListView(
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp)
                     ) {
-                        item {
+                        item(key = "all_channels") {
                             CategoryItem(
                                 label = "All Channels (${uiState.totalChannels})",
                                 isSelected = uiState.selectedGroup == null,
@@ -593,7 +591,7 @@ private fun ChannelListView(
                                 focusRequester = categoryFocusRequester
                             )
                         }
-                        items(uiState.groups) { group ->
+                        items(uiState.groups, key = { it }) { group ->
                             CategoryItem(
                                 label = group,
                                 isSelected = uiState.selectedGroup == group,
@@ -605,7 +603,7 @@ private fun ChannelListView(
             }
         }
 
-        // Channel list — semi-transparent overlay, shows when a group is selected and categories are hidden
+        // Channel list — semi-transparent overlay, shows when categories are hidden
         AnimatedVisibility(
             visible = !uiState.showCategories && !uiState.isLoading,
             enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
@@ -649,20 +647,19 @@ private fun ChannelListView(
                     )
                 }
 
-                // Channel list
+                // Channel list — use itemsIndexed for O(1) index access
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(uiState.filteredChannels, key = { it.id }) { channel ->
-                        val isFirst = uiState.filteredChannels.indexOf(channel) == 0
+                    itemsIndexed(uiState.filteredChannels, key = { _, ch -> ch.id }) { index, channel ->
                         ChannelItem(
                             channel = channel,
                             isSelected = channel.id == uiState.selectedChannel?.id,
                             isFavorite = uiState.favoriteIds.contains(channel.id),
                             onClick = { viewModel.onChannelSelected(channel) },
                             onToggleFavorite = { viewModel.toggleFavorite(channel.id) },
-                            focusRequester = if (isFirst) channelFocusRequester else null
+                            focusRequester = if (index == 0) channelFocusRequester else null
                         )
                     }
                 }
@@ -684,32 +681,31 @@ private fun ChannelListView(
             }
         }
 
-        // Bottom bar showing current channel info (when channel list or categories visible)
-        if (uiState.selectedChannel != null && (uiState.showCategories || !uiState.showCategories)) {
-            uiState.selectedChannel?.let { ch ->
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(16.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MerlotColors.Black.copy(alpha = 0.8f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (ch.logoUrl.isNotEmpty()) {
-                        AsyncImage(
-                            model = ch.logoUrl,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Column {
-                        Text(ch.name, color = MerlotColors.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("CH ${ch.number} • ${ch.group}", color = MerlotColors.TextMuted, fontSize = 9.sp)
-                    }
+        // Bottom bar showing current channel info
+        if (uiState.selectedChannel != null) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MerlotColors.Black.copy(alpha = 0.8f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val ch = uiState.selectedChannel!!
+                if (ch.logoUrl.isNotEmpty()) {
+                    AsyncImage(
+                        model = ch.logoUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Column {
+                    Text(ch.name, color = MerlotColors.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("CH ${ch.number} • ${ch.group}", color = MerlotColors.TextMuted, fontSize = 9.sp)
                 }
             }
         }
@@ -868,51 +864,6 @@ private fun ChannelItem(
             color = MerlotColors.TextMuted,
             fontSize = 9.sp,
             modifier = Modifier.width(24.dp)
-        )
-    }
-}
-
-@Composable
-private fun GroupChip(
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    var isFocused by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                when {
-                    isSelected -> MerlotColors.Accent
-                    isFocused -> MerlotColors.Surface2
-                    else -> MerlotColors.Surface
-                }
-            )
-            .then(
-                if (isFocused && !isSelected)
-                    Modifier.border(1.5.dp, MerlotColors.Accent, RoundedCornerShape(16.dp))
-                else Modifier
-            )
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                ) {
-                    onClick()
-                    true
-                } else false
-            }
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary,
-            fontSize = 10.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1
         )
     }
 }

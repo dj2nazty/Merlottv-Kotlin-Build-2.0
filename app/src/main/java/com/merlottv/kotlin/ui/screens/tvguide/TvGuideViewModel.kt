@@ -1,7 +1,9 @@
 package com.merlottv.kotlin.ui.screens.tvguide
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.EpgChannel
 import com.merlottv.kotlin.domain.repository.EpgRepository
@@ -10,7 +12,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class TvGuideUiState(
@@ -22,7 +26,8 @@ data class TvGuideUiState(
 
 @HiltViewModel
 class TvGuideViewModel @Inject constructor(
-    private val epgRepository: EpgRepository
+    private val epgRepository: EpgRepository,
+    private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TvGuideUiState())
@@ -33,13 +38,25 @@ class TvGuideViewModel @Inject constructor(
     }
 
     private fun loadEpg() {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _uiState.value = TvGuideUiState(
                 isLoading = true,
-                loadingMessage = "Downloading EPG data from ${DefaultData.EPG_SOURCES.size} sources..."
+                loadingMessage = "Downloading EPG data..."
             )
             try {
-                epgRepository.loadEpg(DefaultData.EPG_SOURCES.map { it.url })
+                // Merge default + custom EPG sources
+                val defaultUrls = DefaultData.EPG_SOURCES.map { it.url }
+                val customSources = settingsDataStore.customEpgSources.first()
+                val customUrls = customSources.filter { it.enabled }.map { it.url }
+                val allUrls = (defaultUrls + customUrls).distinct()
+
+                _uiState.value = _uiState.value.copy(
+                    loadingMessage = "Downloading EPG data from ${allUrls.size} sources..."
+                )
+
+                withContext(Dispatchers.IO) {
+                    epgRepository.loadEpg(allUrls)
+                }
 
                 _uiState.value = _uiState.value.copy(loadingMessage = "Processing program data...")
 
@@ -52,7 +69,7 @@ class TvGuideViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("TvGuideVM", "Failed to load EPG", e)
                 _uiState.value = TvGuideUiState(
                     isLoading = false,
                     error = "Failed to load EPG: ${e.message}"

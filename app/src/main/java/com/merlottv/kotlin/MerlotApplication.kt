@@ -15,20 +15,22 @@ class MerlotApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var okHttpClient: OkHttpClient
 
     override fun newImageLoader(): ImageLoader {
+        val client = try { okHttpClient } catch (_: UninitializedPropertyAccessException) { OkHttpClient() }
         return ImageLoader.Builder(this)
-            .okHttpClient(okHttpClient)
+            .okHttpClient(client)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.20)
+                    .maxSizePercent(0.15)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("coil_cache"))
-                    .maxSizeBytes(50L * 1024 * 1024) // 50MB
+                    .maxSizeBytes(50L * 1024 * 1024)
                     .build()
             }
             .crossfade(true)
+            .respectCacheHeaders(false)
             .build()
     }
 }
