@@ -34,11 +34,11 @@ object NetworkModule {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
+            // HTTP logging disabled — even BASIC level adds logcat I/O overhead per request.
+            // With 30+ catalog requests + playlist downloads, this accumulates significantly.
+            // Re-enable for debugging: HttpLoggingInterceptor.Level.BASIC
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = if (com.merlottv.kotlin.BuildConfig.DEBUG)
-                    HttpLoggingInterceptor.Level.BASIC
-                else
-                    HttpLoggingInterceptor.Level.NONE
+                level = HttpLoggingInterceptor.Level.NONE
             })
             .build()
     }

@@ -40,8 +40,7 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    // Limit concurrent catalog HTTP requests to avoid flooding the network
-    // Previously 30+ requests fired simultaneously, causing GC pressure + main thread stalls
+    // Limit concurrent catalog HTTP requests — max 6 instead of 30+ simultaneous
     private val catalogDispatcher = Dispatchers.IO.limitedParallelism(6)
 
     init {
@@ -94,8 +93,9 @@ class HomeViewModel @Inject constructor(
                     }
                 }
 
-                // Use bounded dispatcher — max 6 concurrent catalog requests
-                // instead of 30+ simultaneous requests that flooded the network
+                // Simple awaitAll with bounded dispatcher — single state emission
+                // avoids the overhead of Channel-based progressive loading which
+                // caused excessive recompositions on the emulator
                 val rows = supervisorScope {
                     jobs.map { job ->
                         async(catalogDispatcher) {
@@ -120,7 +120,6 @@ class HomeViewModel @Inject constructor(
                     }.awaitAll().filterNotNull()
                 }
 
-                // Sort: Popular/New first, then streaming platforms
                 val sorted = rows.sortedWith(compareBy { row ->
                     val t = row.title.lowercase()
                     when {

@@ -10,16 +10,10 @@ import javax.inject.Singleton
 @Singleton
 class M3uParser @Inject constructor() {
 
-    // Pre-compiled regex — created ONCE at singleton init, reused for every parse
-    private val groupTitleRegex = Regex("""group-title="([^"]*?)"""")
-    private val tvgLogoRegex = Regex("""tvg-logo="([^"]*?)"""")
-    private val tvgIdRegex = Regex("""tvg-id="([^"]*?)"""")
-    private val tvgNameRegex = Regex("""tvg-name="([^"]*?)"""")
-
     /**
      * Stream-based parsing — reads line-by-line from InputStream.
-     * Avoids loading entire 10-50MB M3U file into memory as a String.
-     * This is the PRIMARY method — use this instead of parse(String).
+     * Uses manual indexOf parsing instead of Regex to eliminate MatchResult allocations.
+     * With ~5000 channels × 4 attributes, that's ~20K fewer objects created.
      */
     fun parseStream(inputStream: InputStream): List<Channel> {
         val channels = ArrayList<Channel>(2000)
@@ -32,19 +26,17 @@ class M3uParser @Inject constructor() {
                 val trimmed = line.trimStart()
 
                 if (trimmed.startsWith("#EXTINF:")) {
-                    // Store the EXTINF line, wait for the URL on the next non-comment line
                     pendingExtInf = line.trim()
                 } else if (pendingExtInf != null && trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                    // This is the URL line following an EXTINF
                     channelNumber++
                     val extInf = pendingExtInf!!
                     val url = trimmed
 
                     val name = extractAfterComma(extInf)
-                    val group = groupTitleRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
-                    val logo = tvgLogoRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
-                    val epgId = tvgIdRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
-                    val tvgName = tvgNameRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
+                    val group = extractAttribute(extInf, "group-title=\"")
+                    val logo = extractAttribute(extInf, "tvg-logo=\"")
+                    val epgId = extractAttribute(extInf, "tvg-id=\"")
+                    val tvgName = extractAttribute(extInf, "tvg-name=\"")
 
                     channels.add(
                         Channel(
@@ -59,10 +51,8 @@ class M3uParser @Inject constructor() {
                     )
                     pendingExtInf = null
                 } else if (trimmed.startsWith("#") || trimmed.isEmpty()) {
-                    // Comment or blank line — skip but don't clear pendingExtInf
-                    // (there may be #EXTVLCOPT or similar between EXTINF and URL)
+                    // Comment or blank line — keep pendingExtInf
                 } else {
-                    // Non-URL, non-comment line with no pending EXTINF — skip
                     pendingExtInf = null
                 }
 
@@ -93,12 +83,11 @@ class M3uParser @Inject constructor() {
                 channelNumber++
                 val fullTrimmed = line.trim()
                 val name = extractAfterComma(fullTrimmed)
-                val group = groupTitleRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
-                val logo = tvgLogoRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
-                val epgId = tvgIdRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
-                val tvgName = tvgNameRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
+                val group = extractAttribute(fullTrimmed, "group-title=\"")
+                val logo = extractAttribute(fullTrimmed, "tvg-logo=\"")
+                val epgId = extractAttribute(fullTrimmed, "tvg-id=\"")
+                val tvgName = extractAttribute(fullTrimmed, "tvg-name=\"")
 
-                // Next non-empty, non-comment line is the URL
                 var url = ""
                 var j = i + 1
                 while (j < lineCount) {
@@ -129,6 +118,20 @@ class M3uParser @Inject constructor() {
             i++
         }
         return channels
+    }
+
+    /**
+     * Zero-allocation attribute extraction using indexOf instead of Regex.
+     * Finds: key="value" and returns value.
+     * Eliminates MatchResult + groupValues allocations per attribute per channel.
+     */
+    private fun extractAttribute(line: String, prefix: String): String {
+        val start = line.indexOf(prefix)
+        if (start < 0) return ""
+        val valueStart = start + prefix.length
+        val end = line.indexOf('"', valueStart)
+        if (end < 0) return ""
+        return line.substring(valueStart, end)
     }
 
     private fun extractAfterComma(line: String): String {

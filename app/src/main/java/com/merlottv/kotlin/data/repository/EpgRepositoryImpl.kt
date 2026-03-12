@@ -78,18 +78,34 @@ class EpgRepositoryImpl @Inject constructor(
                 }
             }
 
-            // De-duplicate channels by ID
-            val uniqueChannels = allChannels.distinctBy { it.id }
+            // De-duplicate channels by ID using a set (avoids creating intermediate list)
+            val seenChannelIds = HashSet<String>(allChannels.size)
+            val uniqueChannels = ArrayList<EpgChannel>(allChannels.size / 2)
+            for (ch in allChannels) {
+                if (seenChannelIds.add(ch.id)) {
+                    uniqueChannels.add(ch)
+                }
+            }
             _channels.value = uniqueChannels
 
-            // Build indexed map: channelId (lowercase) → sorted program list
-            // This replaces the flat list + O(n) linear scan with O(1) map lookup
-            val deduped = allPrograms
-                .distinctBy { Triple(it.channelId.lowercase(), it.startTime, it.title) }
-
-            programIndex = deduped
-                .groupBy { it.channelId.lowercase() }
-                .mapValues { (_, programs) -> programs.sortedBy { it.startTime } }
+            // Build indexed map with dedup in a SINGLE PASS:
+            // Groups by channelId while deduplicating, then sorts each group.
+            // Avoids: Triple allocation per entry, intermediate deduped list, double iteration.
+            val tempIndex = HashMap<String, MutableList<EpgEntry>>(uniqueChannels.size)
+            val seenPrograms = HashSet<Long>(allPrograms.size)
+            for (entry in allPrograms) {
+                val key = entry.channelId.lowercase()
+                // Composite hash key avoids Triple allocation — hash channelId+startTime+title
+                val dedupKey = (key.hashCode().toLong() * 31 + entry.startTime) * 31 + entry.title.hashCode()
+                if (seenPrograms.add(dedupKey)) {
+                    tempIndex.getOrPut(key) { ArrayList() }.add(entry)
+                }
+            }
+            // Sort each channel's program list in-place (avoids creating new sorted copies)
+            for ((_, programs) in tempIndex) {
+                programs.sortBy { it.startTime }
+            }
+            programIndex = tempIndex
         }
     }
 

@@ -32,7 +32,8 @@ import javax.inject.Inject
 data class LiveTvUiState(
     val isLoading: Boolean = true,
     val channels: List<Channel> = emptyList(),
-    val filteredChannels: List<Channel> = emptyList(),
+    // null = no filter applied, use channels directly (avoids duplicating the full list in memory)
+    private val _filteredChannels: List<Channel>? = null,
     val groups: List<String> = emptyList(),
     val selectedGroup: String? = null,
     val selectedChannel: Channel? = null,
@@ -54,7 +55,13 @@ data class LiveTvUiState(
     val failoverMessage: String = "",
     // Category sidebar visibility
     val showCategories: Boolean = true
-)
+) {
+    /** Returns filtered channels if a filter is active, otherwise the full channel list */
+    val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
+
+    /** Helper to set filteredChannels — pass null to clear filter and reuse channels */
+    fun withFilteredChannels(filtered: List<Channel>?) = copy(_filteredChannels = filtered)
+}
 
 @HiltViewModel
 class LiveTvViewModel @Inject constructor(
@@ -131,13 +138,14 @@ class LiveTvViewModel @Inject constructor(
                     }.thenBy { it.lowercase() }
                 )
 
+                // Don't set filteredChannels — null means "use channels directly"
+                // This avoids duplicating the full list (thousands of Channel objects) in state
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     channels = channels,
-                    filteredChannels = channels,
                     groups = groups,
                     totalChannels = channels.size
-                )
+                ).withFilteredChannels(null)
 
                 // Auto-play last watched channel
                 autoPlayLastWatched(channels)
@@ -434,13 +442,23 @@ class LiveTvViewModel @Inject constructor(
 
     private fun applyFilters() {
         val state = _uiState.value
+        val hasGroup = state.selectedGroup != null
+        val hasSearch = state.searchQuery.isNotBlank()
+
+        if (!hasGroup && !hasSearch) {
+            // No filter active — reuse full channel list (null = no separate allocation)
+            _uiState.value = state.withFilteredChannels(null)
+            return
+        }
+
         var filtered = state.channels
 
-        state.selectedGroup?.let { group ->
+        if (hasGroup) {
+            val group = state.selectedGroup!!
             filtered = filtered.filter { it.group == group }
         }
 
-        if (state.searchQuery.isNotBlank()) {
+        if (hasSearch) {
             val query = state.searchQuery
             filtered = filtered.filter {
                 it.name.contains(query, ignoreCase = true) ||
@@ -448,7 +466,7 @@ class LiveTvViewModel @Inject constructor(
             }
         }
 
-        _uiState.value = state.copy(filteredChannels = filtered)
+        _uiState.value = state.withFilteredChannels(filtered)
     }
 
     override fun onCleared() {
