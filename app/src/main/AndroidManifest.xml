@@ -19,7 +19,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MerlotTV"
         android:usesCleartextTraffic="true"
-        android:banner="@mipmap/ic_launcher">
+        android:banner="@drawable/tv_banner">
 
         <activity
             android:name=".MainActivity"
