@@ -12,6 +12,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,10 +36,6 @@ import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,11 +53,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,7 +75,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveTvScreen(
     viewModel: LiveTvViewModel = hiltViewModel()
@@ -429,7 +428,6 @@ private fun getQualityLabel(resolution: String): String {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChannelListView(
     viewModel: LiveTvViewModel,
@@ -471,42 +469,28 @@ private fun ChannelListView(
                 shape = RoundedCornerShape(8.dp)
             )
 
-            // Group selector
-            var groupExpanded by remember { mutableStateOf(false) }
-            ExposedDropdownMenuBox(
-                expanded = groupExpanded,
-                onExpandedChange = { groupExpanded = it },
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            // Group selector — D-pad friendly scrollable chips
+            // Group selector — D-pad friendly scrollable chips
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp)
             ) {
-                OutlinedTextField(
-                    value = uiState.selectedGroup ?: "All Groups (${uiState.totalChannels})",
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = groupExpanded) },
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, color = MerlotColors.TextPrimary),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MerlotColors.Accent,
-                        unfocusedBorderColor = MerlotColors.Border
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                )
-                ExposedDropdownMenu(
-                    expanded = groupExpanded,
-                    onDismissRequest = { groupExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("All Groups (${uiState.totalChannels})", fontSize = 11.sp) },
-                        onClick = { viewModel.onGroupSelected(null); groupExpanded = false }
+                item {
+                    GroupChip(
+                        label = "All (${uiState.totalChannels})",
+                        isSelected = uiState.selectedGroup == null,
+                        onClick = { viewModel.onGroupSelected(null) }
                     )
-                    uiState.groups.forEach { group ->
-                        DropdownMenuItem(
-                            text = { Text(group, fontSize = 11.sp) },
-                            onClick = { viewModel.onGroupSelected(group); groupExpanded = false }
-                        )
-                    }
+                }
+                items(uiState.groups) { group ->
+                    GroupChip(
+                        label = group,
+                        isSelected = uiState.selectedGroup == group,
+                        onClick = { viewModel.onGroupSelected(group) }
+                    )
                 }
             }
 
@@ -618,12 +602,31 @@ private fun ChannelItem(
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .onFocusChanged { isFocused = it.isFocused }
             .focusable()
-            .background(if (isSelected) MerlotColors.AccentAlpha10 else MerlotColors.Transparent)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
+            .background(
+                when {
+                    isFocused -> MerlotColors.AccentAlpha20
+                    isSelected -> MerlotColors.AccentAlpha10
+                    else -> MerlotColors.Transparent
+                }
+            )
+            .then(
+                if (isFocused) Modifier.border(1.dp, MerlotColors.Accent, RoundedCornerShape(4.dp))
+                else Modifier
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -684,6 +687,51 @@ private fun ChannelItem(
             color = MerlotColors.TextMuted,
             fontSize = 9.sp,
             modifier = Modifier.width(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun GroupChip(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                when {
+                    isSelected -> MerlotColors.Accent
+                    isFocused -> MerlotColors.Surface2
+                    else -> MerlotColors.Surface
+                }
+            )
+            .then(
+                if (isFocused && !isSelected)
+                    Modifier.border(1.5.dp, MerlotColors.Accent, RoundedCornerShape(16.dp))
+                else Modifier
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary,
+            fontSize = 10.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1
         )
     }
 }

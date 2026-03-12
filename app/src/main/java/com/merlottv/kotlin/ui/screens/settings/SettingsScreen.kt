@@ -3,6 +3,7 @@ package com.merlottv.kotlin.ui.screens.settings
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -68,6 +69,32 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.ui.theme.MerlotColors
+
+/**
+ * Helper modifier that adds a visible Accent border when the composable is focused via D-pad.
+ * Use on any Row/Box/Button that the user can navigate to.
+ */
+@Composable
+private fun Modifier.dpadFocusable(
+    onClick: () -> Unit = {}
+): Modifier {
+    var isFocused by remember { mutableStateOf(false) }
+    return this
+        .onFocusChanged { isFocused = it.isFocused }
+        .focusable()
+        .then(
+            if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+            else Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
+        )
+        .onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown &&
+                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+            ) {
+                onClick()
+                true
+            } else false
+        }
+}
 
 @Composable
 fun SettingsScreen(
@@ -135,7 +162,7 @@ fun SettingsScreen(
                     enabled = !uiState.isCheckingUpdate,
                     colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2, contentColor = MerlotColors.TextPrimary),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.focusable()
+                    modifier = Modifier
                 ) {
                     if (uiState.isCheckingUpdate) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = MerlotColors.Accent, strokeWidth = 2.dp)
@@ -223,8 +250,7 @@ fun SettingsScreen(
                                 if (isActive) MerlotColors.Surface2 else MerlotColors.Surface,
                                 RoundedCornerShape(8.dp)
                             )
-                            .clickable { viewModel.switchProfile(profile.id) }
-                            .focusable()
+                            .dpadFocusable(onClick = { viewModel.switchProfile(profile.id) })
                             .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -289,13 +315,26 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ProfileDataStore.AVATAR_COLORS.forEachIndexed { index, color ->
+                            var colorFocused by remember { mutableStateOf(false) }
                             Box(
                                 modifier = Modifier
                                     .size(24.dp)
                                     .clip(CircleShape)
                                     .background(Color(color))
-                                    .clickable { selectedColor = index }
-                                    .focusable(),
+                                    .onFocusChanged { colorFocused = it.isFocused }
+                                    .focusable()
+                                    .then(
+                                        if (colorFocused) Modifier.border(2.dp, MerlotColors.White, CircleShape)
+                                        else Modifier
+                                    )
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown &&
+                                            (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                        ) {
+                                            selectedColor = index
+                                            true
+                                        } else false
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (index == selectedColor) {
@@ -319,6 +358,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .dpadFocusable()
                             .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
