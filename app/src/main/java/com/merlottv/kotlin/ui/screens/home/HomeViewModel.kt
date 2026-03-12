@@ -2,15 +2,18 @@ package com.merlottv.kotlin.ui.screens.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
 
 data class CatalogRow(
@@ -38,34 +41,52 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadCatalogs() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val addons = addonRepository.getAllAddons().first()
-                val rows = mutableListOf<CatalogRow>()
 
-                for (addon in addons) {
-                    // Fetch manifest to get fresh catalogs
-                    val manifest = addonRepository.fetchManifest(addon.url)
-                    val catalogs = manifest?.catalogs ?: addon.catalogs
-
-                    for (catalog in catalogs.take(3)) {
-                        try {
-                            val items = addonRepository.getCatalog(
-                                addon = manifest ?: addon,
-                                type = catalog.type,
-                                catalogId = catalog.id
-                            )
-                            if (items.isNotEmpty()) {
-                                rows.add(CatalogRow(
-                                    title = "${catalog.name} — ${addon.name}",
-                                    items = items
-                                ))
+                // Fetch all manifests in parallel
+                val manifests = supervisorScope {
+                    addons.map { addon ->
+                        async {
+                            try {
+                                addonRepository.fetchManifest(addon.url) ?: addon
+                            } catch (e: Exception) {
+                                addon
                             }
-                        } catch (e: Exception) {
-                            // Skip failed catalogs
                         }
+                    }.awaitAll()
+                }
+
+                // Build catalog fetch jobs in parallel
+                data class CatalogJob(val addonName: String, val catalogName: String, val type: String, val catalogId: String, val addonUrl: String)
+
+                val jobs = mutableListOf<CatalogJob>()
+                for (manifest in manifests) {
+                    for (catalog in manifest.catalogs.take(3)) {
+                        jobs.add(CatalogJob(manifest.name, catalog.name, catalog.type, catalog.id, manifest.url))
                     }
+                }
+
+                // Fetch catalogs in parallel (max ~6 at a time via supervisorScope)
+                val rows = supervisorScope {
+                    jobs.map { job ->
+                        async {
+                            try {
+                                val addon = manifests.find { it.url == job.addonUrl } ?: return@async null
+                                val items = addonRepository.getCatalog(addon, job.type, job.catalogId)
+                                if (items.isNotEmpty()) {
+                                    CatalogRow(
+                                        title = "${job.catalogName} — ${job.addonName}",
+                                        items = items
+                                    )
+                                } else null
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                    }.awaitAll().filterNotNull()
                 }
 
                 val featured = rows.firstOrNull()?.items?.firstOrNull()

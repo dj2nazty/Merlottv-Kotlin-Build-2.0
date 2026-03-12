@@ -18,6 +18,8 @@ import com.merlottv.kotlin.ui.screens.settings.SettingsScreen
 import com.merlottv.kotlin.ui.screens.tvguide.TvGuideScreen
 import com.merlottv.kotlin.ui.screens.vod.VodScreen
 import com.merlottv.kotlin.ui.screens.vod.VodDetailScreen
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 @Composable
 fun MerlotNavHost(
@@ -28,13 +30,14 @@ fun MerlotNavHost(
         navController = navController,
         startDestination = Screen.Home.route,
         modifier = modifier,
-        enterTransition = { fadeIn(animationSpec = androidx.compose.animation.core.tween(300)) },
-        exitTransition = { fadeOut(animationSpec = androidx.compose.animation.core.tween(300)) }
+        enterTransition = { fadeIn(animationSpec = androidx.compose.animation.core.tween(200)) },
+        exitTransition = { fadeOut(animationSpec = androidx.compose.animation.core.tween(200)) }
     ) {
         composable(Screen.Home.route) {
             HomeScreen(
                 onNavigateToDetail = { type, id ->
-                    navController.navigate(Screen.VodDetail.createRoute(type, id))
+                    val encodedId = URLEncoder.encode(id, "UTF-8")
+                    navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
                 }
             )
         }
@@ -42,7 +45,8 @@ fun MerlotNavHost(
         composable(Screen.Search.route) {
             SearchScreen(
                 onNavigateToDetail = { type, id ->
-                    navController.navigate(Screen.VodDetail.createRoute(type, id))
+                    val encodedId = URLEncoder.encode(id, "UTF-8")
+                    navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
                 }
             )
         }
@@ -58,7 +62,8 @@ fun MerlotNavHost(
         composable(Screen.Vod.route) {
             VodScreen(
                 onNavigateToDetail = { type, id ->
-                    navController.navigate(Screen.VodDetail.createRoute(type, id))
+                    val encodedId = URLEncoder.encode(id, "UTF-8")
+                    navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
                 }
             )
         }
@@ -66,7 +71,8 @@ fun MerlotNavHost(
         composable(Screen.Favorites.route) {
             FavoritesScreen(
                 onNavigateToDetail = { type, id ->
-                    navController.navigate(Screen.VodDetail.createRoute(type, id))
+                    val encodedId = URLEncoder.encode(id, "UTF-8")
+                    navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
                 }
             )
         }
@@ -83,19 +89,31 @@ fun MerlotNavHost(
             )
         ) { backStackEntry ->
             val type = backStackEntry.arguments?.getString("type") ?: "movie"
-            val id = backStackEntry.arguments?.getString("id") ?: ""
+            val id = URLDecoder.decode(backStackEntry.arguments?.getString("id") ?: "", "UTF-8")
             VodDetailScreen(
                 type = type,
                 id = id,
                 onBack = { navController.popBackStack() },
-                onPlay = { streamUrl ->
-                    navController.navigate(Screen.Player.route)
+                onPlay = { streamUrl, title ->
+                    val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
+                    val encodedTitle = URLEncoder.encode(title, "UTF-8")
+                    navController.navigate(Screen.Player.createRoute(encodedUrl, encodedTitle))
                 }
             )
         }
 
-        composable(Screen.Player.route) {
+        composable(
+            route = Screen.Player.route,
+            arguments = listOf(
+                navArgument("url") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" }
+            )
+        ) { backStackEntry ->
+            val url = URLDecoder.decode(backStackEntry.arguments?.getString("url") ?: "", "UTF-8")
+            val title = URLDecoder.decode(backStackEntry.arguments?.getString("title") ?: "", "UTF-8")
             PlayerScreen(
+                streamUrl = url,
+                title = title,
                 onBack = { navController.popBackStack() }
             )
         }

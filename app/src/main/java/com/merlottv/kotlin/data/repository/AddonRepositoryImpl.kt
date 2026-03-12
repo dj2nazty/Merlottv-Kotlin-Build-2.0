@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,15 +29,38 @@ class AddonRepositoryImpl @Inject constructor(
 
     private val _addons = MutableStateFlow(DefaultData.DEFAULT_ADDONS)
 
+    // Manifest cache: URL -> (Addon, timestamp)
+    private val manifestCache = ConcurrentHashMap<String, Pair<Addon, Long>>()
+    private val CACHE_TTL = TimeUnit.MINUTES.toMillis(30)
+
+    // Per-request client with shorter timeout for catalog/meta fetches
+    private val fastClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+    }
+
     override fun getAllAddons(): Flow<List<Addon>> = _addons
 
     override suspend fun fetchManifest(url: String): Addon? {
+        // Check cache first
+        manifestCache[url]?.let { (addon, timestamp) ->
+            if (System.currentTimeMillis() - timestamp < CACHE_TTL) {
+                return addon
+            }
+        }
+
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder().url(url).build()
-                val response = okHttpClient.newCall(request).execute()
+                val response = fastClient.newCall(request).execute()
                 val body = response.body?.string() ?: return@withContext null
-                parseManifest(body, url)
+                val addon = parseManifest(body, url)
+                if (addon != null) {
+                    manifestCache[url] = Pair(addon, System.currentTimeMillis())
+                }
+                addon
             } catch (e: Exception) {
                 e.printStackTrace()
                 null
@@ -52,9 +77,13 @@ class AddonRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val base = addon.url.removeSuffix("/manifest.json")
-                val url = "$base/catalog/$type/$catalogId/skip=$skip.json"
+                val url = if (skip > 0) {
+                    "$base/catalog/$type/$catalogId/skip=$skip.json"
+                } else {
+                    "$base/catalog/$type/$catalogId.json"
+                }
                 val request = Request.Builder().url(url).build()
-                val response = okHttpClient.newCall(request).execute()
+                val response = fastClient.newCall(request).execute()
                 val body = response.body?.string() ?: return@withContext emptyList()
                 parseCatalogResponse(body)
             } catch (e: Exception) {
@@ -71,7 +100,7 @@ class AddonRepositoryImpl @Inject constructor(
                     val base = addon.url.removeSuffix("/manifest.json")
                     val url = "$base/meta/$type/$id.json"
                     val request = Request.Builder().url(url).build()
-                    val response = okHttpClient.newCall(request).execute()
+                    val response = fastClient.newCall(request).execute()
                     if (response.isSuccessful) {
                         val body = response.body?.string() ?: continue
                         val meta = parseMetaResponse(body)
@@ -93,7 +122,7 @@ class AddonRepositoryImpl @Inject constructor(
                     val base = addon.url.removeSuffix("/manifest.json")
                     val url = "$base/stream/$type/$id.json"
                     val request = Request.Builder().url(url).build()
-                    val response = okHttpClient.newCall(request).execute()
+                    val response = fastClient.newCall(request).execute()
                     if (response.isSuccessful) {
                         val body = response.body?.string() ?: continue
                         val streams = parseStreamResponse(body, addon.name, addon.logo)
@@ -114,7 +143,7 @@ class AddonRepositoryImpl @Inject constructor(
                 val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
                 val url = "$base/catalog/$type/top/search=$encodedQuery.json"
                 val request = Request.Builder().url(url).build()
-                val response = okHttpClient.newCall(request).execute()
+                val response = fastClient.newCall(request).execute()
                 val body = response.body?.string() ?: return@withContext emptyList()
                 parseCatalogResponse(body)
             } catch (e: Exception) {
@@ -138,6 +167,7 @@ class AddonRepositoryImpl @Inject constructor(
         val current = _addons.value.toMutableList()
         current.removeAll { it.url == url && !it.isDefault }
         _addons.value = current
+        manifestCache.remove(url)
     }
 
     @Suppress("UNCHECKED_CAST")

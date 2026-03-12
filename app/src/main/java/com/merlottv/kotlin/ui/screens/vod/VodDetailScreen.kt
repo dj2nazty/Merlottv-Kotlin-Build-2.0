@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.merlottv.kotlin.ui.screens.vod
 
 import androidx.compose.foundation.background
@@ -18,7 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
@@ -31,6 +33,7 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -50,10 +53,18 @@ fun VodDetailScreen(
     type: String,
     id: String,
     onBack: () -> Unit,
-    onPlay: (String) -> Unit,
+    onPlay: (String, String) -> Unit,
     viewModel: VodDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // Auto-navigate to player when stream is selected
+    LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
+        if (uiState.autoPlayTriggered && uiState.selectedStreamUrl != null) {
+            onPlay(uiState.selectedStreamUrl!!, uiState.selectedStreamTitle ?: "")
+            viewModel.clearPlayback()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -104,7 +115,7 @@ fun VodDetailScreen(
                                 .align(Alignment.TopStart)
                                 .padding(8.dp)
                         ) {
-                            Icon(Icons.Default.ArrowBack, "Back", tint = MerlotColors.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MerlotColors.White)
                         }
                     }
 
@@ -162,8 +173,8 @@ fun VodDetailScreen(
                                             containerColor = MerlotColors.Surface2,
                                             labelColor = MerlotColors.TextPrimary
                                         ),
-                                        border = SuggestionChipDefaults.suggestionChipBorder(
-                                            borderColor = MerlotColors.Border
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp, MerlotColors.Border
                                         )
                                     )
                                 }
@@ -194,16 +205,27 @@ fun VodDetailScreen(
                             // Action buttons
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
-                                    onClick = { viewModel.loadStreams(); },
+                                    onClick = { viewModel.playBestStream() },
+                                    enabled = !uiState.isLoadingStreams,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MerlotColors.Accent,
                                         contentColor = MerlotColors.Black
                                     ),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("PLAY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    if (uiState.isLoadingStreams) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = MerlotColors.Black,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    } else {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("PLAY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
                                 }
 
                                 IconButton(onClick = { viewModel.toggleFavorite() }) {
@@ -220,49 +242,54 @@ fun VodDetailScreen(
                     // Streams section
                     if (uiState.streams.isNotEmpty()) {
                         Text(
-                            text = "Available Streams",
+                            text = "Available Streams (${uiState.streams.size})",
                             color = MerlotColors.TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(16.dp)
                         )
                         uiState.streams.forEach { stream ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MerlotColors.Surface2)
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = stream.name.ifEmpty { stream.addonName },
-                                        color = MerlotColors.TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    if (stream.title.isNotEmpty()) {
-                                        Text(
-                                            text = stream.title,
-                                            color = MerlotColors.TextMuted,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                }
-                                Button(
-                                    onClick = { onPlay(stream.url) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MerlotColors.Accent,
-                                        contentColor = MerlotColors.Black
-                                    ),
-                                    shape = RoundedCornerShape(6.dp)
+                            val streamUrl = stream.url.ifEmpty { stream.externalUrl }
+                            if (streamUrl.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MerlotColors.Surface2)
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Play", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stream.name.ifEmpty { stream.addonName },
+                                            color = MerlotColors.TextPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        if (stream.title.isNotEmpty()) {
+                                            Text(
+                                                text = stream.title,
+                                                color = MerlotColors.TextMuted,
+                                                fontSize = 10.sp,
+                                                maxLines = 2
+                                            )
+                                        }
+                                    }
+                                    Button(
+                                        onClick = { viewModel.playStream(stream) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MerlotColors.Accent,
+                                            contentColor = MerlotColors.Black
+                                        ),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text("Play", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }

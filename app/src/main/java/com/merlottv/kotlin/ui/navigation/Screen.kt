@@ -27,7 +27,9 @@ sealed class Screen(
     data object VodDetail : Screen("vod_detail/{type}/{id}", "Detail", Icons.Default.Movie) {
         fun createRoute(type: String, id: String) = "vod_detail/$type/$id"
     }
-    data object Player : Screen("player", "Player", Icons.Default.LiveTv)
+    data object Player : Screen("player/{url}?title={title}", "Player", Icons.Default.LiveTv) {
+        fun createRoute(url: String, title: String = "") = "player/$url?title=$title"
+    }
 
     companion object {
         val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Settings)
