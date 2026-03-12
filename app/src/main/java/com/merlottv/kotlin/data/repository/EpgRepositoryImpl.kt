@@ -25,7 +25,10 @@ class EpgRepositoryImpl @Inject constructor(
 ) : EpgRepository {
 
     private val _channels = MutableStateFlow<List<EpgChannel>>(emptyList())
-    private val _programs = MutableStateFlow<List<EpgEntry>>(emptyList())
+
+    // Indexed by lowercase channelId for O(1) lookup instead of O(n) full-list scan
+    @Volatile
+    private var programIndex: Map<String, List<EpgEntry>> = emptyMap()
 
     // Dedicated client with longer timeouts for large EPG files
     private val epgClient = okHttpClient.newBuilder()
@@ -41,7 +44,6 @@ class EpgRepositoryImpl @Inject constructor(
             val allChannels = mutableListOf<EpgChannel>()
             val allPrograms = mutableListOf<EpgEntry>()
 
-            // Load EPG sources in parallel
             supervisorScope {
                 val results = urls.map { url ->
                     async {
@@ -51,19 +53,17 @@ class EpgRepositoryImpl @Inject constructor(
                                 .header("Accept-Encoding", "gzip")
                                 .build()
                             val response = epgClient.newCall(request).execute()
-                            if (response.isSuccessful) {
-                                val body = response.body
-                                if (body != null) {
-                                    // Use stream-based parsing to avoid OOM on large files
-                                    val result = xmltvParser.parseStream(body.byteStream())
-                                    body.close()
-                                    result
+                            response.use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body
+                                    if (body != null) {
+                                        xmltvParser.parseStream(body.byteStream())
+                                    } else {
+                                        Pair(emptyList(), emptyList())
+                                    }
                                 } else {
-                                    Pair(emptyList(), emptyList())
+                                    Pair(emptyList<EpgChannel>(), emptyList<EpgEntry>())
                                 }
-                            } else {
-                                response.close()
-                                Pair(emptyList<EpgChannel>(), emptyList<EpgEntry>())
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -78,37 +78,39 @@ class EpgRepositoryImpl @Inject constructor(
                 }
             }
 
-            // De-duplicate channels by ID (keep first occurrence)
+            // De-duplicate channels by ID
             val uniqueChannels = allChannels.distinctBy { it.id }
-
             _channels.value = uniqueChannels
-            _programs.value = allPrograms
+
+            // Build indexed map: channelId (lowercase) → sorted program list
+            // This replaces the flat list + O(n) linear scan with O(1) map lookup
+            val deduped = allPrograms
                 .distinctBy { Triple(it.channelId.lowercase(), it.startTime, it.title) }
-                .sortedBy { it.startTime }
+
+            programIndex = deduped
+                .groupBy { it.channelId.lowercase() }
+                .mapValues { (_, programs) -> programs.sortedBy { it.startTime } }
         }
     }
 
     override fun getEpgForChannel(channelId: String): Flow<List<EpgEntry>> {
-        return _programs.map { programs ->
-            programs.filter { it.channelId.equals(channelId, ignoreCase = true) }
-                .sortedBy { it.startTime }
-        }
+        // O(1) map lookup instead of O(n) filter + sort over entire program list
+        val programs = programIndex[channelId.lowercase()] ?: emptyList()
+        return MutableStateFlow(programs)
     }
 
     override fun getAllEpgChannels(): Flow<List<EpgChannel>> {
         return _channels.map { channels ->
-            val programsByChannel = _programs.value.groupBy { it.channelId.lowercase() }
             channels.map { ch ->
-                ch.copy(programs = programsByChannel[ch.id.lowercase()] ?: emptyList())
+                ch.copy(programs = programIndex[ch.id.lowercase()] ?: emptyList())
             }
         }
     }
 
     override fun getCurrentProgram(channelId: String): EpgEntry? {
+        // O(1) map lookup + small per-channel list scan instead of O(n) full-list scan
         val now = System.currentTimeMillis()
-        return _programs.value.find { entry ->
-            entry.channelId.equals(channelId, ignoreCase = true) &&
-            entry.startTime <= now && entry.endTime >= now
-        }
+        val channelPrograms = programIndex[channelId.lowercase()] ?: return null
+        return channelPrograms.find { it.startTime <= now && it.endTime >= now }
     }
 }

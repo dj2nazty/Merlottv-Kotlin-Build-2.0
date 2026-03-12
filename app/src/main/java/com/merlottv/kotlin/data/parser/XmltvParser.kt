@@ -15,12 +15,18 @@ import javax.inject.Singleton
 @Singleton
 class XmltvParser @Inject constructor() {
 
-    private val dateFormat = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
+    // Thread-local date formatters — SimpleDateFormat is NOT thread-safe
+    // Using ThreadLocal avoids race conditions when parsing from multiple coroutines
+    private val dateFormatLocal = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
     }
 
-    private val dateFormatAlt = SimpleDateFormat("yyyyMMddHHmmssZ", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
+    private val dateFormatAltLocal = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyyMMddHHmmssZ", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
     }
 
     /**
@@ -240,10 +246,10 @@ class XmltvParser @Inject constructor() {
     private fun parseDate(dateStr: String): Long {
         if (dateStr.isEmpty()) return 0L
         return try {
-            dateFormat.parse(dateStr)?.time ?: 0L
+            dateFormatLocal.get()!!.parse(dateStr)?.time ?: 0L
         } catch (e: Exception) {
             try {
-                dateFormatAlt.parse(dateStr)?.time ?: 0L
+                dateFormatAltLocal.get()!!.parse(dateStr)?.time ?: 0L
             } catch (e2: Exception) {
                 0L
             }

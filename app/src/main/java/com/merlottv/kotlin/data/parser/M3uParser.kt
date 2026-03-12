@@ -7,27 +7,39 @@ import javax.inject.Singleton
 @Singleton
 class M3uParser @Inject constructor() {
 
+    // Pre-compiled regex — created ONCE at singleton init, reused for every parse
+    // Previously these were compiled per-attribute per-channel (4 × thousands = catastrophic)
+    private val groupTitleRegex = Regex("""group-title="([^"]*?)"""")
+    private val tvgLogoRegex = Regex("""tvg-logo="([^"]*?)"""")
+    private val tvgIdRegex = Regex("""tvg-id="([^"]*?)"""")
+    private val tvgNameRegex = Regex("""tvg-name="([^"]*?)"""")
+
     fun parse(content: String): List<Channel> {
-        val channels = mutableListOf<Channel>()
+        if (content.isBlank()) return emptyList()
+
+        val channels = ArrayList<Channel>(2000) // Pre-size for typical IPTV lists
         val lines = content.lines()
+        val lineCount = lines.size
         var i = 0
         var channelNumber = 0
 
-        while (i < lines.size) {
-            val line = lines[i].trim()
+        while (i < lineCount) {
+            val line = lines[i]
+            val trimmed = line.trimStart()
 
-            if (line.startsWith("#EXTINF:")) {
+            if (trimmed.startsWith("#EXTINF:")) {
                 channelNumber++
-                val name = extractAfterComma(line)
-                val group = extractAttribute(line, "group-title")
-                val logo = extractAttribute(line, "tvg-logo")
-                val epgId = extractAttribute(line, "tvg-id")
-                val tvgName = extractAttribute(line, "tvg-name")
+                val fullTrimmed = line.trim()
+                val name = extractAfterComma(fullTrimmed)
+                val group = groupTitleRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
+                val logo = tvgLogoRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
+                val epgId = tvgIdRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
+                val tvgName = tvgNameRegex.find(fullTrimmed)?.groupValues?.getOrNull(1) ?: ""
 
                 // Next non-empty, non-comment line is the URL
                 var url = ""
                 var j = i + 1
-                while (j < lines.size) {
+                while (j < lineCount) {
                     val nextLine = lines[j].trim()
                     if (nextLine.isNotEmpty() && !nextLine.startsWith("#")) {
                         url = nextLine
@@ -55,11 +67,6 @@ class M3uParser @Inject constructor() {
             i++
         }
         return channels
-    }
-
-    private fun extractAttribute(line: String, attr: String): String {
-        val regex = Regex("""$attr="([^"]*?)"""")
-        return regex.find(line)?.groupValues?.getOrNull(1) ?: ""
     }
 
     private fun extractAfterComma(line: String): String {

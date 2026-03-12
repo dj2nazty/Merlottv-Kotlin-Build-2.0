@@ -54,14 +54,14 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadCatalogs() {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val addons = addonRepository.getAllAddons().first()
 
                 val manifests = supervisorScope {
                     addons.map { addon ->
-                        async {
+                        async(Dispatchers.IO) {
                             try {
                                 addonRepository.fetchManifest(addon.url) ?: addon
                             } catch (_: Exception) {
@@ -92,7 +92,7 @@ class HomeViewModel @Inject constructor(
 
                 val rows = supervisorScope {
                     jobs.map { job ->
-                        async {
+                        async(Dispatchers.IO) {
                             try {
                                 val addon = manifests.find { it.url == job.addonUrl } ?: return@async null
                                 val items = addonRepository.getCatalog(addon, job.type, job.catalogId)

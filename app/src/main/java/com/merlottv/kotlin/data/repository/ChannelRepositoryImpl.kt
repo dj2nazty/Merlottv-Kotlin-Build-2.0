@@ -30,8 +30,10 @@ class ChannelRepositoryImpl @Inject constructor(
             try {
                 val request = Request.Builder().url(playlistUrl).build()
                 val response = okHttpClient.newCall(request).execute()
-                val body = response.body?.string() ?: ""
-                val channels = m3uParser.parse(body)
+                val channels = response.use { resp ->
+                    val body = resp.body?.string() ?: ""
+                    m3uParser.parse(body)
+                }
                 _channels.value = channels
                 channels
             } catch (e: Exception) {
@@ -51,15 +53,16 @@ class ChannelRepositoryImpl @Inject constructor(
                         try {
                             val request = Request.Builder().url(url).build()
                             val response = okHttpClient.newCall(request).execute()
-                            val body = response.body?.string() ?: ""
-                            m3uParser.parse(body)
+                            response.use { resp ->
+                                val body = resp.body?.string() ?: ""
+                                m3uParser.parse(body)
+                            }
                         } catch (_: Exception) {
                             emptyList()
                         }
                     }
                 }.awaitAll().flatten()
             }
-            // De-duplicate by stream URL
             val deduplicated = allChannels.distinctBy { it.streamUrl }
             _channels.value = deduplicated
             deduplicated
