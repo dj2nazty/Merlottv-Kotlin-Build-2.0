@@ -41,8 +41,10 @@ class ChannelRepositoryImpl @Inject constructor(
         }
     }
 
+    private val boundedIo = Dispatchers.IO.limitedParallelism(4)
+
     override suspend fun loadMultipleChannels(playlistUrls: List<String>): List<Channel> {
-        return withContext(Dispatchers.IO) {
+        return withContext(boundedIo) {
             val allChannels = supervisorScope {
                 playlistUrls.map { url ->
                     async {

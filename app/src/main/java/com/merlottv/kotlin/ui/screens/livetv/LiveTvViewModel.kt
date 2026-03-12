@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import com.merlottv.kotlin.data.local.SettingsDataStore
+import com.merlottv.kotlin.data.repository.BackupChannelRepository
 import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.EpgEntry
@@ -41,7 +43,10 @@ data class LiveTvUiState(
     // Video quality info
     val videoResolution: String = "",
     // Current index in filtered list for channel up/down
-    val currentChannelIndex: Int = -1
+    val currentChannelIndex: Int = -1,
+    // Backup stream failover
+    val isFailingOver: Boolean = false,
+    val failoverMessage: String = ""
 )
 
 @HiltViewModel
@@ -50,11 +55,16 @@ class LiveTvViewModel @Inject constructor(
     private val channelRepository: ChannelRepository,
     private val favoritesRepository: FavoritesRepository,
     private val settingsDataStore: SettingsDataStore,
-    private val epgRepository: EpgRepository
+    private val epgRepository: EpgRepository,
+    private val backupChannelRepository: BackupChannelRepository
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(LiveTvUiState())
     val uiState: StateFlow<LiveTvUiState> = _uiState.asStateFlow()
+
+    // Failover tracking
+    private var failoverAttempts = 0
+    private val maxFailoverAttempts = 3
 
     val player: ExoPlayer = ExoPlayer.Builder(application).build().apply {
         addListener(object : Player.Listener {
@@ -63,6 +73,10 @@ class LiveTvViewModel @Inject constructor(
                     "${videoSize.width}x${videoSize.height}"
                 } else ""
                 _uiState.value = _uiState.value.copy(videoResolution = resolution)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                handlePlaybackError()
             }
         })
     }
@@ -140,11 +154,63 @@ class LiveTvViewModel @Inject constructor(
     }
 
     private fun playChannel(channel: Channel) {
+        failoverAttempts = 0
         player.stop()
         player.setMediaItem(MediaItem.fromUri(channel.streamUrl))
         player.prepare()
         player.play()
-        _uiState.value = _uiState.value.copy(videoResolution = "")
+        _uiState.value = _uiState.value.copy(
+            videoResolution = "",
+            isFailingOver = false,
+            failoverMessage = ""
+        )
+    }
+
+    private fun handlePlaybackError() {
+        val currentChannel = _uiState.value.selectedChannel ?: return
+        if (failoverAttempts >= maxFailoverAttempts) {
+            _uiState.value = _uiState.value.copy(
+                isFailingOver = false,
+                failoverMessage = "No working backup found"
+            )
+            return
+        }
+
+        failoverAttempts++
+        _uiState.value = _uiState.value.copy(
+            isFailingOver = true,
+            failoverMessage = "Switching to backup... (attempt $failoverAttempts/$maxFailoverAttempts)"
+        )
+
+        viewModelScope.launch {
+            try {
+                val backupChannel = backupChannelRepository.findBackupStream(currentChannel.name)
+                if (backupChannel != null && backupChannel.streamUrl != currentChannel.streamUrl) {
+                    // Swap to backup stream without resetting failoverAttempts
+                    player.stop()
+                    player.setMediaItem(MediaItem.fromUri(backupChannel.streamUrl))
+                    player.prepare()
+                    player.play()
+                    _uiState.value = _uiState.value.copy(
+                        isFailingOver = false,
+                        failoverMessage = "Playing from backup source"
+                    )
+                    // Clear the message after 3 seconds
+                    kotlinx.coroutines.delay(3000)
+                    _uiState.value = _uiState.value.copy(failoverMessage = "")
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isFailingOver = false,
+                        failoverMessage = "No backup available for this channel"
+                    )
+                }
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isFailingOver = false,
+                    failoverMessage = "Backup search failed"
+                )
+            }
+        }
     }
 
     private fun loadEpgForChannel(channel: Channel) {

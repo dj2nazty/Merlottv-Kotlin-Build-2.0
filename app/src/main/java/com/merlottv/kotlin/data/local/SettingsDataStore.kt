@@ -26,6 +26,12 @@ data class EpgSourceEntry(
     val enabled: Boolean = true
 )
 
+data class BackupSourceEntry(
+    val name: String,
+    val url: String,
+    val enabled: Boolean = true
+)
+
 class SettingsDataStore(private val context: Context) {
 
     companion object {
@@ -33,6 +39,7 @@ class SettingsDataStore(private val context: Context) {
         val PLAYLISTS = stringPreferencesKey("playlists_json")
         val EPG_URLS = stringPreferencesKey("epg_urls")
         val CUSTOM_EPG_SOURCES = stringPreferencesKey("custom_epg_sources")
+        val BACKUP_SOURCES = stringPreferencesKey("backup_sources_json")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
 
@@ -112,6 +119,40 @@ class SettingsDataStore(private val context: Context) {
                     name = obj.optString("name", "EPG ${i + 1}"),
                     url = obj.optString("url", ""),
                     isDefault = false,
+                    enabled = obj.optBoolean("enabled", true)
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // ─── Backup Stream Sources ───
+    val backupSources: Flow<List<BackupSourceEntry>> = context.settingsDataStore.data.map { prefs ->
+        val json = prefs[BACKUP_SOURCES]
+        if (json != null) parseBackupSourcesJson(json) else emptyList()
+    }
+
+    suspend fun setBackupSources(entries: List<BackupSourceEntry>) {
+        val jsonArray = JSONArray()
+        entries.forEach { entry ->
+            val obj = JSONObject()
+            obj.put("name", entry.name)
+            obj.put("url", entry.url)
+            obj.put("enabled", entry.enabled)
+            jsonArray.put(obj)
+        }
+        context.settingsDataStore.edit { it[BACKUP_SOURCES] = jsonArray.toString() }
+    }
+
+    private fun parseBackupSourcesJson(json: String): List<BackupSourceEntry> {
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                BackupSourceEntry(
+                    name = obj.optString("name", "Backup ${i + 1}"),
+                    url = obj.optString("url", ""),
                     enabled = obj.optBoolean("enabled", true)
                 )
             }

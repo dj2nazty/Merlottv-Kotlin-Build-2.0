@@ -34,8 +34,10 @@ class EpgRepositoryImpl @Inject constructor(
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private val boundedIo = Dispatchers.IO.limitedParallelism(3)
+
     override suspend fun loadEpg(urls: List<String>) {
-        withContext(Dispatchers.IO) {
+        withContext(boundedIo) {
             val allChannels = mutableListOf<EpgChannel>()
             val allPrograms = mutableListOf<EpgEntry>()
 
@@ -80,7 +82,9 @@ class EpgRepositoryImpl @Inject constructor(
             val uniqueChannels = allChannels.distinctBy { it.id }
 
             _channels.value = uniqueChannels
-            _programs.value = allPrograms.sortedBy { it.startTime }
+            _programs.value = allPrograms
+                .distinctBy { Triple(it.channelId.lowercase(), it.startTime, it.title) }
+                .sortedBy { it.startTime }
         }
     }
 

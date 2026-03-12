@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.BuildConfig
+import com.merlottv.kotlin.data.local.BackupSourceEntry
 import com.merlottv.kotlin.data.local.EpgSourceEntry
 import com.merlottv.kotlin.data.local.PlaylistEntry
 import com.merlottv.kotlin.data.local.ProfileDataStore
@@ -48,6 +49,8 @@ data class SettingsUiState(
     val latestVersion: String = "",
     val updateUrl: String = "",
     val isCheckingUpdate: Boolean = false,
+    // Backup stream sources
+    val backupSources: List<BackupSourceEntry> = emptyList(),
     // Profiles
     val profiles: List<UserProfile> = emptyList(),
     val activeProfileId: String = "default"
@@ -76,6 +79,7 @@ class SettingsViewModel @Inject constructor(
             val addons = addonRepository.getAllAddons().first()
             val playlists = settingsDataStore.playlists.first()
             val customEpg = settingsDataStore.customEpgSources.first()
+            val backupSources = settingsDataStore.backupSources.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -85,7 +89,8 @@ class SettingsViewModel @Inject constructor(
                 addons = addons,
                 playlists = playlists,
                 customEpgSources = customEpg,
-                defaultEpgSources = defaultEpg
+                defaultEpgSources = defaultEpg,
+                backupSources = backupSources
             )
         }
     }
@@ -273,6 +278,66 @@ class SettingsViewModel @Inject constructor(
             }
         } catch (_: Exception) {}
         return false
+    }
+
+    // ─── Backup Stream Sources ───
+    fun addBackupSource(name: String, url: String) {
+        if (url.isBlank()) return
+        viewModelScope.launch {
+            val current = _uiState.value.backupSources.toMutableList()
+            current.add(BackupSourceEntry(name.ifBlank { "Backup ${current.size + 1}" }, url))
+            settingsDataStore.setBackupSources(current)
+            _uiState.value = _uiState.value.copy(backupSources = current)
+        }
+    }
+
+    fun removeBackupSource(index: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value.backupSources.toMutableList()
+            if (index in current.indices) {
+                current.removeAt(index)
+                settingsDataStore.setBackupSources(current)
+                _uiState.value = _uiState.value.copy(backupSources = current)
+            }
+        }
+    }
+
+    fun toggleBackupSource(index: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value.backupSources.toMutableList()
+            if (index in current.indices) {
+                current[index] = current[index].copy(enabled = !current[index].enabled)
+                settingsDataStore.setBackupSources(current)
+                _uiState.value = _uiState.value.copy(backupSources = current)
+            }
+        }
+    }
+
+    fun importBackupFile(content: String) {
+        viewModelScope.launch {
+            val lines = content.lines()
+                .map { it.trim() }
+                .filter { it.isNotBlank() && (it.startsWith("http://") || it.startsWith("https://")) }
+
+            if (lines.isEmpty()) return@launch
+
+            val current = _uiState.value.backupSources.toMutableList()
+            lines.forEach { url ->
+                // Extract a display name from the username parameter if possible
+                val name = try {
+                    val usernameParam = Regex("[?&]username=([^&]+)").find(url)?.groupValues?.get(1)
+                    val hostParam = Regex("://([^/]+)").find(url)?.groupValues?.get(1)
+                    usernameParam ?: hostParam ?: "Backup"
+                } catch (_: Exception) { "Backup" }
+
+                // Avoid duplicate URLs
+                if (current.none { it.url == url }) {
+                    current.add(BackupSourceEntry(name, url))
+                }
+            }
+            settingsDataStore.setBackupSources(current)
+            _uiState.value = _uiState.value.copy(backupSources = current)
+        }
     }
 
     // ─── Profiles ───

@@ -172,6 +172,39 @@ private fun FullscreenPlayer(
             ChannelInfoOverlay(uiState = uiState)
         }
 
+        // Failover indicator (top-center)
+        AnimatedVisibility(
+            visible = uiState.isFailingOver || uiState.failoverMessage.isNotEmpty(),
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MerlotColors.Black.copy(alpha = 0.85f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (uiState.isFailingOver) {
+                    CircularProgressIndicator(
+                        color = MerlotColors.Accent,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+                Text(
+                    text = uiState.failoverMessage,
+                    color = MerlotColors.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
         // Channel switch indicator (top-right, brief)
         AnimatedVisibility(
             visible = uiState.showOverlay,

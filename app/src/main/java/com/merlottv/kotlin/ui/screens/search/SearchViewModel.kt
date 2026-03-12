@@ -5,13 +5,17 @@ import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
 
 data class SearchUiState(
@@ -28,6 +32,7 @@ class SearchViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
     private var searchJob: Job? = null
+    private val searchDispatcher = Dispatchers.IO.limitedParallelism(4)
 
     fun onQueryChanged(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
@@ -41,14 +46,18 @@ class SearchViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val addons = addonRepository.getAllAddons().first()
-                val allResults = mutableListOf<MetaPreview>()
-                for (addon in addons) {
-                    for (type in listOf("movie", "series")) {
-                        try {
-                            val results = addonRepository.searchCatalog(addon, type, query)
-                            allResults.addAll(results)
-                        } catch (_: Exception) {}
-                    }
+                val allResults = supervisorScope {
+                    addons.flatMap { addon ->
+                        listOf("movie", "series").map { type ->
+                            async(searchDispatcher) {
+                                try {
+                                    addonRepository.searchCatalog(addon, type, query)
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }
+                    }.awaitAll().flatten()
                 }
                 val unique = allResults.distinctBy { it.id }
                 _uiState.value = _uiState.value.copy(results = unique, isLoading = false)

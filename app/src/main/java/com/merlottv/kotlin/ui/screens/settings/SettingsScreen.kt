@@ -2,6 +2,8 @@ package com.merlottv.kotlin.ui.screens.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -487,6 +489,105 @@ fun SettingsScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
                         shape = RoundedCornerShape(8.dp),
                         enabled = epgUrl.isNotBlank()
+                    ) {
+                        Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // ═══ Backup Stream Sources Section ═══
+        item(key = "backup_sources") {
+            val filePickerLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                uri?.let {
+                    val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
+                    viewModel.importBackupFile(content)
+                }
+            }
+
+            SettingsSection(title = "Backup Stream Sources", icon = { Icon(Icons.Default.Refresh, null, tint = MerlotColors.Accent) }) {
+                Text(
+                    "Load backup M3U playlists. When a live stream fails, the app automatically searches these for a working alternative.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                uiState.backupSources.forEachIndexed { index, source ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .dpadFocusable()
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
+                        }
+                        Switch(
+                            checked = source.enabled,
+                            onCheckedChange = { viewModel.toggleBackupSource(index) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MerlotColors.Accent,
+                                checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier.height(24.dp)
+                        )
+                        IconButton(onClick = { viewModel.removeBackupSource(index) }) {
+                            Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Import from file button
+                Button(
+                    onClick = { filePickerLauncher.launch(arrayOf("text/*")) },
+                    colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Import from File", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Manual add
+                var backupName by remember { mutableStateOf("") }
+                var backupUrl by remember { mutableStateOf("") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        DpadTextField(
+                            value = backupName,
+                            onValueChange = { backupName = it },
+                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        DpadTextField(
+                            value = backupUrl,
+                            onValueChange = { backupUrl = it },
+                            placeholder = { Text("https://backup-server.com/get.php?username=...", color = MerlotColors.TextMuted, fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.addBackupSource(backupName, backupUrl)
+                            backupName = ""
+                            backupUrl = ""
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = backupUrl.isNotBlank()
                     ) {
                         Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
