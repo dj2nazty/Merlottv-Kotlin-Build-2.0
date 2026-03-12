@@ -31,8 +31,14 @@ class ChannelRepositoryImpl @Inject constructor(
                 val request = Request.Builder().url(playlistUrl).build()
                 val response = okHttpClient.newCall(request).execute()
                 val channels = response.use { resp ->
-                    val body = resp.body?.string() ?: ""
-                    m3uParser.parse(body)
+                    val body = resp.body
+                    if (body != null) {
+                        // Stream-parse directly from InputStream — avoids loading
+                        // entire 10-50MB M3U file into memory as a String
+                        m3uParser.parseStream(body.byteStream())
+                    } else {
+                        emptyList()
+                    }
                 }
                 _channels.value = channels
                 channels
@@ -54,8 +60,12 @@ class ChannelRepositoryImpl @Inject constructor(
                             val request = Request.Builder().url(url).build()
                             val response = okHttpClient.newCall(request).execute()
                             response.use { resp ->
-                                val body = resp.body?.string() ?: ""
-                                m3uParser.parse(body)
+                                val body = resp.body
+                                if (body != null) {
+                                    m3uParser.parseStream(body.byteStream())
+                                } else {
+                                    emptyList()
+                                }
                             }
                         } catch (_: Exception) {
                             emptyList()

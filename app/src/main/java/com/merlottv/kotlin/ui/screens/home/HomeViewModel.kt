@@ -40,6 +40,10 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    // Limit concurrent catalog HTTP requests to avoid flooding the network
+    // Previously 30+ requests fired simultaneously, causing GC pressure + main thread stalls
+    private val catalogDispatcher = Dispatchers.IO.limitedParallelism(6)
+
     init {
         loadCatalogs()
         loadContinueWatching()
@@ -90,9 +94,11 @@ class HomeViewModel @Inject constructor(
                     }
                 }
 
+                // Use bounded dispatcher — max 6 concurrent catalog requests
+                // instead of 30+ simultaneous requests that flooded the network
                 val rows = supervisorScope {
                     jobs.map { job ->
-                        async(Dispatchers.IO) {
+                        async(catalogDispatcher) {
                             try {
                                 val addon = manifests.find { it.url == job.addonUrl } ?: return@async null
                                 val items = addonRepository.getCatalog(addon, job.type, job.catalogId)

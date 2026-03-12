@@ -1,6 +1,9 @@
 package com.merlottv.kotlin.data.parser
 
 import com.merlottv.kotlin.domain.model.Channel
+import java.io.BufferedReader
+import java.io.InputStream
+import java.io.InputStreamReader
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -8,16 +11,75 @@ import javax.inject.Singleton
 class M3uParser @Inject constructor() {
 
     // Pre-compiled regex — created ONCE at singleton init, reused for every parse
-    // Previously these were compiled per-attribute per-channel (4 × thousands = catastrophic)
     private val groupTitleRegex = Regex("""group-title="([^"]*?)"""")
     private val tvgLogoRegex = Regex("""tvg-logo="([^"]*?)"""")
     private val tvgIdRegex = Regex("""tvg-id="([^"]*?)"""")
     private val tvgNameRegex = Regex("""tvg-name="([^"]*?)"""")
 
+    /**
+     * Stream-based parsing — reads line-by-line from InputStream.
+     * Avoids loading entire 10-50MB M3U file into memory as a String.
+     * This is the PRIMARY method — use this instead of parse(String).
+     */
+    fun parseStream(inputStream: InputStream): List<Channel> {
+        val channels = ArrayList<Channel>(2000)
+        var channelNumber = 0
+        var pendingExtInf: String? = null
+
+        BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8), 64 * 1024).use { reader ->
+            var line = reader.readLine()
+            while (line != null) {
+                val trimmed = line.trimStart()
+
+                if (trimmed.startsWith("#EXTINF:")) {
+                    // Store the EXTINF line, wait for the URL on the next non-comment line
+                    pendingExtInf = line.trim()
+                } else if (pendingExtInf != null && trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                    // This is the URL line following an EXTINF
+                    channelNumber++
+                    val extInf = pendingExtInf!!
+                    val url = trimmed
+
+                    val name = extractAfterComma(extInf)
+                    val group = groupTitleRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
+                    val logo = tvgLogoRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
+                    val epgId = tvgIdRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
+                    val tvgName = tvgNameRegex.find(extInf)?.groupValues?.getOrNull(1) ?: ""
+
+                    channels.add(
+                        Channel(
+                            id = epgId.ifEmpty { "${group}_${name}".hashCode().toString() },
+                            name = name,
+                            group = group,
+                            logoUrl = logo,
+                            streamUrl = url,
+                            epgId = epgId.ifEmpty { tvgName },
+                            number = channelNumber
+                        )
+                    )
+                    pendingExtInf = null
+                } else if (trimmed.startsWith("#") || trimmed.isEmpty()) {
+                    // Comment or blank line — skip but don't clear pendingExtInf
+                    // (there may be #EXTVLCOPT or similar between EXTINF and URL)
+                } else {
+                    // Non-URL, non-comment line with no pending EXTINF — skip
+                    pendingExtInf = null
+                }
+
+                line = reader.readLine()
+            }
+        }
+        return channels
+    }
+
+    /**
+     * Legacy String-based parsing — kept for backward compatibility.
+     * Prefer parseStream() for large files to avoid OOM.
+     */
     fun parse(content: String): List<Channel> {
         if (content.isBlank()) return emptyList()
 
-        val channels = ArrayList<Channel>(2000) // Pre-size for typical IPTV lists
+        val channels = ArrayList<Channel>(2000)
         val lines = content.lines()
         val lineCount = lines.size
         var i = 0

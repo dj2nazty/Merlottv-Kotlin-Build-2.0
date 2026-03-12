@@ -116,8 +116,13 @@ class LiveTvViewModel @Inject constructor(
                     }
                 }
 
+                // Extract groups efficiently — use LinkedHashSet to preserve insertion order
+                // and avoid creating intermediate List from map().distinct()
+                val groupSet = LinkedHashSet<String>(channels.size / 10)
+                for (ch in channels) { groupSet.add(ch.group) }
+
                 // Sort groups: USA-related first, then alphabetically
-                val groups = channels.map { it.group }.distinct().sortedWith(
+                val groups = groupSet.sortedWith(
                     compareByDescending<String> { group ->
                         val lower = group.lowercase()
                         lower.contains("usa") || lower.contains("us ") ||
@@ -148,17 +153,25 @@ class LiveTvViewModel @Inject constructor(
         try {
             val lastId = settingsDataStore.lastWatchedChannelId.first()
             if (lastId.isNotEmpty()) {
-                val channel = channels.find { it.id == lastId }
-                if (channel != null) {
-                    val index = channels.indexOf(channel)
+                // Find channel and its index in a single pass instead of find() + indexOf()
+                var foundIndex = -1
+                var foundChannel: Channel? = null
+                for (i in channels.indices) {
+                    if (channels[i].id == lastId) {
+                        foundIndex = i
+                        foundChannel = channels[i]
+                        break
+                    }
+                }
+                if (foundChannel != null) {
                     _uiState.value = _uiState.value.copy(
-                        selectedChannel = channel,
+                        selectedChannel = foundChannel,
                         isFullscreen = true,
                         showOverlay = false,
-                        currentChannelIndex = index
+                        currentChannelIndex = foundIndex
                     )
-                    safePlayChannel(channel)
-                    loadEpgForChannel(channel)
+                    safePlayChannel(foundChannel)
+                    loadEpgForChannel(foundChannel)
                 }
             }
         } catch (e: Exception) {

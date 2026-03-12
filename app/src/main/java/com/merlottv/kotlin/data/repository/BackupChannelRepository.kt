@@ -29,6 +29,11 @@ class BackupChannelRepository @Inject constructor(
     private val cacheDuration = 30 * 60 * 1000L // 30 minutes
     private val boundedIo = Dispatchers.IO.limitedParallelism(3)
 
+    // Pre-compiled regex for normalizeName — avoids recompilation per call
+    private val qualityTagRegex = Regex("\\b(HD|FHD|UHD|4K|SD|LQ|H\\.?265|H\\.?264|HEVC)\\b", RegexOption.IGNORE_CASE)
+    private val countryPrefixRegex = Regex("^(US|UK|CA|AU|IN|FR|DE|ES|IT|BR|MX|NL|SE|NO|DK|FI|PL|RO|HU|CZ|GR|TR|ZA|NZ|IE|PT|BE|AT|CH):\\s*", RegexOption.IGNORE_CASE)
+    private val separatorRegex = Regex("[\\s|:_\\-]+")
+
     /**
      * Find a backup stream for a channel by name.
      * Returns null if no match found.
@@ -69,8 +74,12 @@ class BackupChannelRepository @Inject constructor(
                             val request = Request.Builder().url(url).build()
                             val response = okHttpClient.newCall(request).execute()
                             response.use { resp ->
-                                val body = resp.body?.string() ?: ""
-                                m3uParser.parse(body)
+                                val body = resp.body
+                                if (body != null) {
+                                    m3uParser.parseStream(body.byteStream())
+                                } else {
+                                    emptyList()
+                                }
                             }
                         } catch (_: Exception) {
                             emptyList()
@@ -108,9 +117,9 @@ class BackupChannelRepository @Inject constructor(
      */
     private fun normalizeName(name: String): String {
         return name
-            .replace(Regex("\\b(HD|FHD|UHD|4K|SD|LQ|H\\.?265|H\\.?264|HEVC)\\b", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("^(US|UK|CA|AU|IN|FR|DE|ES|IT|BR|MX|NL|SE|NO|DK|FI|PL|RO|HU|CZ|GR|TR|ZA|NZ|IE|PT|BE|AT|CH):\\s*", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("[\\s|:_\\-]+"), " ")
+            .replace(qualityTagRegex, "")
+            .replace(countryPrefixRegex, "")
+            .replace(separatorRegex, " ")
             .trim()
             .lowercase()
     }
