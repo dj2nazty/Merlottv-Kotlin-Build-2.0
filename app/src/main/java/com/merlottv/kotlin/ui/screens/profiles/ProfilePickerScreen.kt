@@ -1,10 +1,8 @@
 package com.merlottv.kotlin.ui.screens.profiles
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -24,15 +21,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -95,16 +95,15 @@ fun ProfilePickerScreen(
 
 @Composable
 private fun ProfileCard(profile: UserProfile, onClick: () -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
+    var isFocused by remember { mutableStateOf(false) }
     val avatarColor = ProfileDataStore.AVATAR_COLORS.getOrElse(profile.colorIndex) { 0xFF00E5FF.toInt() }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .focusable(interactionSource = interactionSource)
-            .onKeyEvent { event ->
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                     onClick(); true
                 } else false
@@ -117,6 +116,10 @@ private fun ProfileCard(profile: UserProfile, onClick: () -> Unit) {
                 .background(
                     if (isFocused) Color(avatarColor)
                     else Color(avatarColor).copy(alpha = 0.7f)
+                )
+                .then(
+                    if (isFocused) Modifier.border(3.dp, MerlotColors.Accent, RoundedCornerShape(16.dp))
+                    else Modifier
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -139,15 +142,14 @@ private fun ProfileCard(profile: UserProfile, onClick: () -> Unit) {
 
 @Composable
 private fun AddProfileCard(onClick: () -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
+    var isFocused by remember { mutableStateOf(false) }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .focusable(interactionSource = interactionSource)
-            .onKeyEvent { event ->
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                     onClick(); true
                 } else false
@@ -157,7 +159,11 @@ private fun AddProfileCard(onClick: () -> Unit) {
             modifier = Modifier
                 .size(if (isFocused) 110.dp else 100.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(MerlotColors.Surface2),
+                .background(MerlotColors.Surface2)
+                .then(
+                    if (isFocused) Modifier.border(3.dp, MerlotColors.Accent, RoundedCornerShape(16.dp))
+                    else Modifier
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(

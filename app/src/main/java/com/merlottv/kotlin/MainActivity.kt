@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +14,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.merlottv.kotlin.ui.components.SidebarNavigation
@@ -40,6 +48,8 @@ fun MerlotApp() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     var isLiveTvFullscreen by remember { mutableStateOf(false) }
+    var sidebarVisible by remember { mutableStateOf(true) }
+    val sidebarFocusRequester = remember { FocusRequester() }
 
     // Hide sidebar on player screen or when live TV is fullscreen
     val showSidebar = currentRoute != Screen.Player.route && !isLiveTvFullscreen
@@ -49,11 +59,29 @@ fun MerlotApp() {
             .fillMaxSize()
             .background(MerlotColors.Background)
     ) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (showSidebar) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .onPreviewKeyEvent { event ->
+                    // D-pad Left at the content edge → show sidebar and give it focus
+                    if (event.type == KeyEventType.KeyDown &&
+                        event.key == Key.DirectionLeft &&
+                        showSidebar && !sidebarVisible
+                    ) {
+                        sidebarVisible = true
+                        try { sidebarFocusRequester.requestFocus() } catch (_: Exception) {}
+                        true
+                    } else {
+                        false
+                    }
+                }
+        ) {
+            if (showSidebar && sidebarVisible) {
                 SidebarNavigation(
                     currentRoute = currentRoute,
+                    focusRequester = sidebarFocusRequester,
                     onNavigate = { screen ->
+                        sidebarVisible = false
                         navController.navigate(screen.route) {
                             popUpTo(Screen.Home.route) { saveState = true }
                             launchSingleTop = true

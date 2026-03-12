@@ -5,11 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,12 +28,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,7 +48,8 @@ import com.merlottv.kotlin.ui.theme.MerlotColors
 fun SidebarNavigation(
     currentRoute: String?,
     onNavigate: (Screen) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester = remember { FocusRequester() }
 ) {
     var isExpanded by remember { mutableStateOf(false) }
 
@@ -102,13 +101,13 @@ fun SidebarNavigation(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Navigation items
-        Screen.sidebarItems.forEach { screen ->
+        Screen.sidebarItems.forEachIndexed { index, screen ->
             SidebarItem(
                 screen = screen,
                 isSelected = currentRoute == screen.route,
                 isExpanded = isExpanded,
                 onClick = { onNavigate(screen) },
-                onFocused = { isExpanded = true }
+                modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
             )
         }
     }
@@ -120,17 +119,16 @@ private fun SidebarItem(
     isSelected: Boolean,
     isExpanded: Boolean,
     onClick: () -> Unit,
-    onFocused: () -> Unit
+    modifier: Modifier = Modifier
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val isHovered by interactionSource.collectIsHoveredAsState()
+    // Single focus state source — no MutableInteractionSource split
+    var isFocused by remember { mutableStateOf(false) }
 
     val backgroundColor by animateColorAsState(
         targetValue = when {
             isSelected && isFocused -> MerlotColors.AccentAlpha20
+            isFocused -> MerlotColors.Hover
             isSelected -> MerlotColors.AccentAlpha10
-            isFocused || isHovered -> MerlotColors.Hover
             else -> Color.Transparent
         },
         animationSpec = tween(150),
@@ -139,8 +137,7 @@ private fun SidebarItem(
 
     val iconColor by animateColorAsState(
         targetValue = when {
-            isSelected -> MerlotColors.Accent
-            isFocused || isHovered -> MerlotColors.TextPrimary
+            isSelected || isFocused -> MerlotColors.Accent
             else -> MerlotColors.TextMuted
         },
         animationSpec = tween(150),
@@ -150,7 +147,6 @@ private fun SidebarItem(
     val borderColor by animateColorAsState(
         targetValue = when {
             isFocused -> MerlotColors.Accent
-            isSelected -> MerlotColors.AccentAlpha20
             else -> Color.Transparent
         },
         animationSpec = tween(150),
@@ -158,20 +154,19 @@ private fun SidebarItem(
     )
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(backgroundColor)
             .border(
-                width = if (isFocused) 2.dp else if (isSelected) 1.dp else 0.dp,
+                width = if (isFocused) 2.dp else 0.dp,
                 color = borderColor,
                 shape = RoundedCornerShape(8.dp)
             )
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .focusable(interactionSource = interactionSource)
-            .onFocusChanged { if (it.isFocused) onFocused() }
-            .onKeyEvent { event ->
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
                         Key.DirectionCenter, Key.Enter -> {
