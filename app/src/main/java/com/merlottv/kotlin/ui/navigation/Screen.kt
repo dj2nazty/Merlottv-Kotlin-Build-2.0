@@ -1,0 +1,35 @@
+package com.merlottv.kotlin.ui.navigation
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.ui.graphics.vector.ImageVector
+
+sealed class Screen(
+    val route: String,
+    val title: String,
+    val icon: ImageVector
+) {
+    data object Home : Screen("home", "Home", Icons.Default.Home)
+    data object Search : Screen("search", "Search", Icons.Default.Search)
+    data object LiveTv : Screen("live_tv", "Live TV", Icons.Default.LiveTv)
+    data object TvGuide : Screen("tv_guide", "TV Guide", Icons.Default.Tv)
+    data object Vod : Screen("vod", "VOD", Icons.Default.Movie)
+    data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
+    data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+
+    // Detail routes
+    data object VodDetail : Screen("vod_detail/{type}/{id}", "Detail", Icons.Default.Movie) {
+        fun createRoute(type: String, id: String) = "vod_detail/$type/$id"
+    }
+    data object Player : Screen("player", "Player", Icons.Default.LiveTv)
+
+    companion object {
+        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Settings)
+    }
+}
