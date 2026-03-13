@@ -72,8 +72,12 @@ import androidx.media3.ui.PlayerView
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import com.merlottv.kotlin.data.repository.SubtitleRepository
+import com.merlottv.kotlin.domain.model.DefaultData
+import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Subtitle
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -107,6 +111,11 @@ fun PlayerScreen(
     var subtitleSize by remember { mutableStateOf(1.0f) }
     var subtitleFont by remember { mutableStateOf("default") }
     var activeSubtitle by remember { mutableStateOf<Subtitle?>(null) }
+
+    // Stream selection state
+    var availableStreams by remember { mutableStateOf<List<Stream>>(emptyList()) }
+    var currentStreamUrl by remember { mutableStateOf(streamUrl) }
+    var isLoadingStreams by remember { mutableStateOf(false) }
 
     val watchProgressStore = remember {
         try { WatchProgressDataStore(context.applicationContext) } catch (_: Exception) { null }
@@ -174,8 +183,9 @@ fun PlayerScreen(
             if (savedPos > 0) player.seekTo(savedPos)
         }
 
-        // Fetch subtitles in background
+        // Fetch subtitles and available streams in background
         if (contentId.isNotEmpty()) {
+            // Fetch subtitles
             val fetchedSubs = withContext(Dispatchers.IO) {
                 subtitleRepo.getSubtitles(contentType, contentId)
             }
@@ -186,9 +196,17 @@ fun PlayerScreen(
                 val preferred = fetchedSubs.firstOrNull { it.lang == selectedSubtitleLang }
                     ?: fetchedSubs.firstOrNull { it.lang.startsWith("eng") }
                     ?: fetchedSubs.first()
-                applySubtitle(player, preferred, streamUrl)
+                applySubtitle(player, preferred, currentStreamUrl)
                 activeSubtitle = preferred
             }
+
+            // Fetch available streams for stream switching
+            isLoadingStreams = true
+            val fetchedStreams = withContext(Dispatchers.IO) {
+                fetchStreamsForContent(contentType, contentId)
+            }
+            availableStreams = fetchedStreams
+            isLoadingStreams = false
         }
     }
 
@@ -415,7 +433,7 @@ fun PlayerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterEnd)
         ) {
-            SubtitleMenuPanel(
+            PlayerOptionsPanel(
                 subtitles = subtitles,
                 enabled = subtitlesEnabled,
                 selectedLang = selectedSubtitleLang,
@@ -423,11 +441,13 @@ fun PlayerScreen(
                 currentFont = subtitleFont,
                 activeSubtitle = activeSubtitle,
                 isLoading = subtitles.isEmpty() && contentId.isNotEmpty(),
+                availableStreams = availableStreams,
+                currentStreamUrl = currentStreamUrl,
+                isLoadingStreams = isLoadingStreams,
                 onToggle = { enabled ->
                     subtitlesEnabled = enabled
                     scope.launch { settingsStore?.setSubtitlesEnabled(enabled) }
                     if (!enabled) {
-                        // Disable subtitles
                         player.trackSelectionParameters = player.trackSelectionParameters
                             .buildUpon()
                             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -436,7 +456,7 @@ fun PlayerScreen(
                     } else if (subtitles.isNotEmpty()) {
                         val preferred = subtitles.firstOrNull { it.lang == selectedSubtitleLang }
                             ?: subtitles.first()
-                        applySubtitle(player, preferred, streamUrl)
+                        applySubtitle(player, preferred, currentStreamUrl)
                         activeSubtitle = preferred
                     }
                 },
@@ -445,7 +465,7 @@ fun PlayerScreen(
                     scope.launch { settingsStore?.setSubtitleLanguage(lang) }
                     val sub = subtitles.firstOrNull { it.lang == lang }
                     if (sub != null && subtitlesEnabled) {
-                        applySubtitle(player, sub, streamUrl)
+                        applySubtitle(player, sub, currentStreamUrl)
                         activeSubtitle = sub
                     }
                 },
@@ -456,6 +476,24 @@ fun PlayerScreen(
                 onFontChange = { font ->
                     subtitleFont = font
                     scope.launch { settingsStore?.setSubtitleFont(font) }
+                },
+                onSelectStream = { stream ->
+                    val newUrl = stream.url.ifEmpty { stream.externalUrl }
+                    if (newUrl.isNotEmpty() && newUrl != currentStreamUrl) {
+                        currentStreamUrl = newUrl
+                        val savedPos = player.currentPosition
+                        player.stop()
+                        player.clearMediaItems()
+                        player.setMediaItem(MediaItem.fromUri(Uri.parse(newUrl)))
+                        player.prepare()
+                        player.seekTo(savedPos)
+                        player.playWhenReady = true
+                        // Re-apply subtitle if active
+                        if (subtitlesEnabled && activeSubtitle != null) {
+                            applySubtitle(player, activeSubtitle!!, newUrl)
+                        }
+                    }
+                    showSubtitleMenu = false
                 },
                 onClose = { showSubtitleMenu = false }
             )
@@ -522,7 +560,7 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun SubtitleMenuPanel(
+private fun PlayerOptionsPanel(
     subtitles: List<Subtitle>,
     enabled: Boolean,
     selectedLang: String,
@@ -530,152 +568,156 @@ private fun SubtitleMenuPanel(
     currentFont: String,
     activeSubtitle: Subtitle?,
     isLoading: Boolean = false,
+    availableStreams: List<Stream> = emptyList(),
+    currentStreamUrl: String = "",
+    isLoadingStreams: Boolean = false,
     onToggle: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onSizeChange: (Float) -> Unit,
     onFontChange: (String) -> Unit,
+    onSelectStream: (Stream) -> Unit = {},
     onClose: () -> Unit
 ) {
     // Get unique languages
     val languages = subtitles.map { it.lang }.distinct().sorted()
 
+    // Tab state: 0 = Subtitles, 1 = Streams
+    var selectedTab by remember { mutableStateOf(0) }
+
     Column(
         modifier = Modifier
-            .width(280.dp)
+            .width(320.dp)
             .fillMaxSize()
-            .background(MerlotColors.Black.copy(alpha = 0.85f))
+            .background(MerlotColors.Black.copy(alpha = 0.90f))
             .padding(16.dp)
     ) {
+        // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Subtitles", color = MerlotColors.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Player Options", color = MerlotColors.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("D-pad \u2193 to close", color = MerlotColors.TextMuted, fontSize = 10.sp)
         }
-        Spacer(modifier = Modifier.height(4.dp))
-
-        if (isLoading) {
-            Text("Loading subtitles...", color = MerlotColors.TextMuted, fontSize = 12.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-        } else if (subtitles.isEmpty()) {
-            Text("No subtitles available for this content", color = MerlotColors.TextMuted, fontSize = 12.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
         Spacer(modifier = Modifier.height(8.dp))
 
-        // On/Off toggle
-        var toggleFocused by remember { mutableStateOf(false) }
+        // Tab selector: Subtitles | Streams
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (toggleFocused) FocusedGrey.copy(alpha = 0.3f) else Color.Transparent)
-                .then(if (toggleFocused) Modifier.border(2.dp, FocusedGrey, RoundedCornerShape(8.dp)) else Modifier)
-                .onFocusChanged { toggleFocused = it.isFocused }
-                .focusable()
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                        onToggle(!enabled); true
-                    } else false
-                }
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("Subtitles", color = MerlotColors.White, fontSize = 14.sp)
-            Text(
-                if (enabled) "ON" else "OFF",
-                color = if (enabled) MerlotColors.Accent else MerlotColors.TextMuted,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
+            // Subtitles tab
+            var subTabFocused by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedTab == 0) MerlotColors.Accent.copy(alpha = 0.25f) else Color.Transparent)
+                    .then(
+                        if (subTabFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                        else if (selectedTab == 0) Modifier.border(1.dp, MerlotColors.Accent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        else Modifier
+                    )
+                    .onFocusChanged { subTabFocused = it.isFocused }
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                            selectedTab = 0; true
+                        } else false
+                    }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Subtitles",
+                    color = if (selectedTab == 0) MerlotColors.Accent else MerlotColors.TextMuted,
+                    fontSize = 13.sp,
+                    fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+
+            // Streams tab
+            var streamTabFocused by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selectedTab == 1) MerlotColors.Accent.copy(alpha = 0.25f) else Color.Transparent)
+                    .then(
+                        if (streamTabFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                        else if (selectedTab == 1) Modifier.border(1.dp, MerlotColors.Accent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        else Modifier
+                    )
+                    .onFocusChanged { streamTabFocused = it.isFocused }
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                            selectedTab = 1; true
+                        } else false
+                    }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val streamCount = if (availableStreams.isNotEmpty()) " (${availableStreams.size})" else ""
+                Text(
+                    "Streams$streamCount",
+                    color = if (selectedTab == 1) MerlotColors.Accent else MerlotColors.TextMuted,
+                    fontSize = 13.sp,
+                    fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
+                )
+            }
         }
 
-        if (enabled) {
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            // Size controls
-            Text("Size", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-            val sizes = listOf(0.75f to "Small", 1.0f to "Normal", 1.25f to "Large", 1.5f to "Extra Large")
-            sizes.forEach { (size, label) ->
-                val isSelected = (currentSize - size).let { kotlin.math.abs(it) } < 0.05f
-                var isFocused by remember { mutableStateOf(false) }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            when {
-                                isFocused -> FocusedGrey.copy(alpha = 0.3f)
-                                isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
-                                else -> Color.Transparent
-                            }
-                        )
-                        .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                                onSizeChange(size); true
-                            } else false
-                        }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(label, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
-                    if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
-                }
+        if (selectedTab == 0) {
+            // ─── SUBTITLES TAB ───
+            if (isLoading) {
+                Text("Loading subtitles...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+            } else if (subtitles.isEmpty()) {
+                Text("No subtitles available", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Font controls
-            Text("Font", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-            val fonts = listOf("default" to "Default", "monospace" to "Monospace", "serif" to "Serif", "sans-serif" to "Sans Serif")
-            fonts.forEach { (fontKey, fontLabel) ->
-                val isSelected = currentFont == fontKey
-                var isFocused by remember { mutableStateOf(false) }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            when {
-                                isFocused -> FocusedGrey.copy(alpha = 0.3f)
-                                isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
-                                else -> Color.Transparent
-                            }
-                        )
-                        .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                                onFontChange(fontKey); true
-                            } else false
-                        }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(fontLabel, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
-                    if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
-                }
+            // On/Off toggle
+            var toggleFocused by remember { mutableStateOf(false) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (toggleFocused) FocusedGrey.copy(alpha = 0.3f) else Color.Transparent)
+                    .then(if (toggleFocused) Modifier.border(2.dp, FocusedGrey, RoundedCornerShape(8.dp)) else Modifier)
+                    .onFocusChanged { toggleFocused = it.isFocused }
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                            onToggle(!enabled); true
+                        } else false
+                    }
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Subtitles", color = MerlotColors.White, fontSize = 14.sp)
+                Text(
+                    if (enabled) "ON" else "OFF",
+                    color = if (enabled) MerlotColors.Accent else MerlotColors.TextMuted,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            if (enabled) {
+                Spacer(modifier = Modifier.height(8.dp))
 
-            // Language selection
-            Text("Language", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-            LazyColumn {
-                items(languages) { lang ->
-                    val isSelected = lang == selectedLang
+                // Size controls
+                Text("Size", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                val sizes = listOf(0.75f to "Small", 1.0f to "Normal", 1.25f to "Large", 1.5f to "Extra Large")
+                sizes.forEach { (size, label) ->
+                    val isSelected = (currentSize - size).let { kotlin.math.abs(it) } < 0.05f
                     var isFocused by remember { mutableStateOf(false) }
-                    val label = SubtitleRepository.getLanguageLabel(lang)
-                    val count = subtitles.count { it.lang == lang }
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -692,18 +734,186 @@ private fun SubtitleMenuPanel(
                             .focusable()
                             .onPreviewKeyEvent { event ->
                                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                                    onSelectLanguage(lang); true
+                                    onSizeChange(size); true
                                 } else false
                             }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            "$label ($count)",
-                            color = if (isSelected) MerlotColors.Accent else MerlotColors.White,
-                            fontSize = 12.sp
-                        )
-                        if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
+                        Text(label, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
+                        if (isSelected) Text("\u2713", color = MerlotColors.Accent, fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Font controls
+                Text("Font", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                val fonts = listOf("default" to "Default", "monospace" to "Monospace", "serif" to "Serif", "sans-serif" to "Sans Serif")
+                fonts.forEach { (fontKey, fontLabel) ->
+                    val isSelected = currentFont == fontKey
+                    var isFocused by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when {
+                                    isFocused -> FocusedGrey.copy(alpha = 0.3f)
+                                    isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
+                            .onFocusChanged { isFocused = it.isFocused }
+                            .focusable()
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                                    onFontChange(fontKey); true
+                                } else false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(fontLabel, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
+                        if (isSelected) Text("\u2713", color = MerlotColors.Accent, fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Language selection
+                Text("Language", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                LazyColumn {
+                    items(languages) { lang ->
+                        val isSelected = lang == selectedLang
+                        var isFocused by remember { mutableStateOf(false) }
+                        val label = SubtitleRepository.getLanguageLabel(lang)
+                        val count = subtitles.count { it.lang == lang }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when {
+                                        isFocused -> FocusedGrey.copy(alpha = 0.3f)
+                                        isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                                        onSelectLanguage(lang); true
+                                    } else false
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "$label ($count)",
+                                color = if (isSelected) MerlotColors.Accent else MerlotColors.White,
+                                fontSize = 12.sp
+                            )
+                            if (isSelected) Text("\u2713", color = MerlotColors.Accent, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        } else {
+            // ─── STREAMS TAB ───
+            if (isLoadingStreams) {
+                Text("Loading streams...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+            } else if (availableStreams.isEmpty()) {
+                Text("No alternative streams found", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+            } else {
+                Text(
+                    "${availableStreams.size} streams available",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                LazyColumn {
+                    items(availableStreams) { stream ->
+                        val streamPlayUrl = stream.url.ifEmpty { stream.externalUrl }
+                        val isCurrentStream = streamPlayUrl == currentStreamUrl
+                        var isFocused by remember { mutableStateOf(false) }
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    when {
+                                        isFocused -> FocusedGrey.copy(alpha = 0.3f)
+                                        isCurrentStream -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .then(
+                                    if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                    else if (isCurrentStream) Modifier.border(1.dp, MerlotColors.Accent.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    else Modifier
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                                        if (!isCurrentStream) onSelectStream(stream)
+                                        true
+                                    } else false
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            // Stream name (quality/source info)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stream.name.ifEmpty { stream.addonName },
+                                    color = if (isCurrentStream) MerlotColors.Accent else MerlotColors.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isCurrentStream) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isCurrentStream) {
+                                    Text(
+                                        "PLAYING",
+                                        color = MerlotColors.Accent,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            // Stream title (often contains quality, size, codec details)
+                            if (stream.title.isNotEmpty()) {
+                                Text(
+                                    text = stream.title.take(120),
+                                    color = MerlotColors.TextMuted,
+                                    fontSize = 10.sp,
+                                    maxLines = 2
+                                )
+                            }
+
+                            // Addon source label
+                            if (stream.addonName.isNotEmpty() && stream.name.isNotEmpty()) {
+                                Text(
+                                    text = stream.addonName,
+                                    color = MerlotColors.Accent.copy(alpha = 0.6f),
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -759,4 +969,68 @@ private fun formatTime(ms: Long): String {
     } else {
         String.format("%d:%02d", minutes, seconds)
     }
+}
+
+/**
+ * Fetch streams from all installed Stremio addons for the given content.
+ * Calls /stream/{type}/{id}.json on each addon that supports streams.
+ */
+@Suppress("UNCHECKED_CAST")
+private fun fetchStreamsForContent(type: String, id: String): List<Stream> {
+    val client = OkHttpClient.Builder()
+        .callTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+    val moshi = com.squareup.moshi.Moshi.Builder().build()
+    val allStreams = mutableListOf<Stream>()
+
+    for (addon in DefaultData.DEFAULT_ADDONS) {
+        // Skip addons that only provide subtitles or catalogs (no streams)
+        if (addon.resources.contains("subtitles") && addon.resources.size == 1) continue
+        if (addon.id == "imdb-catalogs" || addon.id == "netflix-catalog") continue
+
+        try {
+            val baseUrl = addon.url.removeSuffix("/manifest.json")
+            val url = "$baseUrl/stream/$type/$id.json"
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) continue
+
+            val body = response.body?.string() ?: continue
+            val adapter = moshi.adapter(Map::class.java)
+            val map = adapter.fromJson(body) as? Map<String, Any?> ?: continue
+            val streams = map["streams"] as? List<Map<String, Any?>> ?: continue
+
+            for (s in streams) {
+                val streamUrl = s["url"] as? String ?: ""
+                val streamName = s["name"] as? String ?: ""
+                val streamTitle = s["title"] as? String ?: ""
+                val ytId = s["ytId"] as? String ?: ""
+                val infoHash = s["infoHash"] as? String ?: ""
+                val fileIdx = (s["fileIdx"] as? Number)?.toInt()
+                val externalUrl = s["externalUrl"] as? String ?: ""
+
+                // Skip streams with no playable URL
+                if (streamUrl.isEmpty() && externalUrl.isEmpty() && ytId.isEmpty() && infoHash.isEmpty()) continue
+
+                allStreams.add(
+                    Stream(
+                        name = streamName,
+                        title = streamTitle,
+                        url = streamUrl,
+                        ytId = ytId,
+                        infoHash = infoHash,
+                        fileIdx = fileIdx,
+                        externalUrl = externalUrl,
+                        addonName = addon.name,
+                        addonLogo = ""
+                    )
+                )
+            }
+        } catch (_: Exception) {
+            continue
+        }
+    }
+    return allStreams
 }
