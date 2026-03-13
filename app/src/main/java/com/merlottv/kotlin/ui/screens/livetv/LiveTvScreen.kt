@@ -103,9 +103,9 @@ private fun FullscreenPlayer(
 ) {
     val focusRequester = remember { FocusRequester() }
 
-    // Auto-hide overlay after 5 seconds
-    LaunchedEffect(uiState.showOverlay) {
-        if (uiState.showOverlay) {
+    // Auto-hide overlay after 5 seconds (but not if quick menu is open)
+    LaunchedEffect(uiState.showOverlay, uiState.showQuickMenu) {
+        if (uiState.showOverlay && !uiState.showQuickMenu) {
             delay(5000)
             viewModel.hideOverlay()
         }
@@ -141,11 +141,18 @@ private fun FullscreenPlayer(
                             true
                         }
                         Key.DirectionCenter, Key.Enter -> {
-                            viewModel.toggleOverlay()
+                            if (uiState.showQuickMenu) {
+                                // If quick menu is open, close it
+                                viewModel.hideQuickMenu()
+                            } else {
+                                viewModel.showQuickMenu()
+                            }
                             true
                         }
                         Key.Back -> {
-                            if (uiState.showOverlay) {
+                            if (uiState.showQuickMenu) {
+                                viewModel.hideQuickMenu()
+                            } else if (uiState.showOverlay) {
                                 viewModel.hideOverlay()
                             } else {
                                 viewModel.exitFullscreen()
@@ -240,6 +247,161 @@ private fun FullscreenPlayer(
                 }
             }
         }
+
+        // Quick Menu overlay (OK button popup) — centered on screen
+        AnimatedVisibility(
+            visible = uiState.showQuickMenu,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            QuickMenuOverlay(
+                uiState = uiState,
+                onLastWatchedClick = {
+                    viewModel.goToLastWatchedChannel()
+                    viewModel.hideQuickMenu()
+                },
+                onToggleFavorite = {
+                    viewModel.toggleCurrentChannelFavorite()
+                },
+                onChannelInfoClick = {
+                    viewModel.hideQuickMenu()
+                    viewModel.toggleOverlay()
+                },
+                onDismiss = { viewModel.hideQuickMenu() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickMenuOverlay(
+    uiState: LiveTvUiState,
+    onLastWatchedClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onChannelInfoClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val firstItemFocusRequester = remember { FocusRequester() }
+    val currentChannel = uiState.selectedChannel
+    val isFavorite = currentChannel != null && uiState.favoriteIds.contains(currentChannel.id)
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try { firstItemFocusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
+    Column(
+        modifier = Modifier
+            .width(320.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MerlotColors.Black.copy(alpha = 0.92f))
+            .border(1.dp, Color(0xFF888888).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+            .padding(vertical = 12.dp)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                    onDismiss()
+                    true
+                } else false
+            },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Title
+        Text(
+            text = "Quick Menu",
+            color = MerlotColors.Accent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        // Last watched channel option
+        val lastChannel = uiState.lastWatchedChannel
+        QuickMenuItem(
+            icon = Icons.Default.Tv,
+            label = if (lastChannel != null) "Last: ${lastChannel.name}" else "No previous channel",
+            enabled = lastChannel != null,
+            onClick = onLastWatchedClick,
+            focusRequester = firstItemFocusRequester
+        )
+
+        // Add/Remove from favorites
+        QuickMenuItem(
+            icon = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            label = if (isFavorite) "Remove from Favorites" else "Add to Favorites",
+            iconTint = if (isFavorite) MerlotColors.Accent else MerlotColors.TextMuted,
+            enabled = currentChannel != null,
+            onClick = onToggleFavorite
+        )
+
+        // Channel info
+        QuickMenuItem(
+            icon = Icons.Default.Info,
+            label = "Channel Info",
+            enabled = true,
+            onClick = onChannelInfoClick
+        )
+    }
+}
+
+@Composable
+private fun QuickMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    iconTint: Color = MerlotColors.TextMuted,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (isFocused) Color(0xFF666666).copy(alpha = 0.5f)
+                else MerlotColors.Transparent
+            )
+            .then(
+                if (isFocused) Modifier.border(1.dp, Color(0xFF888888), RoundedCornerShape(8.dp))
+                else Modifier
+            )
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable(enabled)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter) && enabled
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (enabled) {
+                if (isFocused) MerlotColors.White else iconTint
+            } else MerlotColors.TextMuted.copy(alpha = 0.4f),
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = label,
+            color = if (enabled) {
+                if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+            } else MerlotColors.TextMuted.copy(alpha = 0.4f),
+            fontSize = 13.sp,
+            fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -445,7 +607,7 @@ private fun ChannelInfoOverlay(uiState: LiveTvUiState) {
                 horizontalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "\u25B2 \u25BC Channel  \u25CF Info  \u25C0 Back",
+                    text = "\u25B2 \u25BC Channel  \u25CF Menu  \u25C0 Back",
                     color = MerlotColors.TextMuted.copy(alpha = 0.6f),
                     fontSize = 9.sp
                 )

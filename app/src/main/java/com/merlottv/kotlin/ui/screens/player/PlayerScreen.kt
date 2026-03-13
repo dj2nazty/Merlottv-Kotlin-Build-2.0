@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,10 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.ClosedCaptionDisabled
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -40,10 +45,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -60,10 +69,18 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.ui.PlayerView
+import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
+import com.merlottv.kotlin.data.repository.SubtitleRepository
+import com.merlottv.kotlin.domain.model.Subtitle
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val FocusedGrey = Color(0xFF666666)
 
 @Composable
 fun PlayerScreen(
@@ -82,24 +99,29 @@ fun PlayerScreen(
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
 
+    // Subtitle state
+    var showSubtitleMenu by remember { mutableStateOf(false) }
+    var subtitles by remember { mutableStateOf<List<Subtitle>>(emptyList()) }
+    var subtitlesEnabled by remember { mutableStateOf(false) }
+    var selectedSubtitleLang by remember { mutableStateOf("eng") }
+    var subtitleSize by remember { mutableStateOf(1.0f) }
+    var activeSubtitle by remember { mutableStateOf<Subtitle?>(null) }
+
     val watchProgressStore = remember {
-        try {
-            WatchProgressDataStore(context.applicationContext)
-        } catch (_: Exception) {
-            null
-        }
+        try { WatchProgressDataStore(context.applicationContext) } catch (_: Exception) { null }
     }
+    val settingsStore = remember {
+        try { SettingsDataStore(context.applicationContext) } catch (_: Exception) { null }
+    }
+    val subtitleRepo = remember { SubtitleRepository(
+        okhttp3.OkHttpClient.Builder().build(),
+        com.squareup.moshi.Moshi.Builder().build()
+    ) }
 
     val player = remember {
-        // Low-latency buffer config for fast playback start
         val loadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
-            .setBufferDurationsMs(
-                /* minBufferMs */ 2_500,
-                /* maxBufferMs */ 15_000,
-                /* bufferForPlaybackMs */ 800,
-                /* bufferForPlaybackAfterRebufferMs */ 1_500
-            )
+            .setBufferDurationsMs(2_500, 15_000, 800, 1_500)
             .setPrioritizeTimeOverSizeThresholds(true)
             .setTargetBufferBytes(C.LENGTH_UNSET)
             .build()
@@ -128,7 +150,6 @@ fun PlayerScreen(
                             totalDuration = duration.coerceAtLeast(0)
                         }
                     }
-
                     override fun onIsPlayingChanged(playing: Boolean) {
                         isPlaying = playing
                     }
@@ -136,23 +157,44 @@ fun PlayerScreen(
             }
     }
 
-    // Resume from saved position
+    // Load subtitle settings + fetch subtitles
     LaunchedEffect(contentId) {
+        // Load settings
+        if (settingsStore != null) {
+            subtitlesEnabled = settingsStore.subtitlesEnabled.first()
+            selectedSubtitleLang = settingsStore.subtitleLanguage.first()
+            subtitleSize = settingsStore.subtitleSize.first()
+        }
+
+        // Resume from saved position
         if (contentId.isNotEmpty() && watchProgressStore != null) {
             val savedPos = watchProgressStore.getPosition(contentId)
-            if (savedPos > 0) {
-                player.seekTo(savedPos)
+            if (savedPos > 0) player.seekTo(savedPos)
+        }
+
+        // Fetch subtitles in background
+        if (contentId.isNotEmpty()) {
+            val fetchedSubs = withContext(Dispatchers.IO) {
+                subtitleRepo.getSubtitles(contentType, contentId)
+            }
+            subtitles = fetchedSubs
+
+            // Auto-apply subtitle if enabled
+            if (subtitlesEnabled && fetchedSubs.isNotEmpty()) {
+                val preferred = fetchedSubs.firstOrNull { it.lang == selectedSubtitleLang }
+                    ?: fetchedSubs.firstOrNull { it.lang.startsWith("eng") }
+                    ?: fetchedSubs.first()
+                applySubtitle(player, preferred, streamUrl)
+                activeSubtitle = preferred
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
-    // Auto-hide controls after 4 seconds
+    // Auto-hide controls
     LaunchedEffect(showControls) {
-        if (showControls) {
+        if (showControls && !showSubtitleMenu) {
             delay(4000)
             showControls = false
         }
@@ -171,7 +213,7 @@ fun PlayerScreen(
         }
     }
 
-    // Save progress and release on dispose
+    // Save progress on dispose
     DisposableEffect(Unit) {
         onDispose {
             val pos = player.currentPosition
@@ -179,14 +221,7 @@ fun PlayerScreen(
             val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
             scope.launch {
                 try {
-                    watchProgressStore?.saveProgress(
-                        id = id,
-                        position = pos,
-                        duration = dur,
-                        title = title,
-                        poster = poster,
-                        type = contentType
-                    )
+                    watchProgressStore?.saveProgress(id, pos, dur, title, poster, contentType)
                 } catch (_: Exception) {}
             }
             player.release()
@@ -203,29 +238,39 @@ fun PlayerScreen(
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
                         Key.DirectionCenter, Key.Enter -> {
-                            if (player.isPlaying) {
-                                player.pause()
+                            if (showSubtitleMenu) {
+                                // Let subtitle menu handle it
+                                false
                             } else {
-                                player.play()
+                                if (player.isPlaying) player.pause() else player.play()
+                                showControls = true
+                                true
                             }
-                            showControls = true
-                            true
                         }
                         Key.Back -> {
-                            onBack()
-                            true
+                            if (showSubtitleMenu) {
+                                showSubtitleMenu = false
+                                true
+                            } else {
+                                onBack()
+                                true
+                            }
                         }
                         Key.DirectionLeft -> {
-                            player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0))
-                            currentPosition = player.currentPosition
-                            showControls = true
+                            if (!showSubtitleMenu) {
+                                player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0))
+                                currentPosition = player.currentPosition
+                                showControls = true
+                            }
                             true
                         }
                         Key.DirectionRight -> {
-                            val maxPos = player.duration.coerceAtLeast(0)
-                            player.seekTo((player.currentPosition + 10_000).coerceAtMost(maxPos))
-                            currentPosition = player.currentPosition
-                            showControls = true
+                            if (!showSubtitleMenu) {
+                                val maxPos = player.duration.coerceAtLeast(0)
+                                player.seekTo((player.currentPosition + 10_000).coerceAtMost(maxPos))
+                                currentPosition = player.currentPosition
+                                showControls = true
+                            }
                             true
                         }
                         Key.DirectionUp, Key.DirectionDown -> {
@@ -244,12 +289,15 @@ fun PlayerScreen(
                     this.player = player
                     useController = false
                     setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+                    subtitleView?.apply {
+                        setUserDefaultTextSize()
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
 
-        // Pause icon overlay (centered)
+        // Pause icon overlay
         AnimatedVisibility(
             visible = !isPlaying,
             enter = fadeIn(),
@@ -263,16 +311,11 @@ fun PlayerScreen(
                     .background(MerlotColors.Black.copy(alpha = 0.6f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Default.PlayArrow,
-                    contentDescription = "Play",
-                    tint = MerlotColors.White,
-                    modifier = Modifier.size(48.dp)
-                )
+                Icon(Icons.Default.PlayArrow, "Play", tint = MerlotColors.White, modifier = Modifier.size(48.dp))
             }
         }
 
-        // Top bar
+        // Top bar with subtitle toggle
         AnimatedVisibility(
             visible = showControls,
             enter = fadeIn(),
@@ -287,23 +330,27 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MerlotColors.White,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MerlotColors.White, modifier = Modifier.size(28.dp))
                 }
                 if (title.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = title,
-                        color = MerlotColors.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(title, color = MerlotColors.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
                 }
-                Spacer(modifier = Modifier.weight(1f))
+
+                // Subtitle toggle button
+                if (subtitles.isNotEmpty()) {
+                    IconButton(onClick = { showSubtitleMenu = !showSubtitleMenu }) {
+                        Icon(
+                            imageVector = if (subtitlesEnabled) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled,
+                            contentDescription = "Subtitles",
+                            tint = if (subtitlesEnabled) MerlotColors.Accent else MerlotColors.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = null,
@@ -314,9 +361,56 @@ fun PlayerScreen(
             }
         }
 
+        // Subtitle menu overlay
+        AnimatedVisibility(
+            visible = showSubtitleMenu,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.CenterEnd)
+        ) {
+            SubtitleMenuPanel(
+                subtitles = subtitles,
+                enabled = subtitlesEnabled,
+                selectedLang = selectedSubtitleLang,
+                currentSize = subtitleSize,
+                activeSubtitle = activeSubtitle,
+                onToggle = { enabled ->
+                    subtitlesEnabled = enabled
+                    scope.launch { settingsStore?.setSubtitlesEnabled(enabled) }
+                    if (!enabled) {
+                        // Disable subtitles
+                        player.trackSelectionParameters = player.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .build()
+                        activeSubtitle = null
+                    } else if (subtitles.isNotEmpty()) {
+                        val preferred = subtitles.firstOrNull { it.lang == selectedSubtitleLang }
+                            ?: subtitles.first()
+                        applySubtitle(player, preferred, streamUrl)
+                        activeSubtitle = preferred
+                    }
+                },
+                onSelectLanguage = { lang ->
+                    selectedSubtitleLang = lang
+                    scope.launch { settingsStore?.setSubtitleLanguage(lang) }
+                    val sub = subtitles.firstOrNull { it.lang == lang }
+                    if (sub != null && subtitlesEnabled) {
+                        applySubtitle(player, sub, streamUrl)
+                        activeSubtitle = sub
+                    }
+                },
+                onSizeChange = { size ->
+                    subtitleSize = size
+                    scope.launch { settingsStore?.setSubtitleSize(size) }
+                },
+                onClose = { showSubtitleMenu = false }
+            )
+        }
+
         // Bottom progress bar
         AnimatedVisibility(
-            visible = showControls && totalDuration > 0,
+            visible = showControls && totalDuration > 0 && !showSubtitleMenu,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -359,7 +453,183 @@ fun PlayerScreen(
                 }
             }
         }
+
+        // Subtitle size indicator at bottom when active
+        if (subtitlesEnabled && activeSubtitle != null && showControls) {
+            Text(
+                text = "CC: ${activeSubtitle!!.label} (${(subtitleSize * 100).toInt()}%)",
+                color = MerlotColors.Accent.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp, bottom = 60.dp)
+            )
+        }
     }
+}
+
+@Composable
+private fun SubtitleMenuPanel(
+    subtitles: List<Subtitle>,
+    enabled: Boolean,
+    selectedLang: String,
+    currentSize: Float,
+    activeSubtitle: Subtitle?,
+    onToggle: (Boolean) -> Unit,
+    onSelectLanguage: (String) -> Unit,
+    onSizeChange: (Float) -> Unit,
+    onClose: () -> Unit
+) {
+    // Get unique languages
+    val languages = subtitles.map { it.lang }.distinct().sorted()
+
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .fillMaxSize()
+            .background(MerlotColors.Black.copy(alpha = 0.85f))
+            .padding(16.dp)
+    ) {
+        Text("Subtitles", color = MerlotColors.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // On/Off toggle
+        var toggleFocused by remember { mutableStateOf(false) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (toggleFocused) FocusedGrey.copy(alpha = 0.3f) else Color.Transparent)
+                .then(if (toggleFocused) Modifier.border(2.dp, FocusedGrey, RoundedCornerShape(8.dp)) else Modifier)
+                .onFocusChanged { toggleFocused = it.isFocused }
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                        onToggle(!enabled); true
+                    } else false
+                }
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Subtitles", color = MerlotColors.White, fontSize = 14.sp)
+            Text(
+                if (enabled) "ON" else "OFF",
+                color = if (enabled) MerlotColors.Accent else MerlotColors.TextMuted,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (enabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Size controls
+            Text("Size", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+            val sizes = listOf(0.75f to "Small", 1.0f to "Normal", 1.25f to "Large", 1.5f to "Extra Large")
+            sizes.forEach { (size, label) ->
+                val isSelected = (currentSize - size).let { kotlin.math.abs(it) } < 0.05f
+                var isFocused by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            when {
+                                isFocused -> FocusedGrey.copy(alpha = 0.3f)
+                                isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                else -> Color.Transparent
+                            }
+                        )
+                        .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                                onSizeChange(size); true
+                            } else false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(label, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
+                    if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Language selection
+            Text("Language", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+            LazyColumn {
+                items(languages) { lang ->
+                    val isSelected = lang == selectedLang
+                    var isFocused by remember { mutableStateOf(false) }
+                    val label = SubtitleRepository.getLanguageLabel(lang)
+                    val count = subtitles.count { it.lang == lang }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when {
+                                    isFocused -> FocusedGrey.copy(alpha = 0.3f)
+                                    isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
+                            .onFocusChanged { isFocused = it.isFocused }
+                            .focusable()
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                                    onSelectLanguage(lang); true
+                                } else false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "$label ($count)",
+                            color = if (isSelected) MerlotColors.Accent else MerlotColors.White,
+                            fontSize = 12.sp
+                        )
+                        if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Apply a subtitle to the ExoPlayer by rebuilding the MediaItem with a subtitle track.
+ */
+private fun applySubtitle(player: ExoPlayer, subtitle: Subtitle, streamUrl: String) {
+    val currentPos = player.currentPosition
+    val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle.url))
+        .setMimeType(MimeTypes.APPLICATION_SUBRIP)  // SRT format
+        .setLanguage(subtitle.lang)
+        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+        .build()
+
+    val newMediaItem = MediaItem.Builder()
+        .setUri(Uri.parse(streamUrl))
+        .setSubtitleConfigurations(listOf(subtitleConfig))
+        .build()
+
+    player.setMediaItem(newMediaItem)
+    player.prepare()
+    player.seekTo(currentPos)
+    player.playWhenReady = true
+
+    // Enable text track
+    player.trackSelectionParameters = player.trackSelectionParameters
+        .buildUpon()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        .setPreferredTextLanguage(subtitle.lang)
+        .build()
 }
 
 private fun formatTime(ms: Long): String {

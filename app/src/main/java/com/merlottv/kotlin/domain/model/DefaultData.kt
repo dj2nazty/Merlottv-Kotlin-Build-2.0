@@ -10,6 +10,9 @@ object DefaultData {
         EpgSource("EPG.pw UK", "https://epg.pw/xmltv/epg_UK.xml")
     )
 
+    // OpenSubtitles Stremio addon URL (hardcoded)
+    const val OPENSUBTITLES_ADDON_URL = "https://opensubtitles-v3.strem.io"
+
     val DEFAULT_ADDONS = listOf(
         Addon(
             id = "netflix-catalog",

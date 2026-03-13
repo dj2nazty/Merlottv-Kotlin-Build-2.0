@@ -1,5 +1,6 @@
 package com.merlottv.kotlin.data.repository
 
+import com.merlottv.kotlin.data.local.FavoriteVodMeta
 import com.merlottv.kotlin.data.local.FavoritesDataStore
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import kotlinx.coroutines.flow.Flow
@@ -16,12 +17,27 @@ class FavoritesRepositoryImpl @Inject constructor(
 
     override fun getFavoriteVodIds(): Flow<Set<String>> = favoritesDataStore.favoriteVod
 
+    override fun getFavoriteVodMetas(): Flow<Map<String, FavoriteVodMeta>> =
+        favoritesDataStore.getVodMetaMap()
+
     override suspend fun toggleFavoriteChannel(channelId: String) {
         favoritesDataStore.toggleFavoriteChannel(channelId)
     }
 
     override suspend fun toggleFavoriteVod(vodId: String) {
         favoritesDataStore.toggleFavoriteVod(vodId)
+    }
+
+    override suspend fun toggleFavoriteVodWithMeta(vodId: String, meta: FavoriteVodMeta) {
+        val isFav = favoritesDataStore.favoriteVod.first().contains(vodId)
+        favoritesDataStore.toggleFavoriteVod(vodId)
+        if (!isFav) {
+            // Adding — save metadata
+            favoritesDataStore.saveVodMeta(meta)
+        } else {
+            // Removing — clean up metadata
+            favoritesDataStore.removeVodMeta(vodId)
+        }
     }
 
     override suspend fun isFavoriteChannel(channelId: String): Boolean {

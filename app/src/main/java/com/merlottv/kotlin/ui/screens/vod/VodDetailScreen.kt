@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +31,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.SuggestionChip
@@ -55,10 +59,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.merlottv.kotlin.domain.model.Video
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 /** Grey color for focused buttons throughout the app */
@@ -81,10 +87,12 @@ fun VodDetailScreen(
     LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
         if (uiState.autoPlayTriggered && uiState.selectedStreamUrl != null) {
             val meta = uiState.meta
+            val episode = uiState.selectedEpisode
+            val contentId = if (episode != null) episode.id else (meta?.id ?: id)
             onPlay(
                 uiState.selectedStreamUrl!!,
                 uiState.selectedStreamTitle ?: "",
-                meta?.id ?: id,
+                contentId,
                 meta?.poster ?: "",
                 type
             )
@@ -113,6 +121,8 @@ fun VodDetailScreen(
             }
             uiState.meta != null -> {
                 val meta = uiState.meta!!
+                val isSeries = meta.videos.isNotEmpty() && uiState.seasons.isNotEmpty()
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -203,6 +213,9 @@ fun VodDetailScreen(
                                 if (meta.runtime.isNotEmpty()) {
                                     Text(meta.runtime, color = MerlotColors.TextMuted, fontSize = 12.sp)
                                 }
+                                if (isSeries) {
+                                    Text("${uiState.seasons.size} Seasons", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                                }
                             }
 
                             // Genres
@@ -244,43 +257,45 @@ fun VodDetailScreen(
 
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            // Action buttons
+                            // Action buttons — only show Play for movies (series uses episode play)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                // Play button — default focus target, grey on focus
-                                var playFocused by remember { mutableStateOf(false) }
-                                Button(
-                                    onClick = { viewModel.playBestStream() },
-                                    enabled = !uiState.isLoadingStreams,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (playFocused) FocusedButtonGrey else MerlotColors.Accent,
-                                        contentColor = if (playFocused) MerlotColors.White else MerlotColors.Black
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .focusRequester(playButtonFocusRequester)
-                                        .onFocusChanged { playFocused = it.isFocused }
-                                        .focusable()
-                                        .onPreviewKeyEvent { event ->
-                                            if (event.type == KeyEventType.KeyDown &&
-                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                            ) {
-                                                viewModel.playBestStream()
-                                                true
-                                            } else false
+                                if (!isSeries) {
+                                    // Play button — default focus target, grey on focus
+                                    var playFocused by remember { mutableStateOf(false) }
+                                    Button(
+                                        onClick = { viewModel.playBestStream() },
+                                        enabled = !uiState.isLoadingStreams,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (playFocused) FocusedButtonGrey else MerlotColors.Accent,
+                                            contentColor = if (playFocused) MerlotColors.White else MerlotColors.Black
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .focusRequester(playButtonFocusRequester)
+                                            .onFocusChanged { playFocused = it.isFocused }
+                                            .focusable()
+                                            .onPreviewKeyEvent { event ->
+                                                if (event.type == KeyEventType.KeyDown &&
+                                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                                ) {
+                                                    viewModel.playBestStream()
+                                                    true
+                                                } else false
+                                            }
+                                    ) {
+                                        if (uiState.isLoadingStreams) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                color = MerlotColors.Black,
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        } else {
+                                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("PLAY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         }
-                                ) {
-                                    if (uiState.isLoadingStreams) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            color = MerlotColors.Black,
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    } else {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("PLAY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     }
                                 }
 
@@ -290,6 +305,9 @@ fun VodDetailScreen(
                                     onClick = { viewModel.toggleFavorite() },
                                     modifier = Modifier
                                         .onFocusChanged { favFocused = it.isFocused }
+                                        .then(
+                                            if (isSeries) Modifier.focusRequester(playButtonFocusRequester) else Modifier
+                                        )
                                         .then(
                                             if (favFocused) Modifier
                                                 .clip(RoundedCornerShape(8.dp))
@@ -311,7 +329,83 @@ fun VodDetailScreen(
                         }
                     }
 
-                    // Streams section
+                    // =============== SEASON/EPISODE BROWSER (for series) ===============
+                    if (isSeries) {
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Season selector tabs
+                        Text(
+                            text = "Seasons",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LazyRow(
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(uiState.seasons) { season ->
+                                val isSelected = uiState.selectedSeason == season
+                                var isFocused by remember { mutableStateOf(false) }
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { viewModel.selectSeason(season) },
+                                    label = { Text("Season $season", fontSize = 12.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MerlotColors.Accent,
+                                        selectedLabelColor = MerlotColors.Black,
+                                        containerColor = if (isFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                                    ),
+                                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = false,
+                                        borderColor = FocusedButtonGreyLight,
+                                        borderWidth = 2.dp
+                                    ) else FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isSelected
+                                    ),
+                                    modifier = Modifier
+                                        .onFocusChanged { isFocused = it.isFocused }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                viewModel.selectSeason(season)
+                                                true
+                                            } else false
+                                        }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Episode list
+                        Text(
+                            text = "Episodes (${uiState.episodesForSeason.size})",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        uiState.episodesForSeason.forEach { episode ->
+                            EpisodeCard(
+                                episode = episode,
+                                isSelected = uiState.selectedEpisode?.id == episode.id,
+                                isLoadingStreams = uiState.isLoadingStreams && uiState.selectedEpisode?.id == episode.id,
+                                onPlay = { viewModel.playEpisode(episode) }
+                            )
+                        }
+                    }
+
+                    // Streams section (for movies or after episode selection)
                     if (uiState.streams.isNotEmpty()) {
                         Text(
                             text = "Available Streams (${uiState.streams.size})",
@@ -386,6 +480,138 @@ fun VodDetailScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EpisodeCard(
+    episode: Video,
+    isSelected: Boolean,
+    isLoadingStreams: Boolean,
+    onPlay: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                when {
+                    isSelected && isFocused -> FocusedButtonGrey.copy(alpha = 0.4f)
+                    isFocused -> FocusedButtonGrey.copy(alpha = 0.3f)
+                    isSelected -> MerlotColors.Accent.copy(alpha = 0.1f)
+                    else -> MerlotColors.Surface2
+                }
+            )
+            .then(
+                if (isFocused) Modifier.border(2.dp, FocusedButtonGreyLight, RoundedCornerShape(10.dp))
+                else if (isSelected) Modifier.border(1.dp, MerlotColors.Accent.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                else Modifier
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onPlay()
+                    true
+                } else false
+            }
+            .padding(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        // Episode thumbnail
+        Box(
+            modifier = Modifier
+                .width(140.dp)
+                .height(80.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MerlotColors.Surface2),
+            contentAlignment = Alignment.Center
+        ) {
+            if (episode.thumbnail.isNotEmpty()) {
+                AsyncImage(
+                    model = episode.thumbnail,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            // Play overlay icon
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MerlotColors.Black.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isLoadingStreams) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        color = MerlotColors.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = MerlotColors.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Episode info
+        Column(modifier = Modifier.weight(1f)) {
+            // Episode number + title
+            Text(
+                text = "E${episode.episode}. ${episode.title}",
+                color = when {
+                    isFocused -> MerlotColors.White
+                    isSelected -> MerlotColors.Accent
+                    else -> MerlotColors.TextPrimary
+                },
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Runtime / release date
+            val infoItems = mutableListOf<String>()
+            if (episode.released.isNotEmpty()) {
+                // Show just the date part (first 10 chars of ISO date)
+                val dateStr = episode.released.take(10)
+                infoItems.add(dateStr)
+            }
+            if (infoItems.isNotEmpty()) {
+                Text(
+                    text = infoItems.joinToString(" • "),
+                    color = MerlotColors.TextMuted,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            // Overview/description
+            if (episode.overview.isNotEmpty()) {
+                Text(
+                    text = episode.overview,
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
         }
     }

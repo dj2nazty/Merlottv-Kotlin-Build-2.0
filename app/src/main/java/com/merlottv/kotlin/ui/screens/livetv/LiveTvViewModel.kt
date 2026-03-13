@@ -60,7 +60,10 @@ data class LiveTvUiState(
     val isFailingOver: Boolean = false,
     val failoverMessage: String = "",
     // Category sidebar visibility
-    val showCategories: Boolean = true
+    val showCategories: Boolean = true,
+    // Quick menu (OK button popup)
+    val showQuickMenu: Boolean = false,
+    val lastWatchedChannel: Channel? = null
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -170,8 +173,8 @@ class LiveTvViewModel @Inject constructor(
                 val groupSet = LinkedHashSet<String>(channels.size / 10)
                 for (ch in channels) { groupSet.add(ch.group) }
 
-                // Sort groups: USA-related first, then alphabetically
-                val groups = groupSet.sortedWith(
+                // Sort groups: Favorites first, USA-related second, then alphabetically
+                val sortedGroups = groupSet.sortedWith(
                     compareByDescending<String> { group ->
                         val lower = group.lowercase()
                         lower.contains("usa") || lower.contains("us ") ||
@@ -179,6 +182,8 @@ class LiveTvViewModel @Inject constructor(
                         lower.contains("united states") || lower.contains("american")
                     }.thenBy { it.lowercase() }
                 )
+                // Add "★ Favorites" as the first category
+                val groups = listOf("★ Favorites") + sortedGroups
 
                 // Don't set filteredChannels — null means "use channels directly"
                 // This avoids duplicating the full list (thousands of Channel objects) in state
@@ -276,12 +281,14 @@ class LiveTvViewModel @Inject constructor(
     }
 
     fun onChannelSelected(channel: Channel) {
+        val previousChannel = _uiState.value.selectedChannel
         val index = _uiState.value.filteredChannels.indexOf(channel)
         _uiState.value = _uiState.value.copy(
             selectedChannel = channel,
             isFullscreen = true,
             showOverlay = false,
-            currentChannelIndex = index
+            currentChannelIndex = index,
+            lastWatchedChannel = previousChannel
         )
         safePlayChannel(channel)
         loadEpgForChannel(channel)
@@ -454,6 +461,26 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(showOverlay = false)
     }
 
+    fun showQuickMenu() {
+        _uiState.value = _uiState.value.copy(showQuickMenu = true, showOverlay = true)
+    }
+
+    fun hideQuickMenu() {
+        _uiState.value = _uiState.value.copy(showQuickMenu = false)
+    }
+
+    fun goToLastWatchedChannel() {
+        val lastCh = _uiState.value.lastWatchedChannel ?: return
+        hideQuickMenu()
+        onChannelSelected(lastCh)
+    }
+
+    fun toggleCurrentChannelFavorite() {
+        val channelId = _uiState.value.selectedChannel?.id ?: return
+        toggleFavorite(channelId)
+        hideQuickMenu()
+    }
+
     fun exitFullscreen() {
         _uiState.value = _uiState.value.copy(
             isFullscreen = false,
@@ -497,7 +524,13 @@ class LiveTvViewModel @Inject constructor(
 
         if (hasGroup) {
             val group = state.selectedGroup!!
-            filtered = filtered.filter { it.group == group }
+            if (group == "★ Favorites") {
+                // Filter to only favorite channels
+                val favIds = state.favoriteIds
+                filtered = filtered.filter { favIds.contains(it.id) }
+            } else {
+                filtered = filtered.filter { it.group == group }
+            }
         }
 
         if (hasSearch) {

@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -43,6 +45,12 @@ class SettingsDataStore(private val context: Context) {
         val LAST_WATCHED_CHANNEL_ID = stringPreferencesKey("last_watched_channel_id")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
+
+        // Subtitle settings
+        val SUBTITLES_ENABLED = booleanPreferencesKey("subtitles_enabled")
+        val SUBTITLE_LANGUAGE = stringPreferencesKey("subtitle_language")
+        val SUBTITLE_SIZE = floatPreferencesKey("subtitle_size")         // 1.0 = normal
+        val SUBTITLE_FONT = stringPreferencesKey("subtitle_font")       // "default", "monospace", "serif"
 
         const val DEFAULT_PLAYLIST = "https://x-api.uk/get.php?username=MetrlotBackup&password=2813308004&type=m3u_plus"
         const val DEFAULT_TORBOX_KEY = "50c74a49-a6bc-40e9-931e-1cee1943e87b"
@@ -190,5 +198,38 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setCustomAddons(json: String) {
         context.settingsDataStore.edit { it[CUSTOM_ADDONS] = json }
+    }
+
+    // ─── Subtitle Settings ───
+    val subtitlesEnabled: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[SUBTITLES_ENABLED] ?: false
+    }
+
+    val subtitleLanguage: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[SUBTITLE_LANGUAGE] ?: "eng"
+    }
+
+    val subtitleSize: Flow<Float> = context.settingsDataStore.data.map { prefs ->
+        prefs[SUBTITLE_SIZE] ?: 1.0f
+    }
+
+    val subtitleFont: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[SUBTITLE_FONT] ?: "default"
+    }
+
+    suspend fun setSubtitlesEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[SUBTITLES_ENABLED] = enabled }
+    }
+
+    suspend fun setSubtitleLanguage(lang: String) {
+        context.settingsDataStore.edit { it[SUBTITLE_LANGUAGE] = lang }
+    }
+
+    suspend fun setSubtitleSize(size: Float) {
+        context.settingsDataStore.edit { it[SUBTITLE_SIZE] = size }
+    }
+
+    suspend fun setSubtitleFont(font: String) {
+        context.settingsDataStore.edit { it[SUBTITLE_FONT] = font }
     }
 }
