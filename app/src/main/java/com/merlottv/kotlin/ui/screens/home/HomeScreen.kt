@@ -1,5 +1,9 @@
 package com.merlottv.kotlin.ui.screens.home
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -25,11 +29,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,12 +86,12 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 16.dp)
                 ) {
-                    // Hero section
-                    uiState.featuredItem?.let { featured ->
-                        item(key = "hero") {
-                            HeroSection(
-                                meta = featured,
-                                onClick = { onNavigateToDetail(featured.type, featured.id) }
+                    // Hero carousel — auto-rotating top movies
+                    if (uiState.featuredItems.isNotEmpty()) {
+                        item(key = "hero_carousel") {
+                            HeroCarousel(
+                                items = uiState.featuredItems,
+                                onItemClick = { meta -> onNavigateToDetail(meta.type, meta.id) }
                             )
                         }
                     }
@@ -255,8 +262,23 @@ private fun ContinueWatchingCard(item: WatchProgressItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun HeroSection(meta: MetaPreview, onClick: () -> Unit) {
+private fun HeroCarousel(
+    items: List<MetaPreview>,
+    onItemClick: (MetaPreview) -> Unit
+) {
+    if (items.isEmpty()) return
+    var currentIndex by remember { mutableIntStateOf(0) }
     var isFocused by remember { mutableStateOf(false) }
+
+    // Auto-rotate every 5 seconds (pause when focused)
+    LaunchedEffect(currentIndex, isFocused) {
+        if (!isFocused) {
+            delay(5000)
+            currentIndex = (currentIndex + 1) % items.size
+        }
+    }
+
+    val currentItem = items[currentIndex]
 
     Box(
         modifier = Modifier
@@ -267,10 +289,21 @@ private fun HeroSection(meta: MetaPreview, onClick: () -> Unit) {
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                ) {
-                    onClick(); true
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionCenter, Key.Enter -> {
+                            onItemClick(currentItem); true
+                        }
+                        Key.DirectionLeft -> {
+                            currentIndex = if (currentIndex > 0) currentIndex - 1 else items.size - 1
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            currentIndex = (currentIndex + 1) % items.size
+                            true
+                        }
+                        else -> false
+                    }
                 } else false
             }
             .then(
@@ -278,43 +311,72 @@ private fun HeroSection(meta: MetaPreview, onClick: () -> Unit) {
                 else Modifier
             )
     ) {
-        AsyncImage(
-            model = meta.poster,
-            contentDescription = meta.name,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MerlotColors.Transparent,
-                            MerlotColors.Background.copy(alpha = 0.9f)
-                        )
-                    )
+        AnimatedContent(
+            targetState = currentIndex,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "hero_carousel"
+        ) { index ->
+            val meta = items[index]
+            Box(modifier = Modifier.fillMaxSize()) {
+                AsyncImage(
+                    model = meta.poster,
+                    contentDescription = meta.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
-        )
-        Column(
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    MerlotColors.Transparent,
+                                    MerlotColors.Background.copy(alpha = 0.9f)
+                                )
+                            )
+                        )
+                )
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(20.dp)
+                ) {
+                    Text(
+                        text = meta.name,
+                        color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    if (meta.description.isNotEmpty()) {
+                        Text(
+                            text = meta.description,
+                            color = MerlotColors.TextMuted,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Dot indicators at bottom-right
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(20.dp)
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = meta.name,
-                color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            if (meta.description.isNotEmpty()) {
-                Text(
-                    text = meta.description,
-                    color = MerlotColors.TextMuted,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp)
+            items.forEachIndexed { index, _ ->
+                Box(
+                    modifier = Modifier
+                        .size(if (index == currentIndex) 8.dp else 6.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            if (index == currentIndex) MerlotColors.Accent
+                            else MerlotColors.TextMuted.copy(alpha = 0.4f)
+                        )
                 )
             }
         }

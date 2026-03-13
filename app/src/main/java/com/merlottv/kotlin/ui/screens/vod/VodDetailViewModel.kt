@@ -1,19 +1,27 @@
 package com.merlottv.kotlin.ui.screens.vod
 
+import android.app.Application
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
+import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import com.merlottv.kotlin.domain.model.Meta
+import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Video
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
 
 data class VodDetailUiState(
@@ -29,18 +37,30 @@ data class VodDetailUiState(
     val seasons: List<Int> = emptyList(),
     val selectedSeason: Int = 1,
     val episodesForSeason: List<Video> = emptyList(),
-    val selectedEpisode: Video? = null
+    val selectedEpisode: Video? = null,
+    // Watch progress
+    val watchPosition: Long = 0L,
+    val watchDuration: Long = 0L,
+    val watchProgressPercent: Float = 0f,
+    // Similar content ("Like This")
+    val similarItems: List<MetaPreview> = emptyList(),
+    val isLoadingSimilar: Boolean = false
 )
 
 @HiltViewModel
 class VodDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val addonRepository: AddonRepository,
-    private val favoritesRepository: FavoritesRepository
+    private val favoritesRepository: FavoritesRepository,
+    application: Application
 ) : ViewModel() {
 
     private val type: String = savedStateHandle.get<String>("type") ?: "movie"
     private val id: String = savedStateHandle.get<String>("id") ?: ""
+
+    private val watchProgressStore = try {
+        WatchProgressDataStore(application.applicationContext)
+    } catch (_: Exception) { null }
 
     private val _uiState = MutableStateFlow(VodDetailUiState())
     val uiState: StateFlow<VodDetailUiState> = _uiState.asStateFlow()
@@ -48,6 +68,69 @@ class VodDetailViewModel @Inject constructor(
     init {
         loadMeta()
         checkFavorite()
+        loadWatchProgress()
+    }
+
+    private fun loadWatchProgress() {
+        viewModelScope.launch {
+            val pos = watchProgressStore?.getPosition(id) ?: 0L
+            if (pos > 0) {
+                val items = try {
+                    watchProgressStore?.getContinueWatchingItems()?.first() ?: emptyList()
+                } catch (_: Exception) { emptyList() }
+                val item = items.firstOrNull { it.id == id }
+                val dur = item?.duration ?: 0L
+                val percent = if (dur > 0) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+                _uiState.value = _uiState.value.copy(
+                    watchPosition = pos,
+                    watchDuration = dur,
+                    watchProgressPercent = percent
+                )
+            }
+        }
+    }
+
+    fun loadSimilarContent() {
+        val meta = _uiState.value.meta ?: return
+        if (_uiState.value.similarItems.isNotEmpty() || _uiState.value.isLoadingSimilar) return
+        val genres = meta.genres
+        if (genres.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingSimilar = true)
+            try {
+                val addons = addonRepository.getAllAddons().first()
+                val genre = genres.first()
+                val results = supervisorScope {
+                    addons.map { addon ->
+                        async(Dispatchers.IO) {
+                            try {
+                                addonRepository.searchCatalog(addon, type, genre)
+                            } catch (_: Exception) { emptyList() }
+                        }
+                    }.awaitAll().flatten()
+                }
+                val similar = results
+                    .filter { it.id != id }
+                    .distinctBy { it.id }
+                    .take(20)
+                _uiState.value = _uiState.value.copy(
+                    similarItems = similar,
+                    isLoadingSimilar = false
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingSimilar = false)
+            }
+        }
+    }
+
+    /** Play from beginning (restart) — clears saved position */
+    fun playFromStart() {
+        viewModelScope.launch {
+            watchProgressStore?.removeProgress(id)
+            _uiState.value = _uiState.value.copy(watchPosition = 0L, watchProgressPercent = 0f)
+        }
+        playBestStream()
     }
 
     private fun loadMeta() {
@@ -55,7 +138,6 @@ class VodDetailViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             val meta = addonRepository.getMeta(type, id)
             if (meta != null && meta.videos.isNotEmpty()) {
-                // Extract unique seasons, sorted
                 val seasons = meta.videos
                     .map { it.season }
                     .filter { it > 0 }
@@ -102,13 +184,11 @@ class VodDetailViewModel @Inject constructor(
                 selectedEpisode = episode
             )
             try {
-                // Stremio stream endpoint for series episodes uses the video ID
                 val streams = addonRepository.getStreams(type, episode.id)
                 _uiState.value = _uiState.value.copy(
                     streams = streams,
                     isLoadingStreams = false
                 )
-                // Auto-select best stream
                 val bestStream = selectBestStream(streams)
                 if (bestStream != null) {
                     val url = bestStream.url.ifEmpty { bestStream.externalUrl }
@@ -146,7 +226,6 @@ class VodDetailViewModel @Inject constructor(
                 val streams = addonRepository.getStreams(type, id)
                 _uiState.value = _uiState.value.copy(streams = streams, isLoadingStreams = false)
 
-                // Auto-select best stream
                 val bestStream = selectBestStream(streams)
                 if (bestStream != null) {
                     val url = bestStream.url.ifEmpty { bestStream.externalUrl }
@@ -210,17 +289,9 @@ class VodDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Select the best stream based on priority:
-     * 1. Direct HTTP/HTTPS URLs (not torrents/magnets)
-     * 2. Prefer streams with "1080" or "720" in the title
-     * 3. Prefer streams from known good addons (Torbox, Torrentio)
-     * 4. Fall back to first available direct URL
-     */
     private fun selectBestStream(streams: List<Stream>): Stream? {
         if (streams.isEmpty()) return null
 
-        // Filter to only direct playable URLs (http/https, not magnet/torrent)
         val directStreams = streams.filter { stream ->
             val url = stream.url.ifEmpty { stream.externalUrl }
             url.isNotEmpty() &&
@@ -230,11 +301,9 @@ class VodDetailViewModel @Inject constructor(
         }
 
         if (directStreams.isEmpty()) {
-            // Fallback: any stream with a URL
             return streams.firstOrNull { it.url.isNotEmpty() || it.externalUrl.isNotEmpty() }
         }
 
-        // Prefer high quality
         val hd1080 = directStreams.firstOrNull { stream ->
             val text = "${stream.name} ${stream.title}".lowercase()
             text.contains("1080") || text.contains("bluray") || text.contains("remux")
@@ -247,14 +316,12 @@ class VodDetailViewModel @Inject constructor(
         }
         if (hd720 != null) return hd720
 
-        // Prefer Torbox streams (they're debrid/fast)
         val torbox = directStreams.firstOrNull { stream ->
             stream.addonName.contains("torbox", ignoreCase = true) ||
             stream.url.contains("torbox", ignoreCase = true)
         }
         if (torbox != null) return torbox
 
-        // Just pick the first direct stream
         return directStreams.first()
     }
 }

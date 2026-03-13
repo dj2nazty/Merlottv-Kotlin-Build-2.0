@@ -147,6 +147,10 @@ fun MerlotNavHost(
                             contentType = contentType
                         )
                     )
+                },
+                onNavigateToDetail = { detailType, detailId ->
+                    val encodedId = URLEncoder.encode(detailId, "UTF-8")
+                    navController.navigate(Screen.VodDetail.createRoute(detailType, encodedId))
                 }
             )
         }

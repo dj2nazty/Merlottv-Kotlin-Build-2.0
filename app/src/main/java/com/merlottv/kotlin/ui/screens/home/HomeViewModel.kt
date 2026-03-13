@@ -25,7 +25,7 @@ data class CatalogRow(
 
 data class HomeUiState(
     val isLoading: Boolean = true,
-    val featuredItem: MetaPreview? = null,
+    val featuredItems: List<MetaPreview> = emptyList(),
     val continueWatching: List<WatchProgressItem> = emptyList(),
     val catalogRows: List<CatalogRow> = emptyList(),
     val error: String? = null
@@ -140,11 +140,24 @@ class HomeViewModel @Inject constructor(
                     }
                 })
 
-                val featured = sorted.firstOrNull()?.items?.firstOrNull()
+                // Collect top movies for the hero carousel — pick first items from popular movie rows
+                val heroItems = sorted
+                    .filter { row ->
+                        val t = row.title.lowercase()
+                        ("movie" in t) && ("popular" in t || "new" in t || "featured" in t || "trending" in t || "top" in t)
+                    }
+                    .flatMap { it.items }
+                    .distinctBy { it.id }
+                    .filter { it.poster.isNotEmpty() }
+                    .take(8)
+                    .ifEmpty {
+                        // Fallback: just take first items from the first row
+                        sorted.firstOrNull()?.items?.take(5) ?: emptyList()
+                    }
 
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    featuredItem = featured,
+                    featuredItems = heroItems,
                     catalogRows = sorted,
                     error = null
                 )

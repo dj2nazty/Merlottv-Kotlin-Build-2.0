@@ -140,6 +140,7 @@ fun PlayerScreen(
             .setConnectTimeoutMs(10_000)
             .setReadTimeoutMs(10_000)
             .setAllowCrossProtocolRedirects(true)
+            .setUserAgent("MerlotTV/2.18.0 (Android)")
 
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -923,10 +924,22 @@ private fun PlayerOptionsPanel(
 
 /**
  * Apply a subtitle to the ExoPlayer by rebuilding the MediaItem with a subtitle track.
+ * Key: set track selection parameters BEFORE prepare() so ExoPlayer selects text tracks
+ * during preparation, not after.
  */
 private fun applySubtitle(player: ExoPlayer, subtitle: Subtitle, streamUrl: String) {
     val currentPos = player.currentPosition
-    // Detect MIME type from URL or default to SRT
+    val wasPlaying = player.isPlaying
+
+    // Step 1: Enable text track rendering BEFORE setting the new media item
+    // This ensures ExoPlayer's track selector knows to select text tracks during preparation
+    player.trackSelectionParameters = player.trackSelectionParameters
+        .buildUpon()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        .setPreferredTextLanguage(subtitle.lang)
+        .build()
+
+    // Step 2: Detect MIME type from URL
     val mimeType = when {
         subtitle.url.contains(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
         subtitle.url.contains(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
@@ -934,28 +947,27 @@ private fun applySubtitle(player: ExoPlayer, subtitle: Subtitle, streamUrl: Stri
         subtitle.url.contains(".ttml", ignoreCase = true) -> MimeTypes.APPLICATION_TTML
         else -> MimeTypes.APPLICATION_SUBRIP  // Default: SRT (most common from OpenSubtitles)
     }
+
+    // Step 3: Build subtitle configuration with FORCED flag to ensure selection
     val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle.url))
         .setMimeType(mimeType)
         .setLanguage(subtitle.lang)
-        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
+        .setLabel(subtitle.label)
         .build()
 
+    // Step 4: Build new MediaItem with subtitle configuration
     val newMediaItem = MediaItem.Builder()
         .setUri(Uri.parse(streamUrl))
         .setSubtitleConfigurations(listOf(subtitleConfig))
         .build()
 
+    // Step 5: Stop, set media, prepare, seek (in correct order)
+    player.stop()
     player.setMediaItem(newMediaItem)
     player.prepare()
     player.seekTo(currentPos)
-    player.playWhenReady = true
-
-    // Enable text track
-    player.trackSelectionParameters = player.trackSelectionParameters
-        .buildUpon()
-        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-        .setPreferredTextLanguage(subtitle.lang)
-        .build()
+    player.playWhenReady = wasPlaying || true
 }
 
 private fun formatTime(ms: Long): String {
