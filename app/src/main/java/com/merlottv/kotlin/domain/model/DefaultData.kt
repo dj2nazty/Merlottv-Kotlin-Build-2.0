@@ -15,6 +15,14 @@ object DefaultData {
 
     val DEFAULT_ADDONS = listOf(
         Addon(
+            id = "opensubtitles-v3",
+            name = "OpenSubtitles v3",
+            url = "https://opensubtitles-v3.strem.io/manifest.json",
+            isDefault = true,
+            resources = listOf("subtitles"),
+            types = listOf("movie", "series")
+        ),
+        Addon(
             id = "netflix-catalog",
             name = "Netflix Catalog",
             url = "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/bmZ4LGRucCxhbXAsYXRwLGhibSxwbXAscGNwLGRwZTo6VVM6MTc3MjcyODk3MDc1NDowOjA6VVM%3D/manifest.json",

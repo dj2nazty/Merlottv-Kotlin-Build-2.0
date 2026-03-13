@@ -286,7 +286,19 @@ fun PlayerScreen(
                             }
                             true
                         }
-                        Key.DirectionUp, Key.DirectionDown -> {
+                        Key.DirectionUp -> {
+                            if (showControls && !showSubtitleMenu) {
+                                // Open subtitle menu on D-pad Up when controls visible
+                                showSubtitleMenu = true
+                            }
+                            showControls = true
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (showSubtitleMenu) {
+                                // Close subtitle menu on D-pad Down
+                                showSubtitleMenu = false
+                            }
                             showControls = true
                             true
                         }
@@ -372,16 +384,18 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.weight(1f))
                 }
 
-                // Subtitle toggle button
-                if (subtitles.isNotEmpty()) {
-                    IconButton(onClick = { showSubtitleMenu = !showSubtitleMenu }) {
-                        Icon(
-                            imageVector = if (subtitlesEnabled) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled,
-                            contentDescription = "Subtitles",
-                            tint = if (subtitlesEnabled) MerlotColors.Accent else MerlotColors.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                // Subtitle toggle button — always visible
+                IconButton(onClick = { showSubtitleMenu = !showSubtitleMenu }) {
+                    Icon(
+                        imageVector = if (subtitlesEnabled && subtitles.isNotEmpty()) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled,
+                        contentDescription = "Subtitles (D-pad Up)",
+                        tint = when {
+                            subtitlesEnabled && subtitles.isNotEmpty() -> MerlotColors.Accent
+                            subtitles.isEmpty() -> MerlotColors.TextMuted.copy(alpha = 0.5f)
+                            else -> MerlotColors.White
+                        },
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
 
                 Icon(
@@ -408,6 +422,7 @@ fun PlayerScreen(
                 currentSize = subtitleSize,
                 currentFont = subtitleFont,
                 activeSubtitle = activeSubtitle,
+                isLoading = subtitles.isEmpty() && contentId.isNotEmpty(),
                 onToggle = { enabled ->
                     subtitlesEnabled = enabled
                     scope.launch { settingsStore?.setSubtitlesEnabled(enabled) }
@@ -483,7 +498,7 @@ fun PlayerScreen(
                 ) {
                     Text(formatTime(currentPosition), color = MerlotColors.TextMuted, fontSize = 10.sp)
                     Text(
-                        "\u25C0 10s    ENTER Pause    10s \u25B6",
+                        "\u25C0 10s    OK Pause    10s \u25B6    \u25B2 Subtitles",
                         color = MerlotColors.TextMuted.copy(alpha = 0.6f),
                         fontSize = 9.sp
                     )
@@ -514,6 +529,7 @@ private fun SubtitleMenuPanel(
     currentSize: Float,
     currentFont: String,
     activeSubtitle: Subtitle?,
+    isLoading: Boolean = false,
     onToggle: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onSizeChange: (Float) -> Unit,
@@ -530,8 +546,25 @@ private fun SubtitleMenuPanel(
             .background(MerlotColors.Black.copy(alpha = 0.85f))
             .padding(16.dp)
     ) {
-        Text("Subtitles", color = MerlotColors.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Subtitles", color = MerlotColors.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("D-pad \u2193 to close", color = MerlotColors.TextMuted, fontSize = 10.sp)
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+
+        if (isLoading) {
+            Text("Loading subtitles...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+        } else if (subtitles.isEmpty()) {
+            Text("No subtitles available for this content", color = MerlotColors.TextMuted, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // On/Off toggle
         var toggleFocused by remember { mutableStateOf(false) }
@@ -683,8 +716,16 @@ private fun SubtitleMenuPanel(
  */
 private fun applySubtitle(player: ExoPlayer, subtitle: Subtitle, streamUrl: String) {
     val currentPos = player.currentPosition
+    // Detect MIME type from URL or default to SRT
+    val mimeType = when {
+        subtitle.url.contains(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
+        subtitle.url.contains(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
+        subtitle.url.contains(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
+        subtitle.url.contains(".ttml", ignoreCase = true) -> MimeTypes.APPLICATION_TTML
+        else -> MimeTypes.APPLICATION_SUBRIP  // Default: SRT (most common from OpenSubtitles)
+    }
     val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle.url))
-        .setMimeType(MimeTypes.APPLICATION_SUBRIP)  // SRT format
+        .setMimeType(mimeType)
         .setLanguage(subtitle.lang)
         .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
         .build()

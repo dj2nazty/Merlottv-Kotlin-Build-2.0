@@ -34,10 +34,6 @@ class SearchViewModel @Inject constructor(
     private var searchJob: Job? = null
     private val searchDispatcher = Dispatchers.IO.limitedParallelism(4)
 
-    // Addons that should NOT be searched (stream providers, not catalog/search providers)
-    // Their search catalogs return personal library content, not actual search results
-    private val excludedFromSearch = setOf("torbox", "torrentio")
-
     fun onQueryChanged(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
         searchJob?.cancel()
@@ -51,17 +47,9 @@ class SearchViewModel @Inject constructor(
             try {
                 val addons = addonRepository.getAllAddons().first()
 
-                // Filter out stream-only addons (Torbox, Torrentio) — they return
-                // personal library content, not real search results
-                val catalogAddons = addons.filter { addon ->
-                    excludedFromSearch.none { excluded ->
-                        addon.id.contains(excluded, true) || addon.name.contains(excluded, true)
-                    }
-                }
-
-                // Search all catalog addons in parallel — no sequential manifest fetching
+                // Search ALL addons in parallel (including Torbox, Torrentio)
                 val allResults = supervisorScope {
-                    catalogAddons.flatMap { addon ->
+                    addons.flatMap { addon ->
                         listOf("movie", "series").map { type ->
                             async(searchDispatcher) {
                                 try {
