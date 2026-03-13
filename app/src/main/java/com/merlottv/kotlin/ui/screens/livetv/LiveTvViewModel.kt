@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -100,25 +101,39 @@ class LiveTvViewModel @Inject constructor(
      *
      * v2.25.0 improvements:
      * - BandwidthMeter: Tracks network speed so ExoPlayer picks the best quality automatically
-     * - Aggressive low-latency buffers: 800ms min, 6s max for live streams
-     * - Near-instant playback start: only 300ms buffered data needed
-     * - Fast rebuffer recovery: 800ms (was 1000ms)
+     * - Adjustable buffer duration: user-configurable 0.3s–3.0s via Settings slider
+     * - Near-instant playback start based on user's chosen buffer
      * - HTTP timeouts: 6s connect, 6s read — fail fast on dead streams
      * - Cross-protocol redirects enabled for CDN flexibility
+     *
+     * v2.25.1: Buffer duration now reads from user Settings (default 800ms)
      */
     val player: ExoPlayer = run {
+        // Read user's buffer preference (synchronous — only runs once at ViewModel creation)
+        val userBufferMs = runBlocking { settingsDataStore.bufferDurationMs.first() }
+
         // BandwidthMeter tracks download speed and helps ExoPlayer pick optimal quality
         val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
             .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
             .build()
 
+        // Buffer config derived from user setting:
+        // - minBufferMs = userBufferMs (the user's chosen minimum)
+        // - maxBufferMs = userBufferMs * 8 (reasonable ceiling, scales with preference)
+        // - bufferForPlaybackMs = userBufferMs * 3/8 (start playback before full min buffer)
+        // - bufferForPlaybackAfterRebufferMs = userBufferMs (full min buffer after a stall)
+        val minBuffer = userBufferMs
+        val maxBuffer = (userBufferMs * 8).coerceAtMost(24_000) // Cap at 24s max
+        val playbackBuffer = (userBufferMs * 3 / 8).coerceAtLeast(200) // At least 200ms
+        val rebufferBuffer = userBufferMs
+
         val loadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
             .setBufferDurationsMs(
-                /* minBufferMs */                  800,   // Bare minimum data to hold (was 1500)
-                /* maxBufferMs */                  6_000, // Small ceiling for live TV (was 8000)
-                /* bufferForPlaybackMs */           300,   // Start after 300ms of data (was 500) — near-instant
-                /* bufferForPlaybackAfterRebufferMs */ 800 // Fast recovery after stall (was 1000)
+                /* minBufferMs */                  minBuffer,
+                /* maxBufferMs */                  maxBuffer,
+                /* bufferForPlaybackMs */           playbackBuffer,
+                /* bufferForPlaybackAfterRebufferMs */ rebufferBuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .setTargetBufferBytes(C.LENGTH_UNSET)

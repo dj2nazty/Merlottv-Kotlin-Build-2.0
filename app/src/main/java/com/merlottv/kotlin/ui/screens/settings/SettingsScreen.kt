@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -291,6 +292,158 @@ fun SettingsScreen(
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(6.dp)); Text("Run Speed Test", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
+            }
+        }
+
+        // ═══ Live TV Buffer ═══
+        item(key = "buffer") {
+            SettingsSection(
+                title = "Live TV Buffer",
+                icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }
+            ) {
+                Text(
+                    "Adjust the minimum buffer before playback starts. Lower = faster start but more prone to buffering on slow networks. Higher = more stable but slower start.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Current value display
+                val bufferMs = uiState.bufferDurationMs
+                val bufferSec = bufferMs / 1000f
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = String.format("%.1f seconds", bufferSec),
+                        color = MerlotColors.Accent,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    text = "${bufferMs}ms",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 10.sp,
+                    modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // D-pad controlled slider bar
+                // Focus the row, then Left/Right adjusts by 100ms, OK confirms
+                var sliderFocused by remember { mutableStateOf(false) }
+                val steps = 27 // (3000 - 300) / 100 = 27 steps
+                val currentStep = ((bufferMs - 300) / 100).coerceIn(0, steps)
+                val progress = currentStep.toFloat() / steps
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { sliderFocused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown) {
+                                when (event.key) {
+                                    Key.DirectionLeft -> {
+                                        // Decrease by 100ms
+                                        val newMs = (bufferMs - 100).coerceAtLeast(300)
+                                        if (newMs != bufferMs) viewModel.setBufferDuration(newMs)
+                                        true
+                                    }
+                                    Key.DirectionRight -> {
+                                        // Increase by 100ms
+                                        val newMs = (bufferMs + 100).coerceAtMost(3000)
+                                        if (newMs != bufferMs) viewModel.setBufferDuration(newMs)
+                                        true
+                                    }
+                                    Key.DirectionCenter, Key.Enter -> {
+                                        // Confirm — save is already done on each adjustment
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        }
+                        .then(
+                            if (sliderFocused) Modifier
+                                .border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                .background(MerlotColors.Accent.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                            else Modifier
+                                .border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    // Labels: 0.3s on left, 3.0s on right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("0.3s", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                        Text(
+                            if (sliderFocused) "◀  Use Left/Right to adjust  ▶"
+                            else "Select to adjust",
+                            color = if (sliderFocused) MerlotColors.Accent else MerlotColors.TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = if (sliderFocused) FontWeight.Bold else FontWeight.Normal
+                        )
+                        Text("3.0s", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Track bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MerlotColors.Surface2)
+                    ) {
+                        // Filled portion
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(progress)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    if (sliderFocused) MerlotColors.Accent
+                                    else MerlotColors.Accent.copy(alpha = 0.6f)
+                                )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Step indicator dots
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        for (i in 0..steps) {
+                            if (i % 5 == 0 || i == steps) { // Show tick marks at 0.5s intervals
+                                val ms = 300 + i * 100
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (i == currentStep) 6.dp else 3.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (i == currentStep) MerlotColors.Accent
+                                            else if (i <= currentStep) MerlotColors.Accent.copy(alpha = 0.4f)
+                                            else MerlotColors.TextMuted.copy(alpha = 0.3f)
+                                        )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Default: 0.8s (800ms). Takes effect on next channel change.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 10.sp
+                )
             }
         }
 

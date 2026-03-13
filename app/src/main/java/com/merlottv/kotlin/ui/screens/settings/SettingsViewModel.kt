@@ -57,7 +57,9 @@ data class SettingsUiState(
     val activeProfileId: String = "default",
     // Live TV category order
     val categoryOrder: List<String> = emptyList(),
-    val availableCategories: List<String> = emptyList()
+    val availableCategories: List<String> = emptyList(),
+    // Live TV buffer duration (ms) — adjustable 300–3000 in 100ms steps
+    val bufferDurationMs: Int = 800
 )
 
 @HiltViewModel
@@ -86,6 +88,7 @@ class SettingsViewModel @Inject constructor(
             val playlists = settingsDataStore.playlists.first()
             val customEpg = settingsDataStore.customEpgSources.first()
             val backupSources = settingsDataStore.backupSources.first()
+            val bufferMs = settingsDataStore.bufferDurationMs.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -96,7 +99,8 @@ class SettingsViewModel @Inject constructor(
                 playlists = playlists,
                 customEpgSources = customEpg,
                 defaultEpgSources = defaultEpg,
-                backupSources = backupSources
+                backupSources = backupSources,
+                bufferDurationMs = bufferMs
             )
         }
     }
@@ -389,6 +393,15 @@ class SettingsViewModel @Inject constructor(
             addonRepository.addAddon(url)
             val addons = addonRepository.getAllAddons().first()
             _uiState.value = _uiState.value.copy(addons = addons)
+        }
+    }
+
+    // ─── Live TV Buffer Duration ───
+    fun setBufferDuration(ms: Int) {
+        val clamped = ms.coerceIn(300, 3000)
+        _uiState.value = _uiState.value.copy(bufferDurationMs = clamped)
+        viewModelScope.launch {
+            settingsDataStore.setBufferDurationMs(clamped)
         }
     }
 

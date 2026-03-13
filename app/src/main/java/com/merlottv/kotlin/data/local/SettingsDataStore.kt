@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -48,6 +49,10 @@ class SettingsDataStore(private val context: Context) {
 
         // Live TV category order
         val CATEGORY_ORDER = stringPreferencesKey("live_tv_category_order")
+
+        // Live TV buffer duration (milliseconds) — adjustable 300ms to 3000ms
+        val BUFFER_DURATION_MS = intPreferencesKey("live_tv_buffer_duration_ms")
+        const val DEFAULT_BUFFER_MS = 800 // 0.8 seconds default
 
         // Subtitle settings
         val SUBTITLES_ENABLED = booleanPreferencesKey("subtitles_enabled")
@@ -241,6 +246,17 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setSubtitleFont(font: String) {
         context.settingsDataStore.edit { it[SUBTITLE_FONT] = font }
+    }
+
+    // ─── Live TV Buffer Duration ───
+    val bufferDurationMs: Flow<Int> = context.settingsDataStore.data.map { prefs ->
+        prefs[BUFFER_DURATION_MS] ?: DEFAULT_BUFFER_MS
+    }
+
+    suspend fun setBufferDurationMs(ms: Int) {
+        // Clamp to valid range: 300ms – 3000ms
+        val clamped = ms.coerceIn(300, 3000)
+        context.settingsDataStore.edit { it[BUFFER_DURATION_MS] = clamped }
     }
 
     // ─── Live TV Category Order ───
