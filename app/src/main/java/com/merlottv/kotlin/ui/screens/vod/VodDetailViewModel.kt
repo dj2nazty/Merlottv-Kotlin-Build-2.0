@@ -45,8 +45,9 @@ data class VodDetailUiState(
     // Similar content ("Like This")
     val similarItems: List<MetaPreview> = emptyList(),
     val isLoadingSimilar: Boolean = false,
-    // Trailer
-    val trailerYtId: String? = null
+    // Trailer — ytId for direct video, searchQuery for YouTube search fallback
+    val trailerYtId: String? = null,
+    val trailerSearchQuery: String? = null
 )
 
 @HiltViewModel
@@ -142,6 +143,11 @@ class VodDetailViewModel @Inject constructor(
             // Extract trailer YouTube ID from trailerStreams
             val trailerYtId = meta?.trailerStreams
                 ?.firstOrNull { it.ytId.isNotEmpty() }?.ytId
+            // YouTube search fallback — generates a search query for ANY title
+            val trailerSearch = if (trailerYtId == null && meta != null && meta.name.isNotEmpty()) {
+                val yearSuffix = if (meta.year.isNotEmpty()) " ${meta.year}" else ""
+                "${meta.name}$yearSuffix official trailer"
+            } else null
             if (meta != null && meta.videos.isNotEmpty()) {
                 val seasons = meta.videos
                     .map { it.season }
@@ -158,13 +164,15 @@ class VodDetailViewModel @Inject constructor(
                     seasons = seasons,
                     selectedSeason = firstSeason,
                     episodesForSeason = episodes,
-                    trailerYtId = trailerYtId
+                    trailerYtId = trailerYtId,
+                    trailerSearchQuery = trailerSearch
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     meta = meta,
-                    trailerYtId = trailerYtId
+                    trailerYtId = trailerYtId,
+                    trailerSearchQuery = trailerSearch
                 )
             }
         }

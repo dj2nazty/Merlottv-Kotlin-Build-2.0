@@ -87,9 +87,9 @@ class LiveTvViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(LiveTvUiState())
     val uiState: StateFlow<LiveTvUiState> = _uiState.asStateFlow()
 
-    // Failover tracking
+    // Failover tracking — searches all backup sources, not just 3
     private var failoverAttempts = 0
-    private val maxFailoverAttempts = 3
+    private val triedStreamUrls = mutableSetOf<String>()
     private var isPlayerReleased = false
     private var failoverMessageJob: Job? = null
 
@@ -317,6 +317,7 @@ class LiveTvViewModel @Inject constructor(
     private fun safePlayChannel(channel: Channel) {
         if (isPlayerReleased) return
         failoverAttempts = 0
+        triedStreamUrls.clear()
         try {
             player.stop()
             player.clearMediaItems()
@@ -336,28 +337,25 @@ class LiveTvViewModel @Inject constructor(
     private fun handlePlaybackError() {
         if (isPlayerReleased) return
         val currentChannel = _uiState.value.selectedChannel ?: return
-        if (failoverAttempts >= maxFailoverAttempts) {
-            _uiState.value = _uiState.value.copy(
-                isFailingOver = false,
-                failoverMessage = "No working backup found"
-            )
-            clearFailoverMessageAfterDelay()
-            return
-        }
+
+        // Track the current (broken) stream URL so we never try it again
+        triedStreamUrls.add(currentChannel.streamUrl)
 
         failoverAttempts++
         _uiState.value = _uiState.value.copy(
             isFailingOver = true,
-            failoverMessage = "Switching to backup... ($failoverAttempts/$maxFailoverAttempts)"
+            failoverMessage = "Searching backup sources... (attempt $failoverAttempts)"
         )
 
         viewModelScope.launch {
             try {
                 val backupChannel = withContext(Dispatchers.IO) {
-                    backupChannelRepository.findBackupStream(currentChannel.name)
+                    backupChannelRepository.findBackupStream(currentChannel.name, triedStreamUrls)
                 }
                 if (isPlayerReleased) return@launch
-                if (backupChannel != null && backupChannel.streamUrl != currentChannel.streamUrl) {
+                if (backupChannel != null) {
+                    // Track this backup URL in case it also fails
+                    triedStreamUrls.add(backupChannel.streamUrl)
                     try {
                         player.stop()
                         player.clearMediaItems()
@@ -373,9 +371,10 @@ class LiveTvViewModel @Inject constructor(
                     )
                     clearFailoverMessageAfterDelay()
                 } else {
+                    // No more matches found across all backup sources
                     _uiState.value = _uiState.value.copy(
                         isFailingOver = false,
-                        failoverMessage = "No backup available"
+                        failoverMessage = "No working backup found (searched all sources)"
                     )
                     clearFailoverMessageAfterDelay()
                 }

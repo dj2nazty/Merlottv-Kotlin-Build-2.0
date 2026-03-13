@@ -36,11 +36,17 @@ class BackupChannelRepository @Inject constructor(
 
     /**
      * Find a backup stream for a channel by name.
+     * Excludes any URLs in [excludeUrls] so the caller can skip already-tried streams.
      * Returns null if no match found.
      */
-    suspend fun findBackupStream(channelName: String): Channel? {
+    suspend fun findBackupStream(channelName: String, excludeUrls: Set<String> = emptySet()): Channel? {
         ensureCacheLoaded()
-        return findBestMatch(channelName, cachedBackupChannels)
+        val candidates = if (excludeUrls.isEmpty()) {
+            cachedBackupChannels
+        } else {
+            cachedBackupChannels.filter { it.streamUrl !in excludeUrls }
+        }
+        return findBestMatch(channelName, candidates)
     }
 
     fun invalidateCache() {

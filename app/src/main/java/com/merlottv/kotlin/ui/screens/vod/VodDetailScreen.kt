@@ -424,32 +424,55 @@ fun VodDetailScreen(
                                     Text("LIKE THIS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
 
-                                // Trailer button — only shown when trailer is available
-                                if (uiState.trailerYtId != null) {
+                                // Trailer button — ALWAYS shown (direct YouTube ID or search fallback)
+                                if (uiState.trailerYtId != null || uiState.trailerSearchQuery != null) {
                                     val context = androidx.compose.ui.platform.LocalContext.current
                                     var trailerFocused by remember { mutableStateOf(false) }
-                                    Button(
-                                        onClick = {
-                                            val ytId = uiState.trailerYtId
-                                            if (ytId != null) {
+
+                                    // Helper: launch trailer — direct video if ytId, otherwise YouTube search
+                                    val launchTrailer = {
+                                        val ytId = uiState.trailerYtId
+                                        val searchQuery = uiState.trailerSearchQuery
+                                        if (ytId != null) {
+                                            // Direct YouTube video
+                                            try {
+                                                val ytAppIntent = android.content.Intent(
+                                                    android.content.Intent.ACTION_VIEW,
+                                                    android.net.Uri.parse("vnd.youtube:$ytId")
+                                                )
+                                                context.startActivity(ytAppIntent)
+                                            } catch (_: Exception) {
                                                 try {
-                                                    // Try YouTube app first, fallback to browser
-                                                    val ytAppIntent = android.content.Intent(
+                                                    val webIntent = android.content.Intent(
                                                         android.content.Intent.ACTION_VIEW,
-                                                        android.net.Uri.parse("vnd.youtube:$ytId")
+                                                        android.net.Uri.parse("https://www.youtube.com/watch?v=$ytId")
                                                     )
-                                                    context.startActivity(ytAppIntent)
-                                                } catch (_: Exception) {
-                                                    try {
-                                                        val webIntent = android.content.Intent(
-                                                            android.content.Intent.ACTION_VIEW,
-                                                            android.net.Uri.parse("https://www.youtube.com/watch?v=$ytId")
-                                                        )
-                                                        context.startActivity(webIntent)
-                                                    } catch (_: Exception) { /* no YouTube available */ }
-                                                }
+                                                    context.startActivity(webIntent)
+                                                } catch (_: Exception) { }
                                             }
-                                        },
+                                        } else if (searchQuery != null) {
+                                            // YouTube search fallback — opens YouTube search for "Movie Name official trailer"
+                                            val encoded = java.net.URLEncoder.encode(searchQuery, "UTF-8")
+                                            try {
+                                                val searchIntent = android.content.Intent(
+                                                    android.content.Intent.ACTION_VIEW,
+                                                    android.net.Uri.parse("vnd.youtube://results?search_query=$encoded")
+                                                )
+                                                context.startActivity(searchIntent)
+                                            } catch (_: Exception) {
+                                                try {
+                                                    val webIntent = android.content.Intent(
+                                                        android.content.Intent.ACTION_VIEW,
+                                                        android.net.Uri.parse("https://www.youtube.com/results?search_query=$encoded")
+                                                    )
+                                                    context.startActivity(webIntent)
+                                                } catch (_: Exception) { }
+                                            }
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { launchTrailer() },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = if (trailerFocused) FocusedButtonGrey else MerlotColors.Surface2,
                                             contentColor = if (trailerFocused) MerlotColors.White else MerlotColors.TextPrimary
@@ -462,24 +485,7 @@ fun VodDetailScreen(
                                                 if (event.type == KeyEventType.KeyDown &&
                                                     (event.key == Key.DirectionCenter || event.key == Key.Enter)
                                                 ) {
-                                                    val ytId = uiState.trailerYtId
-                                                    if (ytId != null) {
-                                                        try {
-                                                            val ytAppIntent = android.content.Intent(
-                                                                android.content.Intent.ACTION_VIEW,
-                                                                android.net.Uri.parse("vnd.youtube:$ytId")
-                                                            )
-                                                            context.startActivity(ytAppIntent)
-                                                        } catch (_: Exception) {
-                                                            try {
-                                                                val webIntent = android.content.Intent(
-                                                                    android.content.Intent.ACTION_VIEW,
-                                                                    android.net.Uri.parse("https://www.youtube.com/watch?v=$ytId")
-                                                                )
-                                                                context.startActivity(webIntent)
-                                                            } catch (_: Exception) { }
-                                                        }
-                                                    }
+                                                    launchTrailer()
                                                     true
                                                 } else false
                                             }
