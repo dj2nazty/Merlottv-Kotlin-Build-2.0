@@ -4,11 +4,17 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultAllocator
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.repository.BackupChannelRepository
 import com.merlottv.kotlin.domain.model.Channel
@@ -82,23 +88,59 @@ class LiveTvViewModel @Inject constructor(
     private var isPlayerReleased = false
     private var failoverMessageJob: Job? = null
 
-    val player: ExoPlayer = ExoPlayer.Builder(application).build().apply {
-        playWhenReady = true
-        addListener(object : Player.Listener {
-            override fun onVideoSizeChanged(videoSize: VideoSize) {
-                if (isPlayerReleased) return
-                val resolution = if (videoSize.width > 0 && videoSize.height > 0) {
-                    "${videoSize.width}x${videoSize.height}"
-                } else ""
-                _uiState.value = _uiState.value.copy(videoResolution = resolution)
-            }
+    /**
+     * Zero-buffer ExoPlayer configuration for live TV:
+     * - minBufferMs = 1500ms: Absolute minimum data to hold before starting playback
+     * - maxBufferMs = 8000ms: Small ceiling so player never stockpiles and wastes memory
+     * - bufferForPlaybackMs = 500ms: Start playback after only 500ms of data (near-instant)
+     * - bufferForPlaybackAfterRebufferMs = 1000ms: After a rebuffer, resume after 1s (fast recovery)
+     * - HTTP connect/read timeouts = 8s: Fail fast on dead streams
+     * - prioritizeTimeOverSizeThresholds = true: Prefer time-based buffering, not byte-based
+     */
+    val player: ExoPlayer = run {
+        val loadControl = DefaultLoadControl.Builder()
+            .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
+            .setBufferDurationsMs(
+                /* minBufferMs */ 1_500,
+                /* maxBufferMs */ 8_000,
+                /* bufferForPlaybackMs */ 500,
+                /* bufferForPlaybackAfterRebufferMs */ 1_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(C.LENGTH_UNSET)
+            .build()
 
-            override fun onPlayerError(error: PlaybackException) {
-                if (isPlayerReleased) return
-                Log.w("LiveTvVM", "Player error: ${error.errorCodeName}", error)
-                handlePlaybackError()
+        // HTTP data source with tight timeouts for fast failover
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(8_000)
+            .setReadTimeoutMs(8_000)
+            .setAllowCrossProtocolRedirects(true)
+
+        val dataSourceFactory = DefaultDataSource.Factory(application, httpDataSourceFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+
+        ExoPlayer.Builder(application)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+            .apply {
+                playWhenReady = true
+                addListener(object : Player.Listener {
+                    override fun onVideoSizeChanged(videoSize: VideoSize) {
+                        if (isPlayerReleased) return
+                        val resolution = if (videoSize.width > 0 && videoSize.height > 0) {
+                            "${videoSize.width}x${videoSize.height}"
+                        } else ""
+                        _uiState.value = _uiState.value.copy(videoResolution = resolution)
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        if (isPlayerReleased) return
+                        Log.w("LiveTvVM", "Player error: ${error.errorCodeName}", error)
+                        handlePlaybackError()
+                    }
+                })
             }
-        })
     }
 
     init {

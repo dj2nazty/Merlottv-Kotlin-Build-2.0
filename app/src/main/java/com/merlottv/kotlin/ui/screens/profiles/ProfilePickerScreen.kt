@@ -1,5 +1,10 @@
 package com.merlottv.kotlin.ui.screens.profiles
 
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -22,7 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -31,7 +36,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -41,8 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -50,7 +52,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,7 +59,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.UserProfile
 import com.merlottv.kotlin.ui.theme.MerlotColors
-import kotlinx.coroutines.delay
 
 @Composable
 fun ProfilePickerScreen(
@@ -75,7 +75,6 @@ fun ProfilePickerScreen(
         contentAlignment = Alignment.Center
     ) {
         if (showCreateDialog) {
-            // Profile creation form overlay
             CreateProfileDialog(
                 profileCount = profiles.size,
                 onConfirm = { name, colorIndex ->
@@ -128,9 +127,14 @@ private fun CreateProfileDialog(
 ) {
     var profileName by remember { mutableStateOf("") }
     var selectedColor by remember { mutableIntStateOf(profileCount % ProfileDataStore.AVATAR_COLORS.size) }
-    var isEditingName by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Voice input launcher
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spoken.isNullOrBlank()) profileName = spoken
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -190,80 +194,34 @@ private fun CreateProfileDialog(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Name input — TvTextField pattern
-        if (isEditingName) {
-            LaunchedEffect(Unit) {
-                delay(100)
-                try { focusRequester.requestFocus() } catch (_: Exception) {}
-                delay(100)
-                keyboardController?.show()
-            }
-
-            OutlinedTextField(
-                value = profileName,
-                onValueChange = { profileName = it },
-                placeholder = { Text("Enter profile name", color = MerlotColors.TextMuted, fontSize = 13.sp) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = MerlotColors.TextPrimary,
-                    unfocusedTextColor = MerlotColors.TextPrimary,
-                    cursorColor = MerlotColors.Accent,
-                    focusedBorderColor = MerlotColors.Accent,
-                    unfocusedBorderColor = MerlotColors.Border
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester)
-                    .onPreviewKeyEvent { keyEvent ->
-                        if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Back) {
-                            keyboardController?.hide()
-                            isEditingName = false
-                            true
-                        } else false
+        // Name input — standard OutlinedTextField (works natively with Android TV keyboard + voice)
+        OutlinedTextField(
+            value = profileName,
+            onValueChange = { profileName = it },
+            placeholder = { Text("Enter profile name", color = MerlotColors.TextMuted, fontSize = 14.sp) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = MerlotColors.TextPrimary,
+                unfocusedTextColor = MerlotColors.TextPrimary,
+                cursorColor = MerlotColors.Accent,
+                focusedBorderColor = MerlotColors.Accent,
+                unfocusedBorderColor = MerlotColors.Border
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(8.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+            trailingIcon = {
+                IconButton(onClick = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Say profile name")
                     }
-                    .onFocusChanged { state ->
-                        if (!state.isFocused && !state.hasFocus) isEditingName = false
-                    },
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp),
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp)
-            )
-        } else {
-            var nameFocused by remember { mutableStateOf(false) }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MerlotColors.Surface2)
-                    .border(
-                        if (nameFocused) 2.dp else 1.dp,
-                        if (nameFocused) MerlotColors.Accent else MerlotColors.Border,
-                        RoundedCornerShape(8.dp)
-                    )
-                    .onFocusChanged { nameFocused = it.isFocused }
-                    .focusable()
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                            isEditingName = true; true
-                        } else false
-                    }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Edit, null,
-                    tint = if (nameFocused) MerlotColors.Accent else MerlotColors.TextMuted,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = profileName.ifEmpty { "Enter profile name" },
-                    color = if (profileName.isEmpty()) MerlotColors.TextMuted else MerlotColors.TextPrimary,
-                    fontSize = 14.sp,
-                    maxLines = 1
-                )
+                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
+                }) {
+                    Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice input", tint = MerlotColors.Accent, modifier = Modifier.size(20.dp))
+                }
             }
-        }
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 

@@ -1,7 +1,9 @@
 package com.merlottv.kotlin.ui.screens.settings
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -27,7 +29,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -43,7 +44,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,8 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -63,14 +61,13 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.ui.theme.MerlotColors
-import kotlinx.coroutines.delay
 
 /**
  * Helper modifier that adds a visible Accent border when the composable is focused via D-pad.
@@ -210,8 +207,43 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     var newProfileName by remember { mutableStateOf("") }
                     var selectedColor by remember { mutableIntStateOf(0) }
+
+                    // Voice input launcher for profile name
+                    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                        if (result.resultCode == Activity.RESULT_OK) {
+                            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                            if (!spoken.isNullOrBlank()) newProfileName = spoken
+                        }
+                    }
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TvTextField(value = newProfileName, onValueChange = { newProfileName = it }, placeholder = "Profile name", modifier = Modifier.weight(1f))
+                        OutlinedTextField(
+                            value = newProfileName,
+                            onValueChange = { newProfileName = it },
+                            placeholder = { Text("Profile name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MerlotColors.TextPrimary,
+                                unfocusedTextColor = MerlotColors.TextPrimary,
+                                cursorColor = MerlotColors.Accent,
+                                focusedBorderColor = MerlotColors.Accent,
+                                unfocusedBorderColor = MerlotColors.Border
+                            ),
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Say profile name")
+                                    }
+                                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
+                                }) {
+                                    Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice input", tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(onClick = { viewModel.addProfile(newProfileName, selectedColor); newProfileName = ""; selectedColor = (selectedColor + 1) % ProfileDataStore.AVATAR_COLORS.size }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = newProfileName.isNotBlank()) {
                             Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
@@ -246,10 +278,74 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 var playlistName by remember { mutableStateOf("") }
                 var playlistUrl by remember { mutableStateOf("") }
-                TvTextField(value = playlistName, onValueChange = { playlistName = it }, placeholder = "Playlist name", modifier = Modifier.fillMaxWidth())
+
+                // Voice input launcher for playlist fields
+                var voiceTarget by remember { mutableStateOf("") }
+                val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                    if (result.resultCode == Activity.RESULT_OK) {
+                        val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                        if (!spoken.isNullOrBlank()) {
+                            when (voiceTarget) {
+                                "name" -> playlistName = spoken
+                                "url" -> playlistUrl = spoken
+                            }
+                        }
+                    }
+                }
+
+                fun launchVoice(target: String, prompt: String) {
+                    voiceTarget = target
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
+                    }
+                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
+                }
+
+                OutlinedTextField(
+                    value = playlistName,
+                    onValueChange = { playlistName = it },
+                    placeholder = { Text("Playlist name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MerlotColors.TextPrimary,
+                        unfocusedTextColor = MerlotColors.TextPrimary,
+                        cursorColor = MerlotColors.Accent,
+                        focusedBorderColor = MerlotColors.Accent,
+                        unfocusedBorderColor = MerlotColors.Border
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                    trailingIcon = {
+                        IconButton(onClick = { launchVoice("name", "Say playlist name") }) {
+                            Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice", tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TvTextField(value = playlistUrl, onValueChange = { playlistUrl = it }, placeholder = "https://playlist-url.m3u", modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = playlistUrl,
+                        onValueChange = { playlistUrl = it },
+                        placeholder = { Text("https://playlist-url.m3u", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MerlotColors.TextPrimary,
+                            unfocusedTextColor = MerlotColors.TextPrimary,
+                            cursorColor = MerlotColors.Accent,
+                            focusedBorderColor = MerlotColors.Accent,
+                            unfocusedBorderColor = MerlotColors.Border
+                        ),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                        trailingIcon = {
+                            IconButton(onClick = { launchVoice("url", "Say playlist URL") }) {
+                                Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice", tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = { viewModel.addPlaylist(playlistName, playlistUrl); playlistName = ""; playlistUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = playlistUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
@@ -280,9 +376,39 @@ fun SettingsScreen(
                 var epgUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        TvTextField(value = epgName, onValueChange = { epgName = it }, placeholder = "Source name", modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(
+                            value = epgName,
+                            onValueChange = { epgName = it },
+                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MerlotColors.TextPrimary,
+                                unfocusedTextColor = MerlotColors.TextPrimary,
+                                cursorColor = MerlotColors.Accent,
+                                focusedBorderColor = MerlotColors.Accent,
+                                unfocusedBorderColor = MerlotColors.Border
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
-                        TvTextField(value = epgUrl, onValueChange = { epgUrl = it }, placeholder = "https://epg-source.xml", modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(
+                            value = epgUrl,
+                            onValueChange = { epgUrl = it },
+                            placeholder = { Text("https://epg-source.xml", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MerlotColors.TextPrimary,
+                                unfocusedTextColor = MerlotColors.TextPrimary,
+                                cursorColor = MerlotColors.Accent,
+                                focusedBorderColor = MerlotColors.Accent,
+                                unfocusedBorderColor = MerlotColors.Border
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = { viewModel.addEpgSource(epgName, epgUrl); epgName = ""; epgUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = epgUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
@@ -315,9 +441,39 @@ fun SettingsScreen(
                 var backupUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        TvTextField(value = backupName, onValueChange = { backupName = it }, placeholder = "Source name", modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(
+                            value = backupName,
+                            onValueChange = { backupName = it },
+                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MerlotColors.TextPrimary,
+                                unfocusedTextColor = MerlotColors.TextPrimary,
+                                cursorColor = MerlotColors.Accent,
+                                focusedBorderColor = MerlotColors.Accent,
+                                unfocusedBorderColor = MerlotColors.Border
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
-                        TvTextField(value = backupUrl, onValueChange = { backupUrl = it }, placeholder = "https://backup-server.com/get.php?username=...", modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(
+                            value = backupUrl,
+                            onValueChange = { backupUrl = it },
+                            placeholder = { Text("https://backup-server.com/get.php?username=...", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MerlotColors.TextPrimary,
+                                unfocusedTextColor = MerlotColors.TextPrimary,
+                                cursorColor = MerlotColors.Accent,
+                                focusedBorderColor = MerlotColors.Accent,
+                                unfocusedBorderColor = MerlotColors.Border
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = { viewModel.addBackupSource(backupName, backupUrl); backupName = ""; backupUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = backupUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
@@ -340,7 +496,22 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 var addonInput by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TvTextField(value = addonInput, onValueChange = { addonInput = it }, placeholder = "https://addon.example.com/manifest.json", modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = addonInput,
+                        onValueChange = { addonInput = it },
+                        placeholder = { Text("https://addon.example.com/manifest.json", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MerlotColors.TextPrimary,
+                            unfocusedTextColor = MerlotColors.TextPrimary,
+                            cursorColor = MerlotColors.Accent,
+                            focusedBorderColor = MerlotColors.Accent,
+                            unfocusedBorderColor = MerlotColors.Border
+                        ),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = { viewModel.addAddon(addonInput); addonInput = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
@@ -351,7 +522,22 @@ fun SettingsScreen(
         item(key = "torbox") {
             SettingsSection(title = "Torbox", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 var torboxInput by remember { mutableStateOf(uiState.torboxKey) }
-                TvTextField(value = torboxInput, onValueChange = { torboxInput = it }, placeholder = "Torbox API Key", modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = torboxInput,
+                    onValueChange = { torboxInput = it },
+                    placeholder = { Text("Torbox API Key", color = MerlotColors.TextMuted, fontSize = 12.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MerlotColors.TextPrimary,
+                        unfocusedTextColor = MerlotColors.TextPrimary,
+                        cursorColor = MerlotColors.Accent,
+                        focusedBorderColor = MerlotColors.Accent,
+                        unfocusedBorderColor = MerlotColors.Border
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = { viewModel.saveTorboxKey(torboxInput) }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Save Key", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
             }
@@ -366,79 +552,5 @@ private fun SettingsSection(title: String, icon: @Composable () -> Unit = {}, co
     Column(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) { icon(); Spacer(modifier = Modifier.width(8.dp)); Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
         content()
-    }
-}
-
-/**
- * TV-friendly text field: D-pad navigable preview box that opens a real editable
- * OutlinedTextField + soft keyboard (including voice input) on D-pad center/Enter.
- * Press Back to dismiss keyboard and return to D-pad navigation mode.
- */
-@Composable
-private fun TvTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    modifier: Modifier = Modifier
-) {
-    var isEditing by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    if (isEditing) {
-        LaunchedEffect(Unit) {
-            delay(100)
-            try { focusRequester.requestFocus() } catch (_: Exception) {}
-            delay(100)
-            keyboardController?.show()
-        }
-
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = { Text(placeholder, color = MerlotColors.TextMuted, fontSize = 10.sp) },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = MerlotColors.TextPrimary,
-                unfocusedTextColor = MerlotColors.TextPrimary,
-                cursorColor = MerlotColors.Accent,
-                focusedBorderColor = MerlotColors.Accent,
-                unfocusedBorderColor = MerlotColors.Border
-            ),
-            modifier = modifier
-                .focusRequester(focusRequester)
-                .onPreviewKeyEvent { keyEvent ->
-                    if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Back) {
-                        keyboardController?.hide()
-                        isEditing = false
-                        true
-                    } else false
-                }
-                .onFocusChanged { state ->
-                    if (!state.isFocused && !state.hasFocus) isEditing = false
-                },
-            singleLine = true,
-            shape = RoundedCornerShape(8.dp),
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
-        )
-    } else {
-        var isFocused by remember { mutableStateOf(false) }
-        Row(
-            modifier = modifier
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MerlotColors.Surface)
-                .border(if (isFocused) 2.dp else 1.dp, if (isFocused) MerlotColors.Accent else MerlotColors.Border, RoundedCornerShape(8.dp))
-                .onFocusChanged { isFocused = it.isFocused }
-                .focusable()
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) { isEditing = true; true } else false
-                }
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.Edit, null, tint = if (isFocused) MerlotColors.Accent else MerlotColors.TextMuted, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(text = value.ifEmpty { placeholder }, color = if (value.isEmpty()) MerlotColors.TextMuted else MerlotColors.TextPrimary, fontSize = 11.sp, maxLines = 1)
-        }
     }
 }

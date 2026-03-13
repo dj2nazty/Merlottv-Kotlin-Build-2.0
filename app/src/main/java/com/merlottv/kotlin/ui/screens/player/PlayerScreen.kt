@@ -50,9 +50,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.ui.PlayerView
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -85,24 +91,49 @@ fun PlayerScreen(
     }
 
     val player = remember {
-        ExoPlayer.Builder(context).build().apply {
-            val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
-            setMediaItem(mediaItem)
-            playWhenReady = true
-            prepare()
+        // Low-latency buffer config for fast playback start
+        val loadControl = DefaultLoadControl.Builder()
+            .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
+            .setBufferDurationsMs(
+                /* minBufferMs */ 2_500,
+                /* maxBufferMs */ 15_000,
+                /* bufferForPlaybackMs */ 800,
+                /* bufferForPlaybackAfterRebufferMs */ 1_500
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(C.LENGTH_UNSET)
+            .build()
 
-            addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY) {
-                        totalDuration = duration.coerceAtLeast(0)
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(10_000)
+            .setReadTimeoutMs(10_000)
+            .setAllowCrossProtocolRedirects(true)
+
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+            .apply {
+                val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
+                setMediaItem(mediaItem)
+                playWhenReady = true
+                prepare()
+
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY) {
+                            totalDuration = duration.coerceAtLeast(0)
+                        }
                     }
-                }
 
-                override fun onIsPlayingChanged(playing: Boolean) {
-                    isPlaying = playing
-                }
-            })
-        }
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        isPlaying = playing
+                    }
+                })
+            }
     }
 
     // Resume from saved position

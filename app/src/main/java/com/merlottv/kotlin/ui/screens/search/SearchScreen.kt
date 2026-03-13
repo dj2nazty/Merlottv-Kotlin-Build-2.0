@@ -1,5 +1,10 @@
 package com.merlottv.kotlin.ui.screens.search
 
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -11,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -18,8 +24,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -55,6 +63,16 @@ fun SearchScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // Voice input launcher for search
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spoken.isNullOrBlank()) {
+                viewModel.onQueryChanged(spoken)
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -66,6 +84,17 @@ fun SearchScreen(
             onValueChange = { viewModel.onQueryChanged(it) },
             placeholder = { Text("Search movies & series...", color = MerlotColors.TextMuted) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MerlotColors.TextMuted) },
+            trailingIcon = {
+                IconButton(onClick = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies and series")
+                    }
+                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
+                }) {
+                    Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice search", tint = MerlotColors.Accent, modifier = Modifier.size(20.dp))
+                }
+            },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = MerlotColors.TextPrimary,
                 unfocusedTextColor = MerlotColors.TextPrimary,
