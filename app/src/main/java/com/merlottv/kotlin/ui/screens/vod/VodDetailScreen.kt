@@ -87,6 +87,9 @@ fun VodDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playButtonFocusRequester = remember { FocusRequester() }
 
+    // In-app trailer player state
+    var showingTrailerUrl by remember { mutableStateOf<String?>(null) }
+
     // Auto-navigate to player when stream is selected
     LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
         if (uiState.autoPlayTriggered && uiState.selectedStreamUrl != null) {
@@ -426,48 +429,17 @@ fun VodDetailScreen(
 
                                 // Trailer button — ALWAYS shown (direct YouTube ID or search fallback)
                                 if (uiState.trailerYtId != null || uiState.trailerSearchQuery != null) {
-                                    val context = androidx.compose.ui.platform.LocalContext.current
                                     var trailerFocused by remember { mutableStateOf(false) }
 
-                                    // Helper: launch trailer — direct video if ytId, otherwise YouTube search
+                                    // Helper: open trailer in-app via WebView
                                     val launchTrailer = {
                                         val ytId = uiState.trailerYtId
                                         val searchQuery = uiState.trailerSearchQuery
                                         if (ytId != null) {
-                                            // Direct YouTube video
-                                            try {
-                                                val ytAppIntent = android.content.Intent(
-                                                    android.content.Intent.ACTION_VIEW,
-                                                    android.net.Uri.parse("vnd.youtube:$ytId")
-                                                )
-                                                context.startActivity(ytAppIntent)
-                                            } catch (_: Exception) {
-                                                try {
-                                                    val webIntent = android.content.Intent(
-                                                        android.content.Intent.ACTION_VIEW,
-                                                        android.net.Uri.parse("https://www.youtube.com/watch?v=$ytId")
-                                                    )
-                                                    context.startActivity(webIntent)
-                                                } catch (_: Exception) { }
-                                            }
+                                            showingTrailerUrl = "https://www.youtube.com/watch?v=$ytId"
                                         } else if (searchQuery != null) {
-                                            // YouTube search fallback — opens YouTube search for "Movie Name official trailer"
                                             val encoded = java.net.URLEncoder.encode(searchQuery, "UTF-8")
-                                            try {
-                                                val searchIntent = android.content.Intent(
-                                                    android.content.Intent.ACTION_VIEW,
-                                                    android.net.Uri.parse("vnd.youtube://results?search_query=$encoded")
-                                                )
-                                                context.startActivity(searchIntent)
-                                            } catch (_: Exception) {
-                                                try {
-                                                    val webIntent = android.content.Intent(
-                                                        android.content.Intent.ACTION_VIEW,
-                                                        android.net.Uri.parse("https://www.youtube.com/results?search_query=$encoded")
-                                                    )
-                                                    context.startActivity(webIntent)
-                                                } catch (_: Exception) { }
-                                            }
+                                            showingTrailerUrl = "https://www.youtube.com/results?search_query=$encoded"
                                         }
                                     }
 
@@ -717,6 +689,14 @@ fun VodDetailScreen(
                     }
                 }
             }
+        }
+
+        // ─── In-App Trailer Player Overlay ───
+        showingTrailerUrl?.let { url ->
+            com.merlottv.kotlin.ui.components.YouTubeWebPlayer(
+                url = url,
+                onDismiss = { showingTrailerUrl = null }
+            )
         }
     }
 }

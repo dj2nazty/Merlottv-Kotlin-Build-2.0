@@ -1,15 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@file:Suppress("SetJavaScriptEnabled")
 
 package com.merlottv.kotlin.ui.screens.spacex
 
-import android.annotation.SuppressLint
-import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -20,7 +12,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
@@ -38,15 +29,14 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.LaunchStatus
 import com.merlottv.kotlin.domain.model.SpaceXLaunch
+import com.merlottv.kotlin.ui.components.YouTubeWebPlayer
 import com.merlottv.kotlin.ui.theme.MerlotColors
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -207,120 +197,6 @@ fun SpaceXScreen(
     }
 }
 
-// ─── In-App YouTube WebView Player ──────────────────────────────────────────
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun YouTubeWebPlayer(
-    url: String,
-    onDismiss: () -> Unit
-) {
-    // Back button closes the player
-    BackHandler { onDismiss() }
-
-    val embedUrl = remember(url) { buildEmbedUrl(url) }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
-                    onDismiss(); true
-                } else false
-            }
-    ) {
-        // WebView
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    webViewClient = WebViewClient()
-                    webChromeClient = WebChromeClient()
-                    settings.apply {
-                        javaScriptEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        domStorageEnabled = true
-                        allowContentAccess = true
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    }
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    loadUrl(embedUrl)
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Close button (top-right)
-        var closeFocused by remember { mutableStateOf(false) }
-        IconButton(
-            onClick = onDismiss,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.6f))
-                .onFocusChanged { closeFocused = it.isFocused }
-                .focusable()
-                .then(
-                    if (closeFocused) Modifier.border(2.dp, Color.White, CircleShape)
-                    else Modifier
-                )
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown &&
-                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                    ) {
-                        onDismiss(); true
-                    } else false
-                }
-        ) {
-            Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(24.dp))
-        }
-    }
-}
-
-/**
- * Convert a YouTube URL into an embeddable URL.
- * Handles: youtu.be/ID, youtube.com/watch?v=ID, youtube.com/live/ID,
- * and falls back to loading the URL directly in WebView if no ID can be extracted.
- */
-private fun buildEmbedUrl(url: String): String {
-    val videoId = extractYouTubeId(url)
-    return if (videoId != null) {
-        "https://www.youtube.com/embed/$videoId?autoplay=1&rel=0&modestbranding=1&playsinline=1"
-    } else {
-        // Can't extract ID — load URL directly (e.g. channel live page)
-        url
-    }
-}
-
-private fun extractYouTubeId(url: String): String? {
-    // youtu.be/VIDEO_ID
-    if (url.contains("youtu.be/")) {
-        return url.substringAfter("youtu.be/").substringBefore("?").substringBefore("&").takeIf { it.isNotEmpty() }
-    }
-    // youtube.com/live/VIDEO_ID
-    if (url.contains("/live/")) {
-        return url.substringAfter("/live/").substringBefore("?").substringBefore("&").takeIf { it.isNotEmpty() }
-    }
-    // youtube.com/watch?v=VIDEO_ID
-    if (url.contains("v=")) {
-        return url.substringAfter("v=").substringBefore("&").substringBefore("#").takeIf { it.isNotEmpty() }
-    }
-    // youtube.com/embed/VIDEO_ID (already embedded)
-    if (url.contains("/embed/")) {
-        return url.substringAfter("/embed/").substringBefore("?").substringBefore("&").takeIf { it.isNotEmpty() }
-    }
-    return null
-}
-
 // ─── Countdown Hero Card ────────────────────────────────────────────────────
 
 @Composable
@@ -407,44 +283,43 @@ private fun CountdownHeroCard(
                     )
                 }
 
-                // Bottom row — watch live button
-                if (launch.videoUrls.isNotEmpty() || launch.webcastLive) {
-                    var btnFocused by remember { mutableStateOf(false) }
-                    Button(
-                        onClick = {
-                            val watchUrl = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
-                            onWatchLive(watchUrl)
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (launch.webcastLive) Color(0xFFE53935) else MerlotColors.Accent
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        modifier = Modifier
-                            .onFocusChanged { btnFocused = it.isFocused }
-                            .focusable()
-                            .then(
-                                if (btnFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
-                                else Modifier
-                            )
-                            .onPreviewKeyEvent { event ->
-                                if (event.type == KeyEventType.KeyDown &&
-                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                ) {
-                                    val watchUrl = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
-                                    onWatchLive(watchUrl)
-                                    true
-                                } else false
-                            }
-                    ) {
-                        Icon(Icons.Default.PlayArrow, "Watch", modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (launch.webcastLive) "WATCH LIVE" else "Watch Stream",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                // Bottom row — watch button (always shown, defaults to SpaceX live channel)
+                var btnFocused by remember { mutableStateOf(false) }
+                val watchUrl = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
+                Button(
+                    onClick = { onWatchLive(watchUrl) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (launch.webcastLive) Color(0xFFE53935) else MerlotColors.Accent
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .onFocusChanged { btnFocused = it.isFocused }
+                        .focusable()
+                        .then(
+                            if (btnFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
+                            else Modifier
                         )
-                    }
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                            ) {
+                                onWatchLive(watchUrl)
+                                true
+                            } else false
+                        }
+                ) {
+                    Icon(Icons.Default.PlayArrow, "Watch", modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        when {
+                            launch.webcastLive -> "WATCH LIVE"
+                            launch.videoUrls.isNotEmpty() -> "Watch Stream"
+                            else -> "SpaceX Live"
+                        },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
