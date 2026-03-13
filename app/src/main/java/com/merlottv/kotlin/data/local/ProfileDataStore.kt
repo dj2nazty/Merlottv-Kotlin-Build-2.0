@@ -19,6 +19,7 @@ data class UserProfile(
     val id: String = UUID.randomUUID().toString().take(8),
     val name: String,
     val colorIndex: Int = 0,
+    val avatarUrl: String = "", // Empty = use color+letter, non-empty = show image
     val isDefault: Boolean = false
 )
 
@@ -39,13 +40,56 @@ class ProfileDataStore(private val context: Context) {
             0xFF64FFDA.toInt()  // Teal
         )
 
+        /** 25 pre-selected avatar images using DiceBear API — themed after popular animated characters */
+        val AVATAR_IMAGES = listOf(
+            // Family Guy themed
+            "https://api.dicebear.com/7.x/adventurer/png?seed=Peter&size=128&backgroundColor=b6e3f4",
+            "https://api.dicebear.com/7.x/adventurer/png?seed=Stewie&size=128&backgroundColor=ffd5dc",
+            "https://api.dicebear.com/7.x/adventurer/png?seed=Brian&size=128&backgroundColor=c0aede",
+            "https://api.dicebear.com/7.x/adventurer/png?seed=Quagmire&size=128&backgroundColor=d1d4f9",
+            "https://api.dicebear.com/7.x/adventurer/png?seed=Lois&size=128&backgroundColor=ffdfbf",
+            // Simpsons themed
+            "https://api.dicebear.com/7.x/fun-emoji/png?seed=Homer&size=128&backgroundColor=ffd93d",
+            "https://api.dicebear.com/7.x/fun-emoji/png?seed=Bart&size=128&backgroundColor=ff6b6b",
+            "https://api.dicebear.com/7.x/fun-emoji/png?seed=Lisa&size=128&backgroundColor=c0eb75",
+            "https://api.dicebear.com/7.x/fun-emoji/png?seed=Marge&size=128&backgroundColor=74b9ff",
+            "https://api.dicebear.com/7.x/fun-emoji/png?seed=Krusty&size=128&backgroundColor=fdcb6e",
+            // Star Wars themed
+            "https://api.dicebear.com/7.x/bottts/png?seed=DarthVader&size=128&backgroundColor=2d3436",
+            "https://api.dicebear.com/7.x/bottts/png?seed=Yoda&size=128&backgroundColor=00b894",
+            "https://api.dicebear.com/7.x/bottts/png?seed=BobaFett&size=128&backgroundColor=636e72",
+            "https://api.dicebear.com/7.x/bottts/png?seed=Stormtrooper&size=128&backgroundColor=dfe6e9",
+            "https://api.dicebear.com/7.x/bottts/png?seed=R2D2&size=128&backgroundColor=0984e3",
+            // Disney themed
+            "https://api.dicebear.com/7.x/pixel-art/png?seed=Mickey&size=128&backgroundColor=e17055",
+            "https://api.dicebear.com/7.x/pixel-art/png?seed=Donald&size=128&backgroundColor=74b9ff",
+            "https://api.dicebear.com/7.x/pixel-art/png?seed=Goofy&size=128&backgroundColor=fdcb6e",
+            "https://api.dicebear.com/7.x/pixel-art/png?seed=BuzzLightyear&size=128&backgroundColor=a29bfe",
+            "https://api.dicebear.com/7.x/pixel-art/png?seed=Stitch&size=128&backgroundColor=81ecec",
+            // Other popular animated
+            "https://api.dicebear.com/7.x/adventurer/png?seed=SpongeBob&size=128&backgroundColor=ffeaa7",
+            "https://api.dicebear.com/7.x/adventurer/png?seed=RickSanchez&size=128&backgroundColor=55efc4",
+            "https://api.dicebear.com/7.x/adventurer/png?seed=ScoobyDoo&size=128&backgroundColor=fab1a0",
+            "https://api.dicebear.com/7.x/bottts/png?seed=Batman&size=128&backgroundColor=2d3436",
+            "https://api.dicebear.com/7.x/fun-emoji/png?seed=Pikachu&size=128&backgroundColor=ffeaa7"
+        )
+
+        /** Human-readable labels for avatar images */
+        val AVATAR_LABELS = listOf(
+            "Peter", "Stewie", "Brian", "Quagmire", "Lois",
+            "Homer", "Bart", "Lisa", "Marge", "Krusty",
+            "Vader", "Yoda", "Boba Fett", "Trooper", "R2-D2",
+            "Mickey", "Donald", "Goofy", "Buzz", "Stitch",
+            "SpongeBob", "Rick", "Scooby", "Batman", "Pikachu"
+        )
+
         private const val DEFAULT_PROFILE_ID = "default"
     }
 
     val profiles: Flow<List<UserProfile>> = context.profileDataStore.data.map { prefs ->
         val json = prefs[PROFILES]
         if (json != null) parseProfilesJson(json)
-        else listOf(UserProfile(DEFAULT_PROFILE_ID, "Default", 0, true))
+        else listOf(UserProfile(DEFAULT_PROFILE_ID, "Default", 0, "", true))
     }
 
     val activeProfileId: Flow<String> = context.profileDataStore.data.map { prefs ->
@@ -60,13 +104,14 @@ class ProfileDataStore(private val context: Context) {
         context.profileDataStore.edit { it[ACTIVE_PROFILE_ID] = profileId }
     }
 
-    suspend fun addProfile(name: String, colorIndex: Int): UserProfile {
+    suspend fun addProfile(name: String, colorIndex: Int, avatarUrl: String = ""): UserProfile {
         val currentProfiles = profiles.first().toMutableList()
         if (currentProfiles.size >= 6) throw IllegalStateException("Maximum 6 profiles allowed")
         val profile = UserProfile(
             id = UUID.randomUUID().toString().take(8),
             name = name,
-            colorIndex = colorIndex
+            colorIndex = colorIndex,
+            avatarUrl = avatarUrl
         )
         currentProfiles.add(profile)
         saveProfiles(currentProfiles)
@@ -104,6 +149,7 @@ class ProfileDataStore(private val context: Context) {
             obj.put("id", p.id)
             obj.put("name", p.name)
             obj.put("colorIndex", p.colorIndex)
+            obj.put("avatarUrl", p.avatarUrl)
             obj.put("isDefault", p.isDefault)
             jsonArray.put(obj)
         }
@@ -119,11 +165,12 @@ class ProfileDataStore(private val context: Context) {
                     id = obj.optString("id", "default"),
                     name = obj.optString("name", "Profile"),
                     colorIndex = obj.optInt("colorIndex", 0),
+                    avatarUrl = obj.optString("avatarUrl", ""),
                     isDefault = obj.optBoolean("isDefault", false)
                 )
             }
         } catch (_: Exception) {
-            listOf(UserProfile(DEFAULT_PROFILE_ID, "Default", 0, true))
+            listOf(UserProfile(DEFAULT_PROFILE_ID, "Default", 0, "", true))
         }
     }
 }

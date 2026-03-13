@@ -1,7 +1,9 @@
 package com.merlottv.kotlin.ui.screens.search
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -61,6 +65,7 @@ fun SearchScreen(
     onNavigateToDetail: (String, String) -> Unit,
     viewModel: SearchViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
 
     // Voice input launcher for search
@@ -70,6 +75,17 @@ fun SearchScreen(
             if (!spoken.isNullOrBlank()) {
                 viewModel.onQueryChanged(spoken)
             }
+        }
+    }
+    val speechIntent = remember {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies and series")
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            try { voiceLauncher.launch(speechIntent) } catch (_: Exception) {}
         }
     }
 
@@ -86,11 +102,11 @@ fun SearchScreen(
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MerlotColors.TextMuted) },
             trailingIcon = {
                 IconButton(onClick = {
-                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies and series")
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        try { voiceLauncher.launch(speechIntent) } catch (_: Exception) {}
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
-                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
                 }) {
                     Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice search", tint = MerlotColors.Accent, modifier = Modifier.size(20.dp))
                 }

@@ -1,11 +1,14 @@
 package com.merlottv.kotlin.ui.screens.settings
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -32,6 +35,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -214,11 +220,20 @@ fun SettingsScreen(
                     var selectedColor by remember { mutableIntStateOf(0) }
 
                     // Voice input launcher for profile name
-                    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                    val profileVoiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                         if (result.resultCode == Activity.RESULT_OK) {
                             val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
                             if (!spoken.isNullOrBlank()) newProfileName = spoken
                         }
+                    }
+                    val profileSpeechIntent = remember {
+                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Say profile name")
+                        }
+                    }
+                    val profilePermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                        if (granted) { try { profileVoiceLauncher.launch(profileSpeechIntent) } catch (_: Exception) {} }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -239,11 +254,11 @@ fun SettingsScreen(
                             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                             trailingIcon = {
                                 IconButton(onClick = {
-                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Say profile name")
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        try { profileVoiceLauncher.launch(profileSpeechIntent) } catch (_: Exception) {}
+                                    } else {
+                                        profilePermLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
-                                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
                                 }) {
                                     Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice input", tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
                                 }
@@ -286,7 +301,7 @@ fun SettingsScreen(
 
                 // Voice input launcher for playlist fields
                 var voiceTarget by remember { mutableStateOf("") }
-                val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                val playlistVoiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                     if (result.resultCode == Activity.RESULT_OK) {
                         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
                         if (!spoken.isNullOrBlank()) {
@@ -297,6 +312,15 @@ fun SettingsScreen(
                         }
                     }
                 }
+                val playlistPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                    if (granted) {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, if (voiceTarget == "name") "Say playlist name" else "Say playlist URL")
+                        }
+                        try { playlistVoiceLauncher.launch(intent) } catch (_: Exception) {}
+                    }
+                }
 
                 fun launchVoice(target: String, prompt: String) {
                     voiceTarget = target
@@ -304,7 +328,11 @@ fun SettingsScreen(
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
                     }
-                    try { voiceLauncher.launch(intent) } catch (_: Exception) {}
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        try { playlistVoiceLauncher.launch(intent) } catch (_: Exception) {}
+                    } else {
+                        playlistPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 }
 
                 OutlinedTextField(
@@ -545,6 +573,80 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = { viewModel.saveTorboxKey(torboxInput) }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Save Key", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            }
+        }
+
+        // ═══ Live TV Category Order ═══
+        if (uiState.categoryOrder.isNotEmpty()) {
+            item(key = "category_order") {
+                SettingsSection(title = "Live TV Categories", icon = { Icon(Icons.Default.List, null, tint = MerlotColors.Accent) }) {
+                    Text("Reorder categories using the arrow buttons. Favorites always stays first.", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    uiState.categoryOrder.forEachIndexed { index, category ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                                .dpadFocusable()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${index + 1}.",
+                                color = MerlotColors.TextMuted,
+                                fontSize = 11.sp,
+                                modifier = Modifier.width(24.dp)
+                            )
+                            Text(
+                                text = category,
+                                color = MerlotColors.TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { viewModel.moveCategoryUp(index) },
+                                enabled = index > 0,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowUp, "Move up",
+                                    tint = if (index > 0) MerlotColors.Accent else MerlotColors.TextMuted.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { viewModel.moveCategoryDown(index) },
+                                enabled = index < uiState.categoryOrder.size - 1,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown, "Move down",
+                                    tint = if (index < uiState.categoryOrder.size - 1) MerlotColors.Accent else MerlotColors.TextMuted.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.saveCategoryOrder() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Save Order", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.resetCategoryOrder() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2, contentColor = MerlotColors.TextPrimary),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Reset", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                }
             }
         }
 

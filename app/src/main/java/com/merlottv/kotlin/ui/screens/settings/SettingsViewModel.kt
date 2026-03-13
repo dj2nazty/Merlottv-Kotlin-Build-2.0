@@ -13,6 +13,7 @@ import com.merlottv.kotlin.data.local.UserProfile
 import com.merlottv.kotlin.domain.model.Addon
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.repository.AddonRepository
+import com.merlottv.kotlin.domain.repository.ChannelRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +54,10 @@ data class SettingsUiState(
     val backupSources: List<BackupSourceEntry> = emptyList(),
     // Profiles
     val profiles: List<UserProfile> = emptyList(),
-    val activeProfileId: String = "default"
+    val activeProfileId: String = "default",
+    // Live TV category order
+    val categoryOrder: List<String> = emptyList(),
+    val availableCategories: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -61,7 +65,8 @@ class SettingsViewModel @Inject constructor(
     application: Application,
     private val settingsDataStore: SettingsDataStore,
     private val addonRepository: AddonRepository,
-    private val profileDataStore: ProfileDataStore
+    private val profileDataStore: ProfileDataStore,
+    private val channelRepository: ChannelRepository
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -70,6 +75,7 @@ class SettingsViewModel @Inject constructor(
     init {
         loadSettings()
         loadProfiles()
+        loadCategoryOrder()
     }
 
     private fun loadSettings() {
@@ -383,6 +389,71 @@ class SettingsViewModel @Inject constructor(
             addonRepository.addAddon(url)
             val addons = addonRepository.getAllAddons().first()
             _uiState.value = _uiState.value.copy(addons = addons)
+        }
+    }
+
+    // ─── Live TV Category Order ───
+    private fun loadCategoryOrder() {
+        viewModelScope.launch {
+            val savedOrder = settingsDataStore.categoryOrder.first()
+            _uiState.value = _uiState.value.copy(categoryOrder = savedOrder)
+
+            // Load available categories from playlists
+            try {
+                val playlists = settingsDataStore.playlists.first()
+                val enabledUrls = playlists.filter { it.enabled }.map { it.url }
+                if (enabledUrls.isNotEmpty()) {
+                    val channels = withContext(Dispatchers.IO) {
+                        if (enabledUrls.size == 1) channelRepository.loadChannels(enabledUrls.first())
+                        else channelRepository.loadMultipleChannels(enabledUrls)
+                    }
+                    val groups = channels.map { it.group }.distinct().sorted()
+                    // If we have a saved order, show it; otherwise show default
+                    val orderedGroups = if (savedOrder.isNotEmpty()) {
+                        val ordered = savedOrder.filter { it in groups }.toMutableList()
+                        val remaining = groups.filter { it !in ordered }
+                        ordered + remaining
+                    } else {
+                        groups
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        availableCategories = orderedGroups,
+                        categoryOrder = if (savedOrder.isNotEmpty()) savedOrder else orderedGroups
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun moveCategoryUp(index: Int) {
+        if (index <= 0) return
+        val current = _uiState.value.categoryOrder.toMutableList()
+        if (index in current.indices) {
+            val item = current.removeAt(index)
+            current.add(index - 1, item)
+            _uiState.value = _uiState.value.copy(categoryOrder = current)
+        }
+    }
+
+    fun moveCategoryDown(index: Int) {
+        val current = _uiState.value.categoryOrder.toMutableList()
+        if (index in current.indices && index < current.size - 1) {
+            val item = current.removeAt(index)
+            current.add(index + 1, item)
+            _uiState.value = _uiState.value.copy(categoryOrder = current)
+        }
+    }
+
+    fun saveCategoryOrder() {
+        viewModelScope.launch {
+            settingsDataStore.setCategoryOrder(_uiState.value.categoryOrder)
+        }
+    }
+
+    fun resetCategoryOrder() {
+        viewModelScope.launch {
+            settingsDataStore.setCategoryOrder(emptyList())
+            _uiState.value = _uiState.value.copy(categoryOrder = _uiState.value.availableCategories)
         }
     }
 }

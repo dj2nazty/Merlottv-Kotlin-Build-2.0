@@ -92,6 +92,8 @@ class HomeViewModel @Inject constructor(
                         jobs.add(CatalogJob(manifest.name, catalog.name, catalog.id, catalog.type, manifest.url))
                     }
                 }
+                // Hide Torbox "Your Media" catalogs from display
+                jobs.removeAll { it.addonName.contains("torbox", true) && it.catalogName.contains("your media", true) }
 
                 // Simple awaitAll with bounded dispatcher — single state emission
                 // avoids the overhead of Channel-based progressive loading which

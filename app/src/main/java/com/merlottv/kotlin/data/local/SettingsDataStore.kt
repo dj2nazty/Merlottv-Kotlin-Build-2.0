@@ -46,6 +46,9 @@ class SettingsDataStore(private val context: Context) {
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
 
+        // Live TV category order
+        val CATEGORY_ORDER = stringPreferencesKey("live_tv_category_order")
+
         // Subtitle settings
         val SUBTITLES_ENABLED = booleanPreferencesKey("subtitles_enabled")
         val SUBTITLE_LANGUAGE = stringPreferencesKey("subtitle_language")
@@ -231,5 +234,22 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setSubtitleFont(font: String) {
         context.settingsDataStore.edit { it[SUBTITLE_FONT] = font }
+    }
+
+    // ─── Live TV Category Order ───
+    val categoryOrder: Flow<List<String>> = context.settingsDataStore.data.map { prefs ->
+        val json = prefs[CATEGORY_ORDER]
+        if (json != null) {
+            try {
+                val arr = JSONArray(json)
+                (0 until arr.length()).map { arr.getString(it) }
+            } catch (_: Exception) { emptyList() }
+        } else emptyList()
+    }
+
+    suspend fun setCategoryOrder(order: List<String>) {
+        val jsonArray = JSONArray()
+        order.forEach { jsonArray.put(it) }
+        context.settingsDataStore.edit { it[CATEGORY_ORDER] = jsonArray.toString() }
     }
 }

@@ -175,16 +175,26 @@ class LiveTvViewModel @Inject constructor(
                 val groupSet = LinkedHashSet<String>(channels.size / 10)
                 for (ch in channels) { groupSet.add(ch.group) }
 
-                // Sort groups: Favorites first, USA-related second, then alphabetically
-                val sortedGroups = groupSet.sortedWith(
-                    compareByDescending<String> { group ->
-                        val lower = group.lowercase()
-                        lower.contains("usa") || lower.contains("us ") ||
-                        lower.startsWith("us:") || lower.startsWith("us|") ||
-                        lower.contains("united states") || lower.contains("american")
-                    }.thenBy { it.lowercase() }
-                )
-                // Add "★ Favorites" as the first category
+                // Check for custom category order from settings
+                val customOrder = settingsDataStore.categoryOrder.first()
+
+                val sortedGroups = if (customOrder.isNotEmpty()) {
+                    // Apply user's custom order, append any new categories at the end
+                    val ordered = customOrder.filter { groupSet.contains(it) }.toMutableList()
+                    val remaining = groupSet.filter { it !in ordered }.sortedBy { it.lowercase() }
+                    ordered + remaining
+                } else {
+                    // Default: USA-related first, then alphabetically
+                    groupSet.sortedWith(
+                        compareByDescending<String> { group ->
+                            val lower = group.lowercase()
+                            lower.contains("usa") || lower.contains("us ") ||
+                            lower.startsWith("us:") || lower.startsWith("us|") ||
+                            lower.contains("united states") || lower.contains("american")
+                        }.thenBy { it.lowercase() }
+                    )
+                }
+                // Add "★ Favorites" as the first category (always)
                 val groups = listOf("★ Favorites") + sortedGroups
 
                 // Don't set filteredChannels — null means "use channels directly"

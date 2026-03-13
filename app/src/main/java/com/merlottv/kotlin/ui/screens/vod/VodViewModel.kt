@@ -100,6 +100,8 @@ class VodViewModel @Inject constructor(
                         jobs.add(CatalogJob(manifest, catalog.id, catalog.name, catalog.type))
                     }
                 }
+                // Hide Torbox "Your Media" catalogs from display
+                jobs.removeAll { it.addon.name.contains("torbox", true) && it.catalogName.contains("your media", true) }
 
                 // Step 3: Fetch all catalogs in parallel
                 val sections = supervisorScope {

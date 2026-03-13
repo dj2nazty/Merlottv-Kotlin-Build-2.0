@@ -4,11 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,8 +21,10 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.ui.components.SidebarNavigation
 import com.merlottv.kotlin.ui.navigation.MerlotNavHost
 import com.merlottv.kotlin.ui.navigation.Screen
@@ -44,6 +46,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MerlotApp() {
+    val context = LocalContext.current
+    val profileDataStore = remember { ProfileDataStore(context) }
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -51,8 +55,23 @@ fun MerlotApp() {
     var sidebarVisible by remember { mutableStateOf(true) }
     val sidebarFocusRequester = remember { FocusRequester() }
 
-    // Hide sidebar on player screen or when live TV is fullscreen
-    val showSidebar = currentRoute != Screen.Player.route && !isLiveTvFullscreen
+    // Determine start destination based on whether a profile has been selected
+    var startDestination by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        startDestination = if (profileDataStore.hasSelectedProfile()) {
+            Screen.Home.route
+        } else {
+            Screen.ProfilePicker.route
+        }
+    }
+
+    // Wait until we know the start destination
+    if (startDestination == null) return
+
+    // Hide sidebar on player screen, profile picker, or when live TV is fullscreen
+    val showSidebar = currentRoute != Screen.Player.route &&
+        currentRoute != Screen.ProfilePicker.route &&
+        !isLiveTvFullscreen
 
     Box(
         modifier = Modifier
@@ -94,6 +113,7 @@ fun MerlotApp() {
             MerlotNavHost(
                 navController = navController,
                 modifier = Modifier.weight(1f),
+                startDestination = startDestination!!,
                 onLiveTvFullscreenChanged = { isLiveTvFullscreen = it }
             )
         }

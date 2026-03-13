@@ -25,10 +25,10 @@ class ProfilePickerViewModel @Inject constructor(
         }
     }
 
-    fun createAndSelectProfile(name: String, colorIndex: Int, onCreated: (String) -> Unit) {
+    fun createAndSelectProfile(name: String, colorIndex: Int, avatarUrl: String = "", onCreated: (String) -> Unit) {
         viewModelScope.launch {
             try {
-                val profile = profileDataStore.addProfile(name, colorIndex)
+                val profile = profileDataStore.addProfile(name, colorIndex, avatarUrl)
                 profileDataStore.setActiveProfile(profile.id)
                 onCreated(profile.id)
             } catch (_: Exception) {}
