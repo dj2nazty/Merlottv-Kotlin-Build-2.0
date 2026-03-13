@@ -1,7 +1,8 @@
 package com.merlottv.kotlin.ui.screens.search
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,9 +26,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,10 +107,21 @@ fun SearchScreen(
 
 @Composable
 private fun SearchResultCard(item: MetaPreview, onClick: () -> Unit) {
+    var isFocused by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .width(130.dp)
-            .clickable { onClick() }
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
     ) {
         AsyncImage(
             model = item.poster,
@@ -109,12 +130,16 @@ private fun SearchResultCard(item: MetaPreview, onClick: () -> Unit) {
                 .width(130.dp)
                 .height(195.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MerlotColors.Surface2),
+                .background(MerlotColors.Surface2)
+                .then(
+                    if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                    else Modifier
+                ),
             contentScale = ContentScale.Crop
         )
         Text(
             text = item.name,
-            color = MerlotColors.TextPrimary,
+            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,

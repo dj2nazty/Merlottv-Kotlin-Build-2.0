@@ -133,6 +133,12 @@ private fun FullscreenPlayer(
                             viewModel.channelDown()
                             true
                         }
+                        Key.DirectionLeft -> {
+                            // D-pad Left → exit fullscreen and show categories
+                            viewModel.exitFullscreen()
+                            viewModel.showCategories()
+                            true
+                        }
                         Key.DirectionCenter, Key.Enter -> {
                             viewModel.toggleOverlay()
                             true

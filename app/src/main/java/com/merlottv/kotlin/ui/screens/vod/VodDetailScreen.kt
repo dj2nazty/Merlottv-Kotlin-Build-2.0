@@ -3,6 +3,8 @@
 package com.merlottv.kotlin.ui.screens.vod
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,9 +38,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -258,19 +269,37 @@ fun VodDetailScreen(
                         uiState.streams.forEach { stream ->
                             val streamUrl = stream.url.ifEmpty { stream.externalUrl }
                             if (streamUrl.isNotEmpty()) {
+                                var streamFocused by remember { mutableStateOf(false) }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 16.dp, vertical = 4.dp)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(MerlotColors.Surface2)
+                                        .background(
+                                            if (streamFocused) MerlotColors.Accent.copy(alpha = 0.15f)
+                                            else MerlotColors.Surface2
+                                        )
+                                        .then(
+                                            if (streamFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                            else Modifier
+                                        )
+                                        .onFocusChanged { streamFocused = it.isFocused }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                viewModel.playStream(stream)
+                                                true
+                                            } else false
+                                        }
                                         .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = stream.name.ifEmpty { stream.addonName },
-                                            color = MerlotColors.TextPrimary,
+                                            color = if (streamFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )

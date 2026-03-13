@@ -6,10 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -65,16 +63,17 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import kotlinx.coroutines.delay
 
 /**
  * Helper modifier that adds a visible Accent border when the composable is focused via D-pad.
- * Use on any Row/Box/Button that the user can navigate to.
  */
 @Composable
 private fun Modifier.dpadFocusable(
@@ -112,31 +111,20 @@ fun SettingsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Title
         item(key = "title") {
-            Text(
-                text = "Settings",
-                color = MerlotColors.TextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text("Settings", color = MerlotColors.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
 
-        // ═══ About Section (FIRST — version + update check) ═══
+        // ═══ About ═══
         item(key = "about") {
             SettingsSection(title = "About", icon = { Icon(Icons.Default.Info, null, tint = MerlotColors.Accent) }) {
                 Text("Merlot TV", color = MerlotColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Text("Kotlin Build 2.0", color = MerlotColors.Accent, fontSize = 12.sp)
                 Text("Version ${uiState.appVersion} (Build ${com.merlottv.kotlin.BuildConfig.VERSION_CODE})", color = MerlotColors.TextMuted, fontSize = 11.sp)
-
                 Spacer(modifier = Modifier.height(10.dp))
-
                 if (uiState.updateAvailable) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MerlotColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                            .padding(10.dp),
+                        modifier = Modifier.fillMaxWidth().background(MerlotColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
@@ -145,50 +133,37 @@ fun SettingsScreen(
                         }
                         if (uiState.updateUrl.isNotEmpty()) {
                             Button(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))
-                                    context.startActivity(intent)
-                                },
+                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))) },
                                 colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
                                 shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Download", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                            }
+                            ) { Text("Download", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-
                 Button(
                     onClick = { viewModel.checkForUpdate() },
                     enabled = !uiState.isCheckingUpdate,
                     colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2, contentColor = MerlotColors.TextPrimary),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     if (uiState.isCheckingUpdate) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = MerlotColors.Accent, strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Checking...", fontSize = 11.sp)
+                        Spacer(modifier = Modifier.width(6.dp)); Text("Checking...", fontSize = 11.sp)
                     } else {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Check for Updates", fontSize = 11.sp)
+                        Spacer(modifier = Modifier.width(6.dp)); Text("Check for Updates", fontSize = 11.sp)
                     }
                 }
             }
         }
 
-        // ═══ Speed Test Section (SECOND) ═══
+        // ═══ Speed Test ═══
         item(key = "speed_test") {
             SettingsSection(title = "Internet Speed Test", icon = { Icon(Icons.Default.Refresh, null, tint = MerlotColors.Accent) }) {
                 if (uiState.isRunningSpeedTest) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            color = MerlotColors.Accent,
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
+                        CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text("Running speed test...", color = MerlotColors.TextPrimary, fontSize = 12.sp)
@@ -200,148 +175,54 @@ fun SettingsScreen(
                     }
                 } else {
                     if (uiState.downloadSpeed.isNotEmpty() || uiState.uploadSpeed.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("↓ Download", color = MerlotColors.TextMuted, fontSize = 10.sp)
-                                Text(uiState.downloadSpeed, color = MerlotColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("↑ Upload", color = MerlotColors.TextMuted, fontSize = 10.sp)
-                                Text(uiState.uploadSpeed, color = MerlotColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            }
+                        Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("↓ Download", color = MerlotColors.TextMuted, fontSize = 10.sp); Text(uiState.downloadSpeed, color = MerlotColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("↑ Upload", color = MerlotColors.TextMuted, fontSize = 10.sp); Text(uiState.uploadSpeed, color = MerlotColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
-                    if (uiState.speedTestError.isNotEmpty()) {
-                        Text("Error: ${uiState.speedTestError}", color = MerlotColors.Danger, fontSize = 11.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-                    Button(
-                        onClick = { viewModel.runSpeedTest() },
-                        colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.focusable()
-                    ) {
-                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Run Speed Test", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    if (uiState.speedTestError.isNotEmpty()) { Text("Error: ${uiState.speedTestError}", color = MerlotColors.Danger, fontSize = 11.sp); Spacer(modifier = Modifier.height(8.dp)) }
+                    Button(onClick = { viewModel.runSpeedTest() }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(6.dp)); Text("Run Speed Test", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
         }
 
-        // ═══ Profiles Section ═══
+        // ═══ Profiles ═══
         item(key = "profiles") {
             SettingsSection(title = "Profiles", icon = { Icon(Icons.Default.Person, null, tint = MerlotColors.Accent) }) {
                 Text("Each profile has its own favorites and watch history.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-
                 uiState.profiles.forEach { profile ->
                     val isActive = profile.id == uiState.activeProfileId
                     val avatarColor = ProfileDataStore.AVATAR_COLORS.getOrElse(profile.colorIndex) { 0xFF00E5FF.toInt() }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (isActive) MerlotColors.Surface2 else MerlotColors.Surface,
-                                RoundedCornerShape(8.dp)
-                            )
-                            .dpadFocusable(onClick = { viewModel.switchProfile(profile.id) })
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Color(avatarColor)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = profile.name.take(1).uppercase(),
-                                color = MerlotColors.Black,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                    Row(modifier = Modifier.fillMaxWidth().background(if (isActive) MerlotColors.Surface2 else MerlotColors.Surface, RoundedCornerShape(8.dp)).dpadFocusable(onClick = { viewModel.switchProfile(profile.id) }).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Color(avatarColor)), contentAlignment = Alignment.Center) { Text(profile.name.take(1).uppercase(), color = MerlotColors.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(profile.name, color = MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            if (isActive) Text("Active", color = MerlotColors.Accent, fontSize = 9.sp)
-                        }
-                        if (isActive) {
-                            Icon(Icons.Default.Check, null, tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
-                        }
-                        if (!profile.isDefault) {
-                            IconButton(onClick = { viewModel.removeProfile(profile.id) }) {
-                                Icon(Icons.Default.Delete, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
-                            }
-                        }
+                        Column(modifier = Modifier.weight(1f)) { Text(profile.name, color = MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold); if (isActive) Text("Active", color = MerlotColors.Accent, fontSize = 9.sp) }
+                        if (isActive) Icon(Icons.Default.Check, null, tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
+                        if (!profile.isDefault) IconButton(onClick = { viewModel.removeProfile(profile.id) }) { Icon(Icons.Default.Delete, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp)) }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-
                 if (uiState.profiles.size < 6) {
                     Spacer(modifier = Modifier.height(8.dp))
                     var newProfileName by remember { mutableStateOf("") }
                     var selectedColor by remember { mutableIntStateOf(0) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        DpadTextField(
-                            value = newProfileName,
-                            onValueChange = { newProfileName = it },
-                            placeholder = { Text("Profile name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
+                        TvTextField(value = newProfileName, onValueChange = { newProfileName = it }, placeholder = "Profile name", modifier = Modifier.weight(1f))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                viewModel.addProfile(newProfileName, selectedColor)
-                                newProfileName = ""
-                                selectedColor = (selectedColor + 1) % ProfileDataStore.AVATAR_COLORS.size
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = newProfileName.isNotBlank()
-                        ) {
-                            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Button(onClick = { viewModel.addProfile(newProfileName, selectedColor); newProfileName = ""; selectedColor = (selectedColor + 1) % ProfileDataStore.AVATAR_COLORS.size }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = newProfileName.isNotBlank()) {
+                            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ProfileDataStore.AVATAR_COLORS.forEachIndexed { index, color ->
                             var colorFocused by remember { mutableStateOf(false) }
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(color))
-                                    .onFocusChanged { colorFocused = it.isFocused }
-                                    .focusable()
-                                    .then(
-                                        if (colorFocused) Modifier.border(2.dp, MerlotColors.White, CircleShape)
-                                        else Modifier
-                                    )
-                                    .onPreviewKeyEvent { event ->
-                                        if (event.type == KeyEventType.KeyDown &&
-                                            (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                        ) {
-                                            selectedColor = index
-                                            true
-                                        } else false
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (index == selectedColor) {
-                                    Icon(Icons.Default.Check, null, tint = MerlotColors.Black, modifier = Modifier.size(14.dp))
-                                }
+                            Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(color)).onFocusChanged { colorFocused = it.isFocused }.focusable().then(if (colorFocused) Modifier.border(2.dp, MerlotColors.White, CircleShape) else Modifier).onPreviewKeyEvent { event -> if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) { selectedColor = index; true } else false }, contentAlignment = Alignment.Center) {
+                                if (index == selectedColor) Icon(Icons.Default.Check, null, tint = MerlotColors.Black, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
@@ -349,435 +230,215 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Playlists Section ═══
+        // ═══ Playlists / M3U ═══
         item(key = "playlists") {
             SettingsSection(title = "Playlists / M3U", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 Text("Add multiple playlists. All enabled playlists load in Live TV.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-
                 uiState.playlists.forEachIndexed { index, playlist ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                            .dpadFocusable()
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(playlist.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(playlist.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
-                        }
-                        Switch(
-                            checked = playlist.enabled,
-                            onCheckedChange = { viewModel.togglePlaylist(index) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MerlotColors.Accent,
-                                checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
-                            ),
-                            modifier = Modifier.height(24.dp)
-                        )
-                        IconButton(onClick = { viewModel.removePlaylist(index) }) {
-                            Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
-                        }
+                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).dpadFocusable().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) { Text(playlist.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(playlist.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
+                        Switch(checked = playlist.enabled, onCheckedChange = { viewModel.togglePlaylist(index) }, colors = SwitchDefaults.colors(checkedThumbColor = MerlotColors.Accent, checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)), modifier = Modifier.height(24.dp))
+                        IconButton(onClick = { viewModel.removePlaylist(index) }) { Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp)) }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-
                 Spacer(modifier = Modifier.height(8.dp))
                 var playlistName by remember { mutableStateOf("") }
                 var playlistUrl by remember { mutableStateOf("") }
-                DpadTextField(
-                    value = playlistName,
-                    onValueChange = { playlistName = it },
-                    placeholder = { Text("Playlist name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                TvTextField(value = playlistName, onValueChange = { playlistName = it }, placeholder = "Playlist name", modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    DpadTextField(
-                        value = playlistUrl,
-                        onValueChange = { playlistUrl = it },
-                        placeholder = { Text("https://playlist-url.m3u", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                        modifier = Modifier.weight(1f)
-                    )
+                    TvTextField(value = playlistUrl, onValueChange = { playlistUrl = it }, placeholder = "https://playlist-url.m3u", modifier = Modifier.weight(1f))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            viewModel.addPlaylist(playlistName, playlistUrl)
-                            playlistName = ""
-                            playlistUrl = ""
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = playlistUrl.isNotBlank()
-                    ) {
-                        Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
+                    Button(onClick = { viewModel.addPlaylist(playlistName, playlistUrl); playlistName = ""; playlistUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = playlistUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
 
-        // ═══ EPG Sources Section ═══
+        // ═══ EPG Sources ═══
         item(key = "epg") {
             SettingsSection(title = "EPG Sources", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 Text("Default sources are always loaded. Add custom EPG sources below.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-
                 uiState.defaultEpgSources.forEach { source ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
-                        }
+                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) { Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
                         Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp)
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-
                 uiState.customEpgSources.forEachIndexed { index, source ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
-                        }
-                        IconButton(onClick = { viewModel.removeEpgSource(index) }) {
-                            Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
-                        }
+                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) { Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
+                        IconButton(onClick = { viewModel.removeEpgSource(index) }) { Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp)) }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-
                 Spacer(modifier = Modifier.height(8.dp))
                 var epgName by remember { mutableStateOf("") }
                 var epgUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        DpadTextField(
-                            value = epgName,
-                            onValueChange = { epgName = it },
-                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        TvTextField(value = epgName, onValueChange = { epgName = it }, placeholder = "Source name", modifier = Modifier.fillMaxWidth())
                         Spacer(modifier = Modifier.height(4.dp))
-                        DpadTextField(
-                            value = epgUrl,
-                            onValueChange = { epgUrl = it },
-                            placeholder = { Text("https://epg-source.xml", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        TvTextField(value = epgUrl, onValueChange = { epgUrl = it }, placeholder = "https://epg-source.xml", modifier = Modifier.fillMaxWidth())
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            viewModel.addEpgSource(epgName, epgUrl)
-                            epgName = ""
-                            epgUrl = ""
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = epgUrl.isNotBlank()
-                    ) {
-                        Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
+                    Button(onClick = { viewModel.addEpgSource(epgName, epgUrl); epgName = ""; epgUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = epgUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
 
-        // ═══ Backup Stream Sources Section ═══
+        // ═══ Backup Stream Sources ═══
         item(key = "backup_sources") {
-            val filePickerLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument()
-            ) { uri ->
-                uri?.let {
-                    val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
-                    viewModel.importBackupFile(content)
-                }
+            val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                uri?.let { val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""; viewModel.importBackupFile(content) }
             }
-
             SettingsSection(title = "Backup Stream Sources", icon = { Icon(Icons.Default.Refresh, null, tint = MerlotColors.Accent) }) {
-                Text(
-                    "Load backup M3U playlists. When a live stream fails, the app automatically searches these for a working alternative.",
-                    color = MerlotColors.TextMuted,
-                    fontSize = 11.sp
-                )
+                Text("Load backup M3U playlists. When a live stream fails, the app automatically searches these for a working alternative.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-
                 uiState.backupSources.forEachIndexed { index, source ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                            .dpadFocusable()
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
-                        }
-                        Switch(
-                            checked = source.enabled,
-                            onCheckedChange = { viewModel.toggleBackupSource(index) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MerlotColors.Accent,
-                                checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
-                            ),
-                            modifier = Modifier.height(24.dp)
-                        )
-                        IconButton(onClick = { viewModel.removeBackupSource(index) }) {
-                            Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
-                        }
+                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).dpadFocusable().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) { Text(source.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(source.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
+                        Switch(checked = source.enabled, onCheckedChange = { viewModel.toggleBackupSource(index) }, colors = SwitchDefaults.colors(checkedThumbColor = MerlotColors.Accent, checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)), modifier = Modifier.height(24.dp))
+                        IconButton(onClick = { viewModel.removeBackupSource(index) }) { Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp)) }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-
                 Spacer(modifier = Modifier.height(8.dp))
-
-                // Import from file button
-                Button(
-                    onClick = { filePickerLauncher.launch(arrayOf("text/*")) },
-                    colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import from File", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Button(onClick = { filePickerLauncher.launch(arrayOf("text/*")) }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(6.dp)); Text("Import from File", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
-
                 Spacer(modifier = Modifier.height(8.dp))
-
-                // Manual add
                 var backupName by remember { mutableStateOf("") }
                 var backupUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        DpadTextField(
-                            value = backupName,
-                            onValueChange = { backupName = it },
-                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        TvTextField(value = backupName, onValueChange = { backupName = it }, placeholder = "Source name", modifier = Modifier.fillMaxWidth())
                         Spacer(modifier = Modifier.height(4.dp))
-                        DpadTextField(
-                            value = backupUrl,
-                            onValueChange = { backupUrl = it },
-                            placeholder = { Text("https://backup-server.com/get.php?username=...", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        TvTextField(value = backupUrl, onValueChange = { backupUrl = it }, placeholder = "https://backup-server.com/get.php?username=...", modifier = Modifier.fillMaxWidth())
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            viewModel.addBackupSource(backupName, backupUrl)
-                            backupName = ""
-                            backupUrl = ""
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = backupUrl.isNotBlank()
-                    ) {
-                        Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
+                    Button(onClick = { viewModel.addBackupSource(backupName, backupUrl); backupName = ""; backupUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = backupUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
 
-        // ═══ Stremio Addons Section ═══
+        // ═══ Stremio Addons ═══
         item(key = "addons") {
             SettingsSection(title = "Stremio Addons", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 Text("Default addons are built-in and cannot be removed.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
-
                 uiState.addons.forEach { addon ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(addon.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(addon.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
-                        }
-                        if (addon.isDefault) {
-                            Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp)
-                        }
+                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) { Text(addon.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(addon.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
+                        if (addon.isDefault) Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                 }
-
                 Spacer(modifier = Modifier.height(8.dp))
                 var addonInput by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    DpadTextField(
-                        value = addonInput,
-                        onValueChange = { addonInput = it },
-                        placeholder = { Text("https://addon.example.com/manifest.json", color = MerlotColors.TextMuted, fontSize = 10.sp) },
-                        modifier = Modifier.weight(1f)
-                    )
+                    TvTextField(value = addonInput, onValueChange = { addonInput = it }, placeholder = "https://addon.example.com/manifest.json", modifier = Modifier.weight(1f))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { viewModel.addAddon(addonInput); addonInput = "" },
-                        colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
+                    Button(onClick = { viewModel.addAddon(addonInput); addonInput = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
 
-        // ═══ Torbox Section ═══
+        // ═══ Torbox ═══
         item(key = "torbox") {
             SettingsSection(title = "Torbox", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 var torboxInput by remember { mutableStateOf(uiState.torboxKey) }
-                DpadTextField(
-                    value = torboxInput,
-                    onValueChange = { torboxInput = it },
-                    label = { Text("Torbox API Key", color = MerlotColors.TextMuted) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                TvTextField(value = torboxInput, onValueChange = { torboxInput = it }, placeholder = "Torbox API Key", modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = { viewModel.saveTorboxKey(torboxInput) },
-                    colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Save Key", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
+                Button(onClick = { viewModel.saveTorboxKey(torboxInput) }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Save Key", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
             }
         }
 
-        // Bottom padding
-        item(key = "spacer") {
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        item(key = "spacer") { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }
 
 @Composable
-private fun SettingsSection(
-    title: String,
-    icon: @Composable () -> Unit = {},
-    content: @Composable () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MerlotColors.Surface, RoundedCornerShape(12.dp))
-            .padding(16.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 10.dp)
-        ) {
-            icon()
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
+private fun SettingsSection(title: String, icon: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) { icon(); Spacer(modifier = Modifier.width(8.dp)); Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
         content()
     }
 }
 
-@Composable
-private fun settingsFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = MerlotColors.TextPrimary,
-    unfocusedTextColor = MerlotColors.TextPrimary,
-    cursorColor = MerlotColors.Accent,
-    focusedBorderColor = MerlotColors.Accent,
-    unfocusedBorderColor = MerlotColors.Border
-)
-
 /**
- * D-pad friendly text field that only opens the keyboard when the user
- * explicitly presses the center/OK button. Navigating over it with
- * D-pad arrows will NOT trigger the soft keyboard.
+ * TV-friendly text field: D-pad navigable preview box that opens a real editable
+ * OutlinedTextField + soft keyboard (including voice input) on D-pad center/Enter.
+ * Press Back to dismiss keyboard and return to D-pad navigation mode.
  */
 @Composable
-private fun DpadTextField(
+private fun TvTextField(
     value: String,
     onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    placeholder: @Composable (() -> Unit)? = null,
-    label: @Composable (() -> Unit)? = null,
-    singleLine: Boolean = true
+    placeholder: String,
+    modifier: Modifier = Modifier
 ) {
     var isEditing by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
-    // Use interaction source to detect click/press (center button on D-pad)
-    val interactionSource = remember { MutableInteractionSource() }
-
-    // When interaction source gets a press, enter editing mode
-    LaunchedEffect(interactionSource) {
-        interactionSource.interactions.collect { interaction ->
-            if (interaction is PressInteraction.Release) {
-                isEditing = true
-            }
-        }
-    }
-
-    // When entering editing mode, request focus on the actual text field
-    LaunchedEffect(isEditing) {
-        if (isEditing) {
-            focusRequester.requestFocus()
-        }
-    }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     if (isEditing) {
+        LaunchedEffect(Unit) {
+            delay(100)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
+            delay(100)
+            keyboardController?.show()
+        }
+
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            placeholder = placeholder,
-            label = label,
-            colors = settingsFieldColors(),
+            placeholder = { Text(placeholder, color = MerlotColors.TextMuted, fontSize = 10.sp) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = MerlotColors.TextPrimary,
+                unfocusedTextColor = MerlotColors.TextPrimary,
+                cursorColor = MerlotColors.Accent,
+                focusedBorderColor = MerlotColors.Accent,
+                unfocusedBorderColor = MerlotColors.Border
+            ),
             modifier = modifier
                 .focusRequester(focusRequester)
                 .onPreviewKeyEvent { keyEvent ->
-                    // Back button exits editing mode
                     if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Back) {
+                        keyboardController?.hide()
                         isEditing = false
                         true
-                    } else {
-                        false
-                    }
+                    } else false
                 }
                 .onFocusChanged { state ->
-                    if (!state.isFocused && !state.hasFocus) {
-                        isEditing = false
-                    }
+                    if (!state.isFocused && !state.hasFocus) isEditing = false
                 },
-            singleLine = singleLine,
+            singleLine = true,
             shape = RoundedCornerShape(8.dp),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
         )
     } else {
-        // Read-only appearance — focusable box that looks like a text field
-        OutlinedTextField(
-            value = value,
-            onValueChange = {},
-            placeholder = placeholder,
-            label = label,
-            colors = settingsFieldColors(),
-            modifier = modifier,
-            singleLine = singleLine,
-            readOnly = true,
-            shape = RoundedCornerShape(8.dp),
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
-            interactionSource = interactionSource
-        )
+        var isFocused by remember { mutableStateOf(false) }
+        Row(
+            modifier = modifier
+                .height(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MerlotColors.Surface)
+                .border(if (isFocused) 2.dp else 1.dp, if (isFocused) MerlotColors.Accent else MerlotColors.Border, RoundedCornerShape(8.dp))
+                .onFocusChanged { isFocused = it.isFocused }
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) { isEditing = true; true } else false
+                }
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Edit, null, tint = if (isFocused) MerlotColors.Accent else MerlotColors.TextMuted, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = value.ifEmpty { placeholder }, color = if (value.isEmpty()) MerlotColors.TextMuted else MerlotColors.TextPrimary, fontSize = 11.sp, maxLines = 1)
+        }
     }
 }
