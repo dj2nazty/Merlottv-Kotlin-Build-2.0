@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -746,11 +747,14 @@ private fun ChannelListView(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
 
-                // Search
+                // Search — readOnly until Enter/OK is pressed to prevent keyboard on D-pad hover
+                var isSearchEditing by remember { mutableStateOf(false) }
+                val searchKeyboardController = LocalSoftwareKeyboardController.current
                 OutlinedTextField(
                     value = uiState.searchQuery,
                     onValueChange = { viewModel.onSearchChanged(it) },
-                    placeholder = { Text("Search...", color = MerlotColors.TextMuted, fontSize = 10.sp) },
+                    readOnly = !isSearchEditing,
+                    placeholder = { Text("Search... (press OK to type)", color = MerlotColors.TextMuted, fontSize = 10.sp) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MerlotColors.TextMuted, modifier = Modifier.size(14.dp)) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = MerlotColors.TextPrimary,
@@ -761,7 +765,21 @@ private fun ChannelListView(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .onFocusChanged { if (!it.isFocused && isSearchEditing) { isSearchEditing = false; searchKeyboardController?.hide() } }
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown) {
+                                when {
+                                    !isSearchEditing && (event.key == Key.DirectionCenter || event.key == Key.Enter) -> {
+                                        isSearchEditing = true; searchKeyboardController?.show(); true
+                                    }
+                                    isSearchEditing && event.key == Key.Back -> {
+                                        isSearchEditing = false; searchKeyboardController?.hide(); true
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        },
                     singleLine = true,
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 10.sp),
                     shape = RoundedCornerShape(8.dp)

@@ -59,8 +59,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -79,7 +82,7 @@ import com.merlottv.kotlin.ui.theme.MerlotColors
 private val FocusedGrey = Color(0xFF666666)
 
 /**
- * Helper modifier that adds a grey border + background tint when focused via D-pad.
+ * Helper modifier that adds an accent border + background tint when focused via D-pad.
  */
 @Composable
 private fun Modifier.dpadFocusable(
@@ -91,8 +94,8 @@ private fun Modifier.dpadFocusable(
         .focusable()
         .then(
             if (isFocused) Modifier
-                .border(2.dp, FocusedGrey, RoundedCornerShape(8.dp))
-                .background(FocusedGrey.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                .border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                .background(MerlotColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
             else Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
         )
         .onPreviewKeyEvent { event ->
@@ -103,6 +106,104 @@ private fun Modifier.dpadFocusable(
                 true
             } else false
         }
+}
+
+/**
+ * TV-friendly button: Surface2 background when unfocused, accent border when focused via D-pad.
+ * Consistent look matching the VOD card selection style.
+ */
+@Composable
+private fun DpadButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MerlotColors.Surface2,
+            contentColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+            disabledContainerColor = MerlotColors.Surface2.copy(alpha = 0.5f),
+            disabledContentColor = MerlotColors.TextMuted
+        ),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .then(
+                if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                else Modifier
+            ),
+        content = content
+    )
+}
+
+/**
+ * TV-friendly text field: shows accent border on D-pad focus but does NOT open keyboard.
+ * Keyboard only opens when user explicitly presses Enter/OK (D-pad center).
+ * Press Back to dismiss keyboard and return to navigation mode.
+ */
+@Composable
+private fun DpadTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    trailingIcon: @Composable (() -> Unit)? = null
+) {
+    var isEditing by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        readOnly = !isEditing,
+        placeholder = { Text(placeholder, color = MerlotColors.TextMuted, fontSize = 12.sp) },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = MerlotColors.TextPrimary,
+            unfocusedTextColor = MerlotColors.TextPrimary,
+            cursorColor = MerlotColors.Accent,
+            focusedBorderColor = if (isEditing) MerlotColors.Accent else MerlotColors.Accent,
+            unfocusedBorderColor = MerlotColors.Border
+        ),
+        modifier = modifier
+            .onFocusChanged { focusState ->
+                if (!focusState.isFocused && isEditing) {
+                    isEditing = false
+                    keyboardController?.hide()
+                }
+            }
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when {
+                        // Enter/OK while NOT editing → activate editing mode + show keyboard
+                        !isEditing && (event.key == Key.DirectionCenter || event.key == Key.Enter) -> {
+                            isEditing = true
+                            keyboardController?.show()
+                            true
+                        }
+                        // Back while editing → deactivate editing mode + hide keyboard
+                        isEditing && event.key == Key.Back -> {
+                            isEditing = false
+                            keyboardController?.hide()
+                            true
+                        }
+                        // D-pad navigation while NOT editing → pass through for normal D-pad nav
+                        !isEditing && (event.key == Key.DirectionUp || event.key == Key.DirectionDown ||
+                            event.key == Key.DirectionLeft || event.key == Key.DirectionRight) -> {
+                            false // Let D-pad navigate away
+                        }
+                        else -> false
+                    }
+                } else false
+            },
+        singleLine = true,
+        shape = RoundedCornerShape(8.dp),
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+        trailingIcon = trailingIcon
+    )
 }
 
 @Composable
@@ -140,20 +241,16 @@ fun SettingsScreen(
                             Text("Version ${uiState.latestVersion}", color = MerlotColors.TextMuted, fontSize = 11.sp)
                         }
                         if (uiState.updateUrl.isNotEmpty()) {
-                            Button(
-                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))) },
-                                colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                                shape = RoundedCornerShape(8.dp)
+                            DpadButton(
+                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))) }
                             ) { Text("Download", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                Button(
+                DpadButton(
                     onClick = { viewModel.checkForUpdate() },
-                    enabled = !uiState.isCheckingUpdate,
-                    colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2, contentColor = MerlotColors.TextPrimary),
-                    shape = RoundedCornerShape(8.dp)
+                    enabled = !uiState.isCheckingUpdate
                 ) {
                     if (uiState.isCheckingUpdate) {
                         CircularProgressIndicator(modifier = Modifier.size(14.dp), color = MerlotColors.Accent, strokeWidth = 2.dp)
@@ -190,7 +287,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     if (uiState.speedTestError.isNotEmpty()) { Text("Error: ${uiState.speedTestError}", color = MerlotColors.Danger, fontSize = 11.sp); Spacer(modifier = Modifier.height(8.dp)) }
-                    Button(onClick = { viewModel.runSpeedTest() }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) {
+                    DpadButton(onClick = { viewModel.runSpeedTest() }) {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(6.dp)); Text("Run Speed Test", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
@@ -237,21 +334,11 @@ fun SettingsScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
+                        DpadTextField(
                             value = newProfileName,
                             onValueChange = { newProfileName = it },
-                            placeholder = { Text("Profile name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MerlotColors.TextPrimary,
-                                unfocusedTextColor = MerlotColors.TextPrimary,
-                                cursorColor = MerlotColors.Accent,
-                                focusedBorderColor = MerlotColors.Accent,
-                                unfocusedBorderColor = MerlotColors.Border
-                            ),
+                            placeholder = "Profile name",
                             modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                             trailingIcon = {
                                 IconButton(onClick = {
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -265,7 +352,7 @@ fun SettingsScreen(
                             }
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Button(onClick = { viewModel.addProfile(newProfileName, selectedColor); newProfileName = ""; selectedColor = (selectedColor + 1) % ProfileDataStore.AVATAR_COLORS.size }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = newProfileName.isNotBlank()) {
+                        DpadButton(onClick = { viewModel.addProfile(newProfileName, selectedColor); newProfileName = ""; selectedColor = (selectedColor + 1) % ProfileDataStore.AVATAR_COLORS.size }, enabled = newProfileName.isNotBlank()) {
                             Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
@@ -335,21 +422,11 @@ fun SettingsScreen(
                     }
                 }
 
-                OutlinedTextField(
+                DpadTextField(
                     value = playlistName,
                     onValueChange = { playlistName = it },
-                    placeholder = { Text("Playlist name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MerlotColors.TextPrimary,
-                        unfocusedTextColor = MerlotColors.TextPrimary,
-                        cursorColor = MerlotColors.Accent,
-                        focusedBorderColor = MerlotColors.Accent,
-                        unfocusedBorderColor = MerlotColors.Border
-                    ),
+                    placeholder = "Playlist name",
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                     trailingIcon = {
                         IconButton(onClick = { launchVoice("name", "Say playlist name") }) {
                             Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice", tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
@@ -358,21 +435,11 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    DpadTextField(
                         value = playlistUrl,
                         onValueChange = { playlistUrl = it },
-                        placeholder = { Text("https://playlist-url.m3u", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = MerlotColors.TextPrimary,
-                            unfocusedTextColor = MerlotColors.TextPrimary,
-                            cursorColor = MerlotColors.Accent,
-                            focusedBorderColor = MerlotColors.Accent,
-                            unfocusedBorderColor = MerlotColors.Border
-                        ),
+                        placeholder = "https://playlist-url.m3u",
                         modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                         trailingIcon = {
                             IconButton(onClick = { launchVoice("url", "Say playlist URL") }) {
                                 Icon(painter = painterResource(com.merlottv.kotlin.R.drawable.ic_mic), "Voice", tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
@@ -380,7 +447,7 @@ fun SettingsScreen(
                         }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { viewModel.addPlaylist(playlistName, playlistUrl); playlistName = ""; playlistUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = playlistUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                    DpadButton(onClick = { viewModel.addPlaylist(playlistName, playlistUrl); playlistName = ""; playlistUrl = "" }, enabled = playlistUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
@@ -409,42 +476,22 @@ fun SettingsScreen(
                 var epgUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        OutlinedTextField(
+                        DpadTextField(
                             value = epgName,
                             onValueChange = { epgName = it },
-                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MerlotColors.TextPrimary,
-                                unfocusedTextColor = MerlotColors.TextPrimary,
-                                cursorColor = MerlotColors.Accent,
-                                focusedBorderColor = MerlotColors.Accent,
-                                unfocusedBorderColor = MerlotColors.Border
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                            placeholder = "Source name",
+                            modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedTextField(
+                        DpadTextField(
                             value = epgUrl,
                             onValueChange = { epgUrl = it },
-                            placeholder = { Text("https://epg-source.xml", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MerlotColors.TextPrimary,
-                                unfocusedTextColor = MerlotColors.TextPrimary,
-                                cursorColor = MerlotColors.Accent,
-                                focusedBorderColor = MerlotColors.Accent,
-                                unfocusedBorderColor = MerlotColors.Border
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                            placeholder = "https://epg-source.xml",
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { viewModel.addEpgSource(epgName, epgUrl); epgName = ""; epgUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = epgUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                    DpadButton(onClick = { viewModel.addEpgSource(epgName, epgUrl); epgName = ""; epgUrl = "" }, enabled = epgUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
@@ -466,7 +513,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { filePickerLauncher.launch(arrayOf("text/*")) }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) {
+                DpadButton(onClick = { filePickerLauncher.launch(arrayOf("text/*")) }) {
                     Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(6.dp)); Text("Import from File", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -474,42 +521,22 @@ fun SettingsScreen(
                 var backupUrl by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        OutlinedTextField(
+                        DpadTextField(
                             value = backupName,
                             onValueChange = { backupName = it },
-                            placeholder = { Text("Source name", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MerlotColors.TextPrimary,
-                                unfocusedTextColor = MerlotColors.TextPrimary,
-                                cursorColor = MerlotColors.Accent,
-                                focusedBorderColor = MerlotColors.Accent,
-                                unfocusedBorderColor = MerlotColors.Border
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                            placeholder = "Source name",
+                            modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedTextField(
+                        DpadTextField(
                             value = backupUrl,
                             onValueChange = { backupUrl = it },
-                            placeholder = { Text("https://backup-server.com/get.php?username=...", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MerlotColors.TextPrimary,
-                                unfocusedTextColor = MerlotColors.TextPrimary,
-                                cursorColor = MerlotColors.Accent,
-                                focusedBorderColor = MerlotColors.Accent,
-                                unfocusedBorderColor = MerlotColors.Border
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                            placeholder = "https://backup-server.com/get.php?username=...",
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { viewModel.addBackupSource(backupName, backupUrl); backupName = ""; backupUrl = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp), enabled = backupUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                    DpadButton(onClick = { viewModel.addBackupSource(backupName, backupUrl); backupName = ""; backupUrl = "" }, enabled = backupUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
@@ -529,24 +556,14 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 var addonInput by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    DpadTextField(
                         value = addonInput,
                         onValueChange = { addonInput = it },
-                        placeholder = { Text("https://addon.example.com/manifest.json", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = MerlotColors.TextPrimary,
-                            unfocusedTextColor = MerlotColors.TextPrimary,
-                            cursorColor = MerlotColors.Accent,
-                            focusedBorderColor = MerlotColors.Accent,
-                            unfocusedBorderColor = MerlotColors.Border
-                        ),
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                        placeholder = "https://addon.example.com/manifest.json",
+                        modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { viewModel.addAddon(addonInput); addonInput = "" }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                    DpadButton(onClick = { viewModel.addAddon(addonInput); addonInput = "" }) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                 }
             }
         }
@@ -555,24 +572,14 @@ fun SettingsScreen(
         item(key = "torbox") {
             SettingsSection(title = "Torbox", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 var torboxInput by remember { mutableStateOf(uiState.torboxKey) }
-                OutlinedTextField(
+                DpadTextField(
                     value = torboxInput,
                     onValueChange = { torboxInput = it },
-                    placeholder = { Text("Torbox API Key", color = MerlotColors.TextMuted, fontSize = 12.sp) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MerlotColors.TextPrimary,
-                        unfocusedTextColor = MerlotColors.TextPrimary,
-                        cursorColor = MerlotColors.Accent,
-                        focusedBorderColor = MerlotColors.Accent,
-                        unfocusedBorderColor = MerlotColors.Border
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+                    placeholder = "Torbox API Key",
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { viewModel.saveTorboxKey(torboxInput) }, colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black), shape = RoundedCornerShape(8.dp)) { Text("Save Key", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                DpadButton(onClick = { viewModel.saveTorboxKey(torboxInput) }) { Text("Save Key", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
             }
         }
 
@@ -679,18 +686,10 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { movingIndex = -1; viewModel.saveCategoryOrder() },
-                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
+                        DpadButton(onClick = { movingIndex = -1; viewModel.saveCategoryOrder() }) {
                             Text("Save Order", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
-                        Button(
-                            onClick = { movingIndex = -1; viewModel.resetCategoryOrder() },
-                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2, contentColor = MerlotColors.TextPrimary),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
+                        DpadButton(onClick = { movingIndex = -1; viewModel.resetCategoryOrder() }) {
                             Text("Reset", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
