@@ -3,12 +3,15 @@ package com.merlottv.kotlin.ui.screens.favorites
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
+import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class FavoritesUiState(
@@ -53,11 +56,15 @@ data class FavoritesUiState(
 
 @HiltViewModel
 class FavoritesViewModel @Inject constructor(
-    private val favoritesRepository: FavoritesRepository
+    private val favoritesRepository: FavoritesRepository,
+    private val addonRepository: AddonRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FavoritesUiState())
     val uiState: StateFlow<FavoritesUiState> = _uiState.asStateFlow()
+
+    // Track which IDs we've already tried to repair, so we don't loop
+    private val repairedIds = mutableSetOf<String>()
 
     init {
         viewModelScope.launch {
@@ -68,6 +75,8 @@ class FavoritesViewModel @Inject constructor(
         viewModelScope.launch {
             favoritesRepository.getFavoriteVodIds().collect { ids ->
                 _uiState.value = _uiState.value.copy(favoriteVodIds = ids)
+                // Auto-repair missing metadata
+                repairMissingMetadata(ids)
             }
         }
         viewModelScope.launch {
@@ -78,6 +87,46 @@ class FavoritesViewModel @Inject constructor(
         viewModelScope.launch {
             favoritesRepository.getCustomLists().collect { lists ->
                 _uiState.value = _uiState.value.copy(customLists = lists)
+            }
+        }
+    }
+
+    /**
+     * For any favorite VOD IDs that don't have stored metadata,
+     * fetch meta from the addon API and save it so posters/titles display properly.
+     */
+    private fun repairMissingMetadata(vodIds: Set<String>) {
+        val currentMetas = _uiState.value.vodMetas
+        val missingIds = vodIds.filter { id ->
+            !currentMetas.containsKey(id) && !repairedIds.contains(id)
+        }
+        if (missingIds.isEmpty()) return
+
+        viewModelScope.launch {
+            for (id in missingIds) {
+                repairedIds.add(id)
+                try {
+                    // Guess type from ID format: tt1234567 is usually a movie,
+                    // but try both — series first since they're more commonly favorited
+                    val meta = withContext(Dispatchers.IO) {
+                        addonRepository.getMeta("series", id)
+                            ?: addonRepository.getMeta("movie", id)
+                    }
+                    if (meta != null && meta.name.isNotEmpty()) {
+                        val favMeta = FavoriteVodMeta(
+                            id = id,
+                            name = meta.name,
+                            poster = meta.poster,
+                            type = meta.type,
+                            imdbRating = meta.imdbRating,
+                            description = meta.description
+                        )
+                        // Save metadata directly without toggling the favorite status
+                        favoritesRepository.saveVodMeta(favMeta)
+                    }
+                } catch (_: Exception) {
+                    // Ignore — best effort repair
+                }
             }
         }
     }

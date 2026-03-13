@@ -10,6 +10,7 @@ interface FavoritesRepository {
     suspend fun toggleFavoriteChannel(channelId: String)
     suspend fun toggleFavoriteVod(vodId: String)
     suspend fun toggleFavoriteVodWithMeta(vodId: String, meta: FavoriteVodMeta)
+    suspend fun saveVodMeta(meta: FavoriteVodMeta)
     suspend fun isFavoriteChannel(channelId: String): Boolean
     suspend fun isFavoriteVod(vodId: String): Boolean
 

@@ -227,11 +227,30 @@ private fun ContinueWatchingCard(item: WatchProgressItem, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
-        Text(
-            text = "${(item.progressPercent * 100).toInt()}% watched",
-            color = MerlotColors.TextMuted,
-            fontSize = 9.sp
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "${(item.progressPercent * 100).toInt()}% watched",
+                color = MerlotColors.TextMuted,
+                fontSize = 9.sp
+            )
+            val remainingMs = (item.duration - item.position).coerceAtLeast(0)
+            if (remainingMs > 0) {
+                val remainingMin = remainingMs / 60_000
+                val remainingText = if (remainingMin >= 60) {
+                    "${remainingMin / 60}h ${remainingMin % 60}m left"
+                } else {
+                    "${remainingMin}m left"
+                }
+                Text(
+                    text = remainingText,
+                    color = MerlotColors.TextMuted,
+                    fontSize = 9.sp
+                )
+            }
+        }
     }
 }
 

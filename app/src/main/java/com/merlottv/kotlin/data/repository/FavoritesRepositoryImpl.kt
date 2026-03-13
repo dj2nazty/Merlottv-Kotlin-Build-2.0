@@ -40,6 +40,10 @@ class FavoritesRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun saveVodMeta(meta: FavoriteVodMeta) {
+        favoritesDataStore.saveVodMeta(meta)
+    }
+
     override suspend fun isFavoriteChannel(channelId: String): Boolean {
         return favoritesDataStore.favoriteChannels.first().contains(channelId)
     }
