@@ -46,9 +46,26 @@ class SearchViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val addons = addonRepository.getAllAddons().first()
+                // Fetch manifests for addons with empty catalogs so we know their search capabilities
+                val resolvedAddons = addons.map { addon ->
+                    if (addon.catalogs.isEmpty()) {
+                        addonRepository.fetchManifest(addon.url) ?: addon
+                    } else addon
+                }
+                // Filter to addons that have catalog resource (can search)
+                val searchableAddons = resolvedAddons.filter { addon ->
+                    addon.catalogs.isNotEmpty() ||
+                    addon.resources.isEmpty()  // unknown capabilities — try anyway
+                }
                 val allResults = supervisorScope {
-                    addons.flatMap { addon ->
-                        listOf("movie", "series").map { type ->
+                    searchableAddons.flatMap { addon ->
+                        // Only search types the addon actually supports
+                        val types = if (addon.types.isNotEmpty()) {
+                            addon.types.filter { it == "movie" || it == "series" }
+                        } else {
+                            listOf("movie", "series")
+                        }
+                        types.map { type ->
                             async(searchDispatcher) {
                                 try {
                                     addonRepository.searchCatalog(addon, type, query)

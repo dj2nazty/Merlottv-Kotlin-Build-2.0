@@ -95,6 +95,7 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun getMeta(type: String, id: String): Meta? {
         return withContext(Dispatchers.IO) {
+            var bestMeta: Meta? = null
             for (addon in _addons.value) {
                 try {
                     val base = addon.url.removeSuffix("/manifest.json")
@@ -103,14 +104,24 @@ class AddonRepositoryImpl @Inject constructor(
                     val response = fastClient.newCall(request).execute()
                     if (response.isSuccessful) {
                         val body = response.body?.string() ?: continue
-                        val meta = parseMetaResponse(body)
-                        if (meta != null) return@withContext meta
+                        val meta = parseMetaResponse(body) ?: continue
+
+                        // For movies, return first successful result
+                        if (type != "series") return@withContext meta
+
+                        // For series, we need the videos/episodes list.
+                        // Keep the first result as fallback, but prefer a response with videos.
+                        if (meta.videos.isNotEmpty()) {
+                            return@withContext meta  // Has episodes — use this one
+                        }
+                        // Store as fallback (has metadata but no episodes)
+                        if (bestMeta == null) bestMeta = meta
                     }
                 } catch (e: Exception) {
                     continue
                 }
             }
-            null
+            bestMeta
         }
     }
 
@@ -140,12 +151,36 @@ class AddonRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val base = addon.url.removeSuffix("/manifest.json")
-                val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                val url = "$base/catalog/$type/top/search=$encodedQuery.json"
-                val request = Request.Builder().url(url).build()
-                val response = fastClient.newCall(request).execute()
-                val body = response.body?.string() ?: return@withContext emptyList()
-                parseCatalogResponse(body)
+                // Use %20 for spaces (URLEncoder uses + which some Stremio addons reject)
+                val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8").replace("+", "%20")
+
+                // Find catalogs for this type that support search
+                val searchCatalogs = addon.catalogs
+                    .filter { cat ->
+                        cat.type == type &&
+                        cat.extra.any { it.name == "search" }
+                    }
+                    .map { it.id }
+                    .distinct()
+                    .ifEmpty {
+                        // Fallback: if no catalogs are defined (manifest not fetched),
+                        // try "top" which is the Cinemeta default
+                        if (addon.catalogs.isEmpty()) listOf("top") else return@withContext emptyList()
+                    }
+
+                val results = mutableListOf<MetaPreview>()
+                for (catalogId in searchCatalogs) {
+                    try {
+                        val url = "$base/catalog/$type/$catalogId/search=$encodedQuery.json"
+                        val request = Request.Builder().url(url).build()
+                        val response = fastClient.newCall(request).execute()
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: continue
+                            results.addAll(parseCatalogResponse(body))
+                        }
+                    } catch (_: Exception) { /* skip this catalog */ }
+                }
+                results
             } catch (e: Exception) {
                 e.printStackTrace()
                 emptyList()
