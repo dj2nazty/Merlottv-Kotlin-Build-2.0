@@ -44,7 +44,9 @@ data class VodDetailUiState(
     val watchProgressPercent: Float = 0f,
     // Similar content ("Like This")
     val similarItems: List<MetaPreview> = emptyList(),
-    val isLoadingSimilar: Boolean = false
+    val isLoadingSimilar: Boolean = false,
+    // Trailer
+    val trailerYtId: String? = null
 )
 
 @HiltViewModel
@@ -137,6 +139,9 @@ class VodDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             val meta = addonRepository.getMeta(type, id)
+            // Extract trailer YouTube ID from trailerStreams
+            val trailerYtId = meta?.trailerStreams
+                ?.firstOrNull { it.ytId.isNotEmpty() }?.ytId
             if (meta != null && meta.videos.isNotEmpty()) {
                 val seasons = meta.videos
                     .map { it.season }
@@ -152,10 +157,15 @@ class VodDetailViewModel @Inject constructor(
                     meta = meta,
                     seasons = seasons,
                     selectedSeason = firstSeason,
-                    episodesForSeason = episodes
+                    episodesForSeason = episodes,
+                    trailerYtId = trailerYtId
                 )
             } else {
-                _uiState.value = _uiState.value.copy(isLoading = false, meta = meta)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    meta = meta,
+                    trailerYtId = trailerYtId
+                )
             }
         }
     }

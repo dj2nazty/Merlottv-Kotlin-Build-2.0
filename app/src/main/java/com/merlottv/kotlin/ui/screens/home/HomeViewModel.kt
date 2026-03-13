@@ -140,7 +140,7 @@ class HomeViewModel @Inject constructor(
                     }
                 })
 
-                // Collect top movies for the hero carousel — pick first items from popular movie rows
+                // Collect top movies for the hero carousel — prefer items with landscape background images
                 val heroItems = sorted
                     .filter { row ->
                         val t = row.title.lowercase()
@@ -148,7 +148,9 @@ class HomeViewModel @Inject constructor(
                     }
                     .flatMap { it.items }
                     .distinctBy { it.id }
-                    .filter { it.poster.isNotEmpty() }
+                    .filter { it.background.isNotEmpty() || it.poster.isNotEmpty() }
+                    // Sort: items with background image first (they look much better in the carousel)
+                    .sortedByDescending { it.background.isNotEmpty() }
                     .take(8)
                     .ifEmpty {
                         // Fallback: just take first items from the first row

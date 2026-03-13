@@ -261,7 +261,9 @@ class AddonRepositoryImpl @Inject constructor(
                     poster = m["poster"] as? String ?: "",
                     posterShape = m["posterShape"] as? String ?: "poster",
                     description = m["description"] as? String ?: "",
-                    imdbRating = m["imdbRating"] as? String ?: ""
+                    imdbRating = m["imdbRating"] as? String ?: "",
+                    background = m["background"] as? String ?: "",
+                    logo = m["logo"] as? String ?: ""
                 )
             }
         } catch (e: Exception) {
@@ -303,7 +305,24 @@ class AddonRepositoryImpl @Inject constructor(
                         overview = v["overview"] as? String ?: "",
                         thumbnail = v["thumbnail"] as? String ?: ""
                     )
-                } ?: emptyList()
+                } ?: emptyList(),
+                trailerStreams = (meta["trailerStreams"] as? List<Map<String, Any?>>)?.map { t ->
+                    com.merlottv.kotlin.domain.model.TrailerStream(
+                        title = t["title"] as? String ?: "",
+                        ytId = t["ytId"] as? String ?: "",
+                        url = t["url"] as? String ?: "",
+                        source = t["source"] as? String ?: ""
+                    )
+                } ?: run {
+                    // Fallback: check for single "trailer" field (YouTube URL or ID)
+                    val trailer = meta["trailer"] as? String ?: ""
+                    if (trailer.isNotEmpty()) {
+                        val ytId = if (trailer.contains("youtube.com") || trailer.contains("youtu.be")) {
+                            trailer.substringAfter("v=", "").substringAfter("youtu.be/", "").substringBefore("&").substringBefore("?")
+                        } else trailer
+                        listOf(com.merlottv.kotlin.domain.model.TrailerStream(title = "Trailer", ytId = ytId))
+                    } else emptyList()
+                }
             )
         } catch (e: Exception) {
             e.printStackTrace()

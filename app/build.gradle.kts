@@ -13,8 +13,8 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 22
-        versionName = "2.20.0"
+        versionCode = 23
+        versionName = "2.21.0"
 
         vectorDrawables {
             useSupportLibrary = true

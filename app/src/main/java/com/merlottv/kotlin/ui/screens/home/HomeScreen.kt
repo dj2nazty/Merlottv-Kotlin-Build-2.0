@@ -283,7 +283,7 @@ private fun HeroCarousel(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(280.dp)
+            .height(320.dp)
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(12.dp))
             .onFocusChanged { isFocused = it.isFocused }
@@ -317,13 +317,16 @@ private fun HeroCarousel(
             label = "hero_carousel"
         ) { index ->
             val meta = items[index]
+            // Use landscape background image (high-res) with poster as fallback
+            val heroImage = meta.background.ifEmpty { meta.poster }
             Box(modifier = Modifier.fillMaxSize()) {
                 AsyncImage(
-                    model = meta.poster,
+                    model = heroImage,
                     contentDescription = meta.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
+                // Gradient overlay for text readability
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -331,22 +334,51 @@ private fun HeroCarousel(
                             Brush.verticalGradient(
                                 colors = listOf(
                                     MerlotColors.Transparent,
-                                    MerlotColors.Background.copy(alpha = 0.9f)
-                                )
+                                    MerlotColors.Background.copy(alpha = 0.85f)
+                                ),
+                                startY = 100f
+                            )
+                        )
+                )
+                // Also add a left-edge gradient for better text contrast
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    MerlotColors.Background.copy(alpha = 0.6f),
+                                    MerlotColors.Transparent
+                                ),
+                                endX = 600f
                             )
                         )
                 )
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(20.dp)
+                        .padding(start = 24.dp, bottom = 20.dp, end = 120.dp)
                 ) {
-                    Text(
-                        text = meta.name,
-                        color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    // Use logo image for title if available, otherwise text
+                    if (meta.logo.isNotEmpty()) {
+                        AsyncImage(
+                            model = meta.logo,
+                            contentDescription = meta.name,
+                            modifier = Modifier
+                                .height(48.dp)
+                                .padding(bottom = 6.dp),
+                            contentScale = ContentScale.FillHeight
+                        )
+                    } else {
+                        Text(
+                            text = meta.name,
+                            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     if (meta.description.isNotEmpty()) {
                         Text(
                             text = meta.description,

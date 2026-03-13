@@ -424,6 +424,72 @@ fun VodDetailScreen(
                                     Text("LIKE THIS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
 
+                                // Trailer button — only shown when trailer is available
+                                if (uiState.trailerYtId != null) {
+                                    val context = androidx.compose.ui.platform.LocalContext.current
+                                    var trailerFocused by remember { mutableStateOf(false) }
+                                    Button(
+                                        onClick = {
+                                            val ytId = uiState.trailerYtId
+                                            if (ytId != null) {
+                                                try {
+                                                    // Try YouTube app first, fallback to browser
+                                                    val ytAppIntent = android.content.Intent(
+                                                        android.content.Intent.ACTION_VIEW,
+                                                        android.net.Uri.parse("vnd.youtube:$ytId")
+                                                    )
+                                                    context.startActivity(ytAppIntent)
+                                                } catch (_: Exception) {
+                                                    try {
+                                                        val webIntent = android.content.Intent(
+                                                            android.content.Intent.ACTION_VIEW,
+                                                            android.net.Uri.parse("https://www.youtube.com/watch?v=$ytId")
+                                                        )
+                                                        context.startActivity(webIntent)
+                                                    } catch (_: Exception) { /* no YouTube available */ }
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (trailerFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                            contentColor = if (trailerFocused) MerlotColors.White else MerlotColors.TextPrimary
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .onFocusChanged { trailerFocused = it.isFocused }
+                                            .focusable()
+                                            .onPreviewKeyEvent { event ->
+                                                if (event.type == KeyEventType.KeyDown &&
+                                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                                ) {
+                                                    val ytId = uiState.trailerYtId
+                                                    if (ytId != null) {
+                                                        try {
+                                                            val ytAppIntent = android.content.Intent(
+                                                                android.content.Intent.ACTION_VIEW,
+                                                                android.net.Uri.parse("vnd.youtube:$ytId")
+                                                            )
+                                                            context.startActivity(ytAppIntent)
+                                                        } catch (_: Exception) {
+                                                            try {
+                                                                val webIntent = android.content.Intent(
+                                                                    android.content.Intent.ACTION_VIEW,
+                                                                    android.net.Uri.parse("https://www.youtube.com/watch?v=$ytId")
+                                                                )
+                                                                context.startActivity(webIntent)
+                                                            } catch (_: Exception) { }
+                                                        }
+                                                    }
+                                                    true
+                                                } else false
+                                            }
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("TRAILER", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+
                                 // Favorite button — grey on focus
                                 var favFocused by remember { mutableStateOf(false) }
                                 IconButton(

@@ -18,7 +18,15 @@ data class Meta(
     val writer: List<String> = emptyList(),
     val imdbRating: String = "",
     val videos: List<Video> = emptyList(),
-    val links: List<MetaLink> = emptyList()
+    val links: List<MetaLink> = emptyList(),
+    val trailerStreams: List<TrailerStream> = emptyList()
+)
+
+data class TrailerStream(
+    val title: String = "",
+    val ytId: String = "",
+    val url: String = "",
+    val source: String = ""
 )
 
 data class MetaPreview(
@@ -28,7 +36,9 @@ data class MetaPreview(
     val poster: String = "",
     val posterShape: String = "poster",
     val description: String = "",
-    val imdbRating: String = ""
+    val imdbRating: String = "",
+    val background: String = "",
+    val logo: String = ""
 )
 
 data class Video(
