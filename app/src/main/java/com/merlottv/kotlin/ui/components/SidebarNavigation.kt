@@ -124,10 +124,12 @@ private fun SidebarItem(
     // Single focus state source — no MutableInteractionSource split
     var isFocused by remember { mutableStateOf(false) }
 
+    val focusedGrey = Color(0xFF666666)
+
     val backgroundColor by animateColorAsState(
         targetValue = when {
-            isSelected && isFocused -> MerlotColors.AccentAlpha20
-            isFocused -> MerlotColors.Hover
+            isSelected && isFocused -> focusedGrey.copy(alpha = 0.4f)
+            isFocused -> focusedGrey.copy(alpha = 0.3f)
             isSelected -> MerlotColors.AccentAlpha10
             else -> Color.Transparent
         },
@@ -137,7 +139,8 @@ private fun SidebarItem(
 
     val iconColor by animateColorAsState(
         targetValue = when {
-            isSelected || isFocused -> MerlotColors.Accent
+            isSelected -> MerlotColors.Accent
+            isFocused -> MerlotColors.White
             else -> MerlotColors.TextMuted
         },
         animationSpec = tween(150),
@@ -146,7 +149,7 @@ private fun SidebarItem(
 
     val borderColor by animateColorAsState(
         targetValue = when {
-            isFocused -> MerlotColors.Accent
+            isFocused -> focusedGrey
             else -> Color.Transparent
         },
         animationSpec = tween(150),

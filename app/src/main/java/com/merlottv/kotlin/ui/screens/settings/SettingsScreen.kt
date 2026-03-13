@@ -69,8 +69,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
+/** Grey color for focused buttons/rows throughout the app */
+private val FocusedGrey = Color(0xFF666666)
+
 /**
- * Helper modifier that adds a visible Accent border when the composable is focused via D-pad.
+ * Helper modifier that adds a grey border + background tint when focused via D-pad.
  */
 @Composable
 private fun Modifier.dpadFocusable(
@@ -81,7 +84,9 @@ private fun Modifier.dpadFocusable(
         .onFocusChanged { isFocused = it.isFocused }
         .focusable()
         .then(
-            if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+            if (isFocused) Modifier
+                .border(2.dp, FocusedGrey, RoundedCornerShape(8.dp))
+                .background(FocusedGrey.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
             else Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
         )
         .onPreviewKeyEvent { event ->

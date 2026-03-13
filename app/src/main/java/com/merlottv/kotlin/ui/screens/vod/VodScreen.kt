@@ -4,10 +4,7 @@ package com.merlottv.kotlin.ui.screens.vod
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,13 +38,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,9 +83,14 @@ fun VodScreen(
                 fontWeight = FontWeight.ExtraBold
             )
             Spacer(modifier = Modifier.width(16.dp))
-            listOf("All", "Movies", "Series").forEach { tab ->
+
+            val tabs = listOf("All", "Movies", "Series")
+            tabs.forEach { tab ->
+                val isSelected = uiState.selectedTab == tab
+                var isFocused by remember { mutableStateOf(false) }
+
                 FilterChip(
-                    selected = uiState.selectedTab == tab,
+                    selected = isSelected,
                     onClick = { viewModel.onTabSelected(tab) },
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -103,10 +106,29 @@ fun VodScreen(
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MerlotColors.Accent,
                         selectedLabelColor = MerlotColors.Black,
-                        containerColor = MerlotColors.Surface2,
-                        labelColor = MerlotColors.TextPrimary
+                        containerColor = if (isFocused) Color(0xFF555555) else MerlotColors.Surface2,
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
                     ),
-                    modifier = Modifier.focusable()
+                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = false,
+                        borderColor = Color(0xFF888888),
+                        borderWidth = 2.dp
+                    ) else FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected
+                    ),
+                    modifier = Modifier
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                            ) {
+                                viewModel.onTabSelected(tab)
+                                true
+                            } else false
+                        }
                 )
             }
 

@@ -56,6 +56,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -733,13 +734,13 @@ private fun CategoryItem(
             .clip(RoundedCornerShape(8.dp))
             .background(
                 when {
-                    isFocused -> MerlotColors.Accent.copy(alpha = 0.25f)
+                    isFocused -> Color(0xFF666666).copy(alpha = 0.4f)
                     isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
                     else -> MerlotColors.Transparent
                 }
             )
             .then(
-                if (isFocused) Modifier.border(1.5.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                if (isFocused) Modifier.border(1.5.dp, Color(0xFF888888), RoundedCornerShape(8.dp))
                 else Modifier
             )
             .then(
@@ -761,7 +762,7 @@ private fun CategoryItem(
         Text(
             text = label,
             color = when {
-                isFocused -> MerlotColors.Accent
+                isFocused -> MerlotColors.White
                 isSelected -> MerlotColors.Accent
                 else -> MerlotColors.White
             },
@@ -801,13 +802,13 @@ private fun ChannelItem(
             }
             .background(
                 when {
-                    isFocused -> MerlotColors.Accent.copy(alpha = 0.25f)
+                    isFocused -> Color(0xFF666666).copy(alpha = 0.4f)
                     isSelected -> MerlotColors.Accent.copy(alpha = 0.12f)
                     else -> MerlotColors.Transparent
                 }
             )
             .then(
-                if (isFocused) Modifier.border(1.dp, MerlotColors.Accent, RoundedCornerShape(4.dp))
+                if (isFocused) Modifier.border(1.dp, Color(0xFF888888), RoundedCornerShape(4.dp))
                 else Modifier
             )
             .padding(horizontal = 12.dp, vertical = 8.dp),

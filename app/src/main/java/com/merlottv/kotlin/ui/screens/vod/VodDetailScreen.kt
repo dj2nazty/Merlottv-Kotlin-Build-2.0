@@ -44,7 +44,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -58,6 +61,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
+/** Grey color for focused buttons throughout the app */
+private val FocusedButtonGrey = Color(0xFF666666)
+private val FocusedButtonGreyLight = Color(0xFF777777)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun VodDetailScreen(
@@ -68,6 +75,7 @@ fun VodDetailScreen(
     viewModel: VodDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val playButtonFocusRequester = remember { FocusRequester() }
 
     // Auto-navigate to player when stream is selected
     LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
@@ -81,6 +89,13 @@ fun VodDetailScreen(
                 type
             )
             viewModel.clearPlayback()
+        }
+    }
+
+    // Default focus on Play button when meta loads
+    LaunchedEffect(uiState.meta) {
+        if (uiState.meta != null) {
+            try { playButtonFocusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
 
@@ -127,13 +142,22 @@ fun VodDetailScreen(
                                     )
                                 )
                         )
+                        // Back button — grey on focus
+                        var backFocused by remember { mutableStateOf(false) }
                         IconButton(
                             onClick = onBack,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(8.dp)
+                                .onFocusChanged { backFocused = it.isFocused }
+                                .then(
+                                    if (backFocused) Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(FocusedButtonGrey)
+                                    else Modifier
+                                )
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MerlotColors.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = if (backFocused) MerlotColors.White else MerlotColors.White)
                         }
                     }
 
@@ -222,14 +246,28 @@ fun VodDetailScreen(
 
                             // Action buttons
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // Play button — default focus target, grey on focus
+                                var playFocused by remember { mutableStateOf(false) }
                                 Button(
                                     onClick = { viewModel.playBestStream() },
                                     enabled = !uiState.isLoadingStreams,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MerlotColors.Accent,
-                                        contentColor = MerlotColors.Black
+                                        containerColor = if (playFocused) FocusedButtonGrey else MerlotColors.Accent,
+                                        contentColor = if (playFocused) MerlotColors.White else MerlotColors.Black
                                     ),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .focusRequester(playButtonFocusRequester)
+                                        .onFocusChanged { playFocused = it.isFocused }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                viewModel.playBestStream()
+                                                true
+                                            } else false
+                                        }
                                 ) {
                                     if (uiState.isLoadingStreams) {
                                         CircularProgressIndicator(
@@ -246,11 +284,27 @@ fun VodDetailScreen(
                                     }
                                 }
 
-                                IconButton(onClick = { viewModel.toggleFavorite() }) {
+                                // Favorite button — grey on focus
+                                var favFocused by remember { mutableStateOf(false) }
+                                IconButton(
+                                    onClick = { viewModel.toggleFavorite() },
+                                    modifier = Modifier
+                                        .onFocusChanged { favFocused = it.isFocused }
+                                        .then(
+                                            if (favFocused) Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(FocusedButtonGrey)
+                                            else Modifier
+                                        )
+                                ) {
                                     Icon(
                                         imageVector = if (uiState.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                         contentDescription = "Favorite",
-                                        tint = if (uiState.isFavorite) MerlotColors.Accent else MerlotColors.TextMuted
+                                        tint = when {
+                                            favFocused -> MerlotColors.White
+                                            uiState.isFavorite -> MerlotColors.Accent
+                                            else -> MerlotColors.TextMuted
+                                        }
                                     )
                                 }
                             }
@@ -276,11 +330,11 @@ fun VodDetailScreen(
                                         .padding(horizontal = 16.dp, vertical = 4.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(
-                                            if (streamFocused) MerlotColors.Accent.copy(alpha = 0.15f)
+                                            if (streamFocused) FocusedButtonGrey.copy(alpha = 0.3f)
                                             else MerlotColors.Surface2
                                         )
                                         .then(
-                                            if (streamFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                            if (streamFocused) Modifier.border(2.dp, FocusedButtonGreyLight, RoundedCornerShape(8.dp))
                                             else Modifier
                                         )
                                         .onFocusChanged { streamFocused = it.isFocused }
@@ -299,7 +353,7 @@ fun VodDetailScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = stream.name.ifEmpty { stream.addonName },
-                                            color = if (streamFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
+                                            color = if (streamFocused) MerlotColors.White else MerlotColors.TextPrimary,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
@@ -312,13 +366,17 @@ fun VodDetailScreen(
                                             )
                                         }
                                     }
+                                    // Stream Play button — grey on focus
+                                    var streamPlayFocused by remember { mutableStateOf(false) }
                                     Button(
                                         onClick = { viewModel.playStream(stream) },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = MerlotColors.Accent,
-                                            contentColor = MerlotColors.Black
+                                            containerColor = if (streamPlayFocused) FocusedButtonGrey else MerlotColors.Accent,
+                                            contentColor = if (streamPlayFocused) MerlotColors.White else MerlotColors.Black
                                         ),
-                                        shape = RoundedCornerShape(6.dp)
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier
+                                            .onFocusChanged { streamPlayFocused = it.isFocused }
                                     ) {
                                         Text("Play", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
