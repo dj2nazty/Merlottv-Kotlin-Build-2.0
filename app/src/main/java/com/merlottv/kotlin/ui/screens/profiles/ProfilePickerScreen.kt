@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import androidx.compose.runtime.LaunchedEffect
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.UserProfile
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -77,7 +78,18 @@ fun ProfilePickerScreen(
     viewModel: ProfilePickerViewModel = hiltViewModel()
 ) {
     val profiles by viewModel.profiles.collectAsState()
+    val hasExistingProfile by viewModel.hasExistingProfile.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+
+    // Auto-redirect to Home if a profile was already selected (returning user)
+    LaunchedEffect(hasExistingProfile) {
+        if (hasExistingProfile == true) {
+            onProfileSelected("existing")
+        }
+    }
+
+    // Don't render UI while checking / if auto-redirecting
+    if (hasExistingProfile != false) return
 
     Box(
         modifier = Modifier
