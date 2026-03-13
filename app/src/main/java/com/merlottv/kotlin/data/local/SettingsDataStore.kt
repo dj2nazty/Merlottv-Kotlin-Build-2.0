@@ -142,7 +142,14 @@ class SettingsDataStore(private val context: Context) {
     // ─── Backup Stream Sources ───
     val backupSources: Flow<List<BackupSourceEntry>> = context.settingsDataStore.data.map { prefs ->
         val json = prefs[BACKUP_SOURCES]
-        if (json != null) parseBackupSourcesJson(json) else emptyList()
+        if (json != null) {
+            parseBackupSourcesJson(json)
+        } else {
+            // Default: use hardcoded backup sources from DefaultData
+            com.merlottv.kotlin.domain.model.DefaultData.DEFAULT_BACKUP_SOURCES.map { src ->
+                BackupSourceEntry(name = src.name, url = src.url, enabled = true)
+            }
+        }
     }
 
     suspend fun setBackupSources(entries: List<BackupSourceEntry>) {

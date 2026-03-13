@@ -34,6 +34,10 @@ class SearchViewModel @Inject constructor(
     private var searchJob: Job? = null
     private val searchDispatcher = Dispatchers.IO.limitedParallelism(4)
 
+    // Addons that should NOT be searched (stream providers, not catalog/search providers)
+    // Their search catalogs return personal library content, not actual search results
+    private val excludedFromSearch = setOf("torbox", "torrentio")
+
     fun onQueryChanged(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
         searchJob?.cancel()
@@ -46,26 +50,19 @@ class SearchViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val addons = addonRepository.getAllAddons().first()
-                // Fetch manifests for addons with empty catalogs so we know their search capabilities
-                val resolvedAddons = addons.map { addon ->
-                    if (addon.catalogs.isEmpty()) {
-                        addonRepository.fetchManifest(addon.url) ?: addon
-                    } else addon
+
+                // Filter out stream-only addons (Torbox, Torrentio) — they return
+                // personal library content, not real search results
+                val catalogAddons = addons.filter { addon ->
+                    excludedFromSearch.none { excluded ->
+                        addon.id.contains(excluded, true) || addon.name.contains(excluded, true)
+                    }
                 }
-                // Filter to addons that have catalog resource (can search)
-                val searchableAddons = resolvedAddons.filter { addon ->
-                    addon.catalogs.isNotEmpty() ||
-                    addon.resources.isEmpty()  // unknown capabilities — try anyway
-                }
+
+                // Search all catalog addons in parallel — no sequential manifest fetching
                 val allResults = supervisorScope {
-                    searchableAddons.flatMap { addon ->
-                        // Only search types the addon actually supports
-                        val types = if (addon.types.isNotEmpty()) {
-                            addon.types.filter { it == "movie" || it == "series" }
-                        } else {
-                            listOf("movie", "series")
-                        }
-                        types.map { type ->
+                    catalogAddons.flatMap { addon ->
+                        listOf("movie", "series").map { type ->
                             async(searchDispatcher) {
                                 try {
                                     addonRepository.searchCatalog(addon, type, query)
