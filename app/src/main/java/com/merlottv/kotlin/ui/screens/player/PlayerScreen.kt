@@ -104,6 +104,7 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
 
     // Subtitle state
+    val panelFocusRequester = remember { FocusRequester() }
     var showSubtitleMenu by remember { mutableStateOf(false) }
     var subtitles by remember { mutableStateOf<List<Subtitle>>(emptyList()) }
     var subtitlesEnabled by remember { mutableStateOf(false) }
@@ -213,6 +214,14 @@ fun PlayerScreen(
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    // Move focus into the options panel when it opens
+    LaunchedEffect(showSubtitleMenu) {
+        if (showSubtitleMenu) {
+            delay(150) // Wait for panel to render
+            try { panelFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
     // Auto-hide controls
     LaunchedEffect(showControls) {
         if (showControls && !showSubtitleMenu) {
@@ -266,62 +275,60 @@ fun PlayerScreen(
             .background(MerlotColors.Black)
             .focusRequester(focusRequester)
             .focusable()
-            .onKeyEvent { event ->
+            .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
-                    when (event.key) {
-                        Key.DirectionCenter, Key.Enter -> {
-                            if (showSubtitleMenu) {
-                                // Let subtitle menu handle it
-                                false
-                            } else {
+                    // When player options panel is open, only handle Back key here
+                    // Let ALL other keys (Up/Down/Enter/Left/Right) pass through to the panel
+                    if (showSubtitleMenu) {
+                        when (event.key) {
+                            Key.Back -> {
+                                showSubtitleMenu = false
+                                // Return focus to the main player box
+                                scope.launch {
+                                    kotlinx.coroutines.delay(100)
+                                    try { focusRequester.requestFocus() } catch (_: Exception) {}
+                                }
+                                true
+                            }
+                            else -> false // Let panel handle all navigation
+                        }
+                    } else {
+                        when (event.key) {
+                            Key.DirectionCenter, Key.Enter -> {
                                 if (player.isPlaying) player.pause() else player.play()
                                 showControls = true
                                 true
                             }
-                        }
-                        Key.Back -> {
-                            if (showSubtitleMenu) {
-                                showSubtitleMenu = false
-                                true
-                            } else {
+                            Key.Back -> {
                                 onBack()
                                 true
                             }
-                        }
-                        Key.DirectionLeft -> {
-                            if (!showSubtitleMenu) {
+                            Key.DirectionLeft -> {
                                 player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0))
                                 currentPosition = player.currentPosition
                                 showControls = true
+                                true
                             }
-                            true
-                        }
-                        Key.DirectionRight -> {
-                            if (!showSubtitleMenu) {
+                            Key.DirectionRight -> {
                                 val maxPos = player.duration.coerceAtLeast(0)
                                 player.seekTo((player.currentPosition + 10_000).coerceAtMost(maxPos))
                                 currentPosition = player.currentPosition
                                 showControls = true
+                                true
                             }
-                            true
-                        }
-                        Key.DirectionUp -> {
-                            if (showControls && !showSubtitleMenu) {
-                                // Open subtitle menu on D-pad Up when controls visible
-                                showSubtitleMenu = true
+                            Key.DirectionUp -> {
+                                if (showControls) {
+                                    showSubtitleMenu = true
+                                }
+                                showControls = true
+                                true
                             }
-                            showControls = true
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            if (showSubtitleMenu) {
-                                // Close subtitle menu on D-pad Down
-                                showSubtitleMenu = false
+                            Key.DirectionDown -> {
+                                showControls = true
+                                true
                             }
-                            showControls = true
-                            true
+                            else -> false
                         }
-                        else -> false
                     }
                 } else false
             }
@@ -435,6 +442,7 @@ fun PlayerScreen(
             modifier = Modifier.align(Alignment.CenterEnd)
         ) {
             PlayerOptionsPanel(
+                panelFocusRequester = panelFocusRequester,
                 subtitles = subtitles,
                 enabled = subtitlesEnabled,
                 selectedLang = selectedSubtitleLang,
@@ -562,6 +570,7 @@ fun PlayerScreen(
 
 @Composable
 private fun PlayerOptionsPanel(
+    panelFocusRequester: FocusRequester = remember { FocusRequester() },
     subtitles: List<Subtitle>,
     enabled: Boolean,
     selectedLang: String,
@@ -620,6 +629,7 @@ private fun PlayerOptionsPanel(
                         else if (selectedTab == 0) Modifier.border(1.dp, MerlotColors.Accent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                         else Modifier
                     )
+                    .focusRequester(panelFocusRequester)
                     .onFocusChanged { subTabFocused = it.isFocused }
                     .focusable()
                     .onPreviewKeyEvent { event ->

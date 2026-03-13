@@ -279,6 +279,9 @@ class LiveTvViewModel @Inject constructor(
         applyFilters()
     }
 
+    /** True when a search query is active — used by UI to show channel results directly */
+    val isSearchActive: Boolean get() = _uiState.value.searchQuery.isNotBlank()
+
     fun onGroupSelected(group: String?) {
         _uiState.value = _uiState.value.copy(selectedGroup = group, showCategories = false)
         applyFilters()
@@ -545,22 +548,22 @@ class LiveTvViewModel @Inject constructor(
 
         var filtered = state.channels
 
-        if (hasGroup) {
-            val group = state.selectedGroup!!
-            if (group == "★ Favorites") {
-                // Filter to only favorite channels
-                val favIds = state.favoriteIds
-                filtered = filtered.filter { favIds.contains(it.id) }
-            } else {
-                filtered = filtered.filter { it.group == group }
-            }
-        }
-
+        // When searching, search across ALL channels regardless of selected group
+        // so users can find any channel from the search box in the category sidebar
         if (hasSearch) {
             val query = state.searchQuery
             filtered = filtered.filter {
                 it.name.contains(query, ignoreCase = true) ||
                 it.group.contains(query, ignoreCase = true)
+            }
+        } else if (hasGroup) {
+            // Only apply group filter when NOT searching
+            val group = state.selectedGroup!!
+            if (group == "★ Favorites") {
+                val favIds = state.favoriteIds
+                filtered = filtered.filter { favIds.contains(it.id) }
+            } else {
+                filtered = filtered.filter { it.group == group }
             }
         }
 

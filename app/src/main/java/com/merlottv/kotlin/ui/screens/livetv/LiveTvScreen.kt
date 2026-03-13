@@ -799,9 +799,10 @@ private fun ChannelListView(
             }
         }
 
-        // Channel list — semi-transparent overlay, shows when categories are hidden
+        // Channel list — semi-transparent overlay, shows when categories are hidden OR search is active
+        val showChannelList = (!uiState.showCategories || uiState.searchQuery.isNotBlank()) && !uiState.isLoading
         AnimatedVisibility(
-            visible = !uiState.showCategories && !uiState.isLoading,
+            visible = showChannelList,
             enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
             exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart)
@@ -813,9 +814,11 @@ private fun ChannelListView(
                     .background(MerlotColors.Black.copy(alpha = 0.75f))
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                            viewModel.onSearchChanged("") // Clear search when going back to categories
                             viewModel.showCategories()
                             true
                         } else if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                            viewModel.onSearchChanged("") // Clear search when going back
                             viewModel.showCategories()
                             true
                         } else false
@@ -830,7 +833,8 @@ private fun ChannelListView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = uiState.selectedGroup ?: "All Channels",
+                        text = if (uiState.searchQuery.isNotBlank()) "Search: \"${uiState.searchQuery}\""
+                               else uiState.selectedGroup ?: "All Channels",
                         color = MerlotColors.Accent,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
