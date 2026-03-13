@@ -26,6 +26,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:hardwareAccelerated="true"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.MerlotTV">
             <intent-filter>

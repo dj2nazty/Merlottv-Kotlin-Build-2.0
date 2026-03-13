@@ -1,9 +1,15 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:Suppress("SetJavaScriptEnabled")
 
 package com.merlottv.kotlin.ui.screens.spacex
 
-import android.content.Intent
-import android.net.Uri
+import android.annotation.SuppressLint
+import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -14,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
@@ -30,12 +37,12 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.LaunchStatus
@@ -51,155 +58,267 @@ fun SpaceXScreen(
     viewModel: SpaceXViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
+
+    // In-app video player state
+    var showingVideoUrl by remember { mutableStateOf<String?>(null) }
 
     // Lazy load — only fetch data when this screen is first composed
     LaunchedEffect(Unit) { viewModel.onScreenVisible() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MerlotColors.Background)
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-    ) {
-        // ─── Header ───
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ─── Main Content ───
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MerlotColors.Background)
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp)
         ) {
-            Text(
-                "SpaceX Launches",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = MerlotColors.TextPrimary
-            )
-            Spacer(Modifier.weight(1f))
-            // Refresh button
-            var refreshFocused by remember { mutableStateOf(false) }
-            IconButton(
-                onClick = { viewModel.refresh() },
-                modifier = Modifier
-                    .size(36.dp)
-                    .onFocusChanged { refreshFocused = it.isFocused }
-                    .focusable()
-                    .then(
-                        if (refreshFocused) Modifier.border(2.dp, MerlotColors.Accent, CircleShape)
-                        else Modifier
-                    )
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown &&
-                            (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                        ) {
-                            viewModel.refresh(); true
-                        } else false
-                    }
+            // ─── Header ───
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.Refresh, "Refresh", tint = MerlotColors.TextPrimary, modifier = Modifier.size(22.dp))
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // ─── Countdown Hero Card ───
-        uiState.nextLaunch?.let { nextLaunch ->
-            CountdownHeroCard(
-                launch = nextLaunch,
-                countdownText = uiState.countdownText,
-                onWatchLive = { url ->
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
-                    } catch (_: Exception) {}
-                }
-            )
-            Spacer(Modifier.height(12.dp))
-        }
-
-        // ─── Sub-Tab Chips ───
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(SpaceXTab.entries.toList()) { tab ->
-                var chipFocused by remember { mutableStateOf(false) }
-                FilterChip(
-                    selected = uiState.selectedTab == tab,
-                    onClick = { viewModel.selectTab(tab) },
-                    label = {
-                        Text(
-                            tab.title,
-                            fontWeight = if (uiState.selectedTab == tab) FontWeight.Bold else FontWeight.Normal
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MerlotColors.Accent.copy(alpha = 0.2f),
-                        selectedLabelColor = MerlotColors.Accent,
-                        containerColor = Color(0xFF2A2A2A),
-                        labelColor = MerlotColors.TextMuted
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (chipFocused) MerlotColors.Accent else Color.Transparent,
-                        selectedBorderColor = if (chipFocused) MerlotColors.Accent else MerlotColors.Accent.copy(alpha = 0.5f),
-                        borderWidth = if (chipFocused) 2.dp else 1.dp,
-                        selectedBorderWidth = if (chipFocused) 2.dp else 1.dp,
-                        enabled = true,
-                        selected = uiState.selectedTab == tab
-                    ),
+                Text(
+                    "SpaceX Launches",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MerlotColors.TextPrimary
+                )
+                Spacer(Modifier.weight(1f))
+                // Refresh button
+                var refreshFocused by remember { mutableStateOf(false) }
+                IconButton(
+                    onClick = { viewModel.refresh() },
                     modifier = Modifier
-                        .onFocusChanged { chipFocused = it.isFocused }
+                        .size(36.dp)
+                        .onFocusChanged { refreshFocused = it.isFocused }
                         .focusable()
+                        .then(
+                            if (refreshFocused) Modifier.border(2.dp, MerlotColors.Accent, CircleShape)
+                            else Modifier
+                        )
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown &&
                                 (event.key == Key.DirectionCenter || event.key == Key.Enter)
                             ) {
-                                viewModel.selectTab(tab); true
+                                viewModel.refresh(); true
                             } else false
                         }
+                ) {
+                    Icon(Icons.Default.Refresh, "Refresh", tint = MerlotColors.TextPrimary, modifier = Modifier.size(22.dp))
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ─── Countdown Hero Card ───
+            uiState.nextLaunch?.let { nextLaunch ->
+                CountdownHeroCard(
+                    launch = nextLaunch,
+                    countdownText = uiState.countdownText,
+                    onWatchLive = { url -> showingVideoUrl = url }
                 )
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // ─── Sub-Tab Chips ───
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(SpaceXTab.entries.toList()) { tab ->
+                    var chipFocused by remember { mutableStateOf(false) }
+                    FilterChip(
+                        selected = uiState.selectedTab == tab,
+                        onClick = { viewModel.selectTab(tab) },
+                        label = {
+                            Text(
+                                tab.title,
+                                fontWeight = if (uiState.selectedTab == tab) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MerlotColors.Accent.copy(alpha = 0.2f),
+                            selectedLabelColor = MerlotColors.Accent,
+                            containerColor = Color(0xFF2A2A2A),
+                            labelColor = MerlotColors.TextMuted
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = if (chipFocused) MerlotColors.Accent else Color.Transparent,
+                            selectedBorderColor = if (chipFocused) MerlotColors.Accent else MerlotColors.Accent.copy(alpha = 0.5f),
+                            borderWidth = if (chipFocused) 2.dp else 1.dp,
+                            selectedBorderWidth = if (chipFocused) 2.dp else 1.dp,
+                            enabled = true,
+                            selected = uiState.selectedTab == tab
+                        ),
+                        modifier = Modifier
+                            .onFocusChanged { chipFocused = it.isFocused }
+                            .focusable()
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown &&
+                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                ) {
+                                    viewModel.selectTab(tab); true
+                                } else false
+                            }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ─── Content ───
+            when {
+                uiState.isLoading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MerlotColors.Accent)
+                    }
+                }
+                uiState.error != null && (
+                    (uiState.selectedTab == SpaceXTab.Upcoming && uiState.upcomingLaunches.isEmpty()) ||
+                    (uiState.selectedTab == SpaceXTab.Past && uiState.pastLaunches.isEmpty())
+                ) -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(uiState.error ?: "Unknown error", color = MerlotColors.TextMuted, fontSize = 16.sp)
+                    }
+                }
+                else -> {
+                    when (uiState.selectedTab) {
+                        SpaceXTab.Upcoming -> LaunchList(
+                            launches = uiState.upcomingLaunches,
+                            onWatchLive = { url -> showingVideoUrl = url }
+                        )
+                        SpaceXTab.Past -> LaunchList(
+                            launches = uiState.pastLaunches,
+                            onWatchLive = { url -> showingVideoUrl = url }
+                        )
+                    }
+                }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-
-        // ─── Content ───
-        when {
-            uiState.isLoading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MerlotColors.Accent)
-                }
-            }
-            uiState.error != null && (
-                (uiState.selectedTab == SpaceXTab.Upcoming && uiState.upcomingLaunches.isEmpty()) ||
-                (uiState.selectedTab == SpaceXTab.Past && uiState.pastLaunches.isEmpty())
-            ) -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(uiState.error ?: "Unknown error", color = MerlotColors.TextMuted, fontSize = 16.sp)
-                }
-            }
-            else -> {
-                when (uiState.selectedTab) {
-                    SpaceXTab.Upcoming -> LaunchList(
-                        launches = uiState.upcomingLaunches,
-                        onWatchLive = { url ->
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                    )
-                    SpaceXTab.Past -> LaunchList(
-                        launches = uiState.pastLaunches,
-                        onWatchLive = { url ->
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                    )
-                }
-            }
+        // ─── In-App YouTube Player Overlay ───
+        showingVideoUrl?.let { url ->
+            YouTubeWebPlayer(
+                url = url,
+                onDismiss = { showingVideoUrl = null }
+            )
         }
     }
+}
+
+// ─── In-App YouTube WebView Player ──────────────────────────────────────────
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun YouTubeWebPlayer(
+    url: String,
+    onDismiss: () -> Unit
+) {
+    // Back button closes the player
+    BackHandler { onDismiss() }
+
+    val embedUrl = remember(url) { buildEmbedUrl(url) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                    onDismiss(); true
+                } else false
+            }
+    ) {
+        // WebView
+        AndroidView(
+            factory = { context ->
+                WebView(context).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    webViewClient = WebViewClient()
+                    webChromeClient = WebChromeClient()
+                    settings.apply {
+                        javaScriptEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        domStorageEnabled = true
+                        allowContentAccess = true
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    }
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    loadUrl(embedUrl)
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Close button (top-right)
+        var closeFocused by remember { mutableStateOf(false) }
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.6f))
+                .onFocusChanged { closeFocused = it.isFocused }
+                .focusable()
+                .then(
+                    if (closeFocused) Modifier.border(2.dp, Color.White, CircleShape)
+                    else Modifier
+                )
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                    ) {
+                        onDismiss(); true
+                    } else false
+                }
+        ) {
+            Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(24.dp))
+        }
+    }
+}
+
+/**
+ * Convert a YouTube URL into an embeddable URL.
+ * Handles: youtu.be/ID, youtube.com/watch?v=ID, youtube.com/live/ID,
+ * and falls back to loading the URL directly in WebView if no ID can be extracted.
+ */
+private fun buildEmbedUrl(url: String): String {
+    val videoId = extractYouTubeId(url)
+    return if (videoId != null) {
+        "https://www.youtube.com/embed/$videoId?autoplay=1&rel=0&modestbranding=1&playsinline=1"
+    } else {
+        // Can't extract ID — load URL directly (e.g. channel live page)
+        url
+    }
+}
+
+private fun extractYouTubeId(url: String): String? {
+    // youtu.be/VIDEO_ID
+    if (url.contains("youtu.be/")) {
+        return url.substringAfter("youtu.be/").substringBefore("?").substringBefore("&").takeIf { it.isNotEmpty() }
+    }
+    // youtube.com/live/VIDEO_ID
+    if (url.contains("/live/")) {
+        return url.substringAfter("/live/").substringBefore("?").substringBefore("&").takeIf { it.isNotEmpty() }
+    }
+    // youtube.com/watch?v=VIDEO_ID
+    if (url.contains("v=")) {
+        return url.substringAfter("v=").substringBefore("&").substringBefore("#").takeIf { it.isNotEmpty() }
+    }
+    // youtube.com/embed/VIDEO_ID (already embedded)
+    if (url.contains("/embed/")) {
+        return url.substringAfter("/embed/").substringBefore("?").substringBefore("&").takeIf { it.isNotEmpty() }
+    }
+    return null
 }
 
 // ─── Countdown Hero Card ────────────────────────────────────────────────────
@@ -293,8 +412,8 @@ private fun CountdownHeroCard(
                     var btnFocused by remember { mutableStateOf(false) }
                     Button(
                         onClick = {
-                            val url = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
-                            onWatchLive(url)
+                            val watchUrl = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
+                            onWatchLive(watchUrl)
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (launch.webcastLive) Color(0xFFE53935) else MerlotColors.Accent
@@ -312,8 +431,8 @@ private fun CountdownHeroCard(
                                 if (event.type == KeyEventType.KeyDown &&
                                     (event.key == Key.DirectionCenter || event.key == Key.Enter)
                                 ) {
-                                    val url = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
-                                    onWatchLive(url)
+                                    val watchUrl = launch.videoUrls.firstOrNull() ?: "https://www.youtube.com/@SpaceX/live"
+                                    onWatchLive(watchUrl)
                                     true
                                 } else false
                             }
@@ -373,9 +492,9 @@ private fun LaunchCard(
                 if (event.type == KeyEventType.KeyDown &&
                     (event.key == Key.DirectionCenter || event.key == Key.Enter)
                 ) {
-                    val url = launch.videoUrls.firstOrNull()
-                    if (url != null) {
-                        onWatchLive(url)
+                    val videoUrl = launch.videoUrls.firstOrNull()
+                    if (videoUrl != null) {
+                        onWatchLive(videoUrl)
                         true
                     } else false
                 } else false
