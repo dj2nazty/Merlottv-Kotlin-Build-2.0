@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SportsFootball
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -22,10 +23,19 @@ sealed class Screen(
     data object TvGuide : Screen("tv_guide", "TV Guide", Icons.Default.Tv)
     data object Vod : Screen("vod", "VOD", Icons.Default.Movie)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
+    data object Sports : Screen("sports", "Sports", Icons.Default.SportsFootball)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 
     // Profile picker
     data object ProfilePicker : Screen("profile_picker", "Profiles", Icons.Default.Person)
+
+    // Sports detail routes
+    data object GameDetail : Screen("sports/game/{league}/{eventId}", "Game", Icons.Default.SportsFootball) {
+        fun createRoute(league: String, eventId: String) = "sports/game/$league/$eventId"
+    }
+    data object TeamDetail : Screen("sports/team/{league}/{teamId}", "Team", Icons.Default.SportsFootball) {
+        fun createRoute(league: String, teamId: String) = "sports/team/$league/$teamId"
+    }
 
     // Detail routes
     data object VodDetail : Screen("vod_detail/{type}/{id}", "Detail", Icons.Default.Movie) {
@@ -42,6 +52,6 @@ sealed class Screen(
     }
 
     companion object {
-        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Settings)
+        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Sports, Settings)
     }
 }
