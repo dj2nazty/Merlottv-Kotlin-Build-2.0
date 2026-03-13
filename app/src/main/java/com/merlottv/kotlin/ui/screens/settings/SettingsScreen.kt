@@ -579,51 +579,99 @@ fun SettingsScreen(
         // ═══ Live TV Category Order ═══
         if (uiState.categoryOrder.isNotEmpty()) {
             item(key = "category_order") {
+                var movingIndex by remember { mutableStateOf(-1) }  // -1 = not moving
+
                 SettingsSection(title = "Live TV Categories", icon = { Icon(Icons.Default.List, null, tint = MerlotColors.Accent) }) {
-                    Text("Reorder categories using the arrow buttons. Favorites always stays first.", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                    Text(
+                        text = if (movingIndex >= 0) "⬆ ⬇  Use D-pad Up/Down to move, press OK to confirm"
+                               else "Select a category and press OK to reorder it",
+                        color = if (movingIndex >= 0) MerlotColors.Accent else MerlotColors.TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = if (movingIndex >= 0) FontWeight.Bold else FontWeight.Normal
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     uiState.categoryOrder.forEachIndexed { index, category ->
+                        val isMoving = movingIndex == index
+                        var isFocused by remember { mutableStateOf(false) }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
-                                .dpadFocusable()
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .background(
+                                    if (isMoving) MerlotColors.Accent.copy(alpha = 0.15f)
+                                    else MerlotColors.Surface2,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .then(
+                                    if (isMoving) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                    else if (isFocused) Modifier.border(2.dp, FocusedGrey, RoundedCornerShape(8.dp))
+                                    else Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown) {
+                                        when (event.key) {
+                                            Key.DirectionCenter, Key.Enter -> {
+                                                if (isMoving) {
+                                                    movingIndex = -1  // Confirm position
+                                                } else {
+                                                    movingIndex = index  // Start moving this category
+                                                }
+                                                true
+                                            }
+                                            Key.DirectionUp -> {
+                                                if (isMoving && index > 0) {
+                                                    viewModel.moveCategoryUp(index)
+                                                    movingIndex = index - 1
+                                                    true
+                                                } else false
+                                            }
+                                            Key.DirectionDown -> {
+                                                if (isMoving && index < uiState.categoryOrder.size - 1) {
+                                                    viewModel.moveCategoryDown(index)
+                                                    movingIndex = index + 1
+                                                    true
+                                                } else false
+                                            }
+                                            Key.Back -> {
+                                                if (isMoving) {
+                                                    movingIndex = -1  // Cancel
+                                                    true
+                                                } else false
+                                            }
+                                            else -> false
+                                        }
+                                    } else false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = "${index + 1}.",
-                                color = MerlotColors.TextMuted,
+                                color = if (isMoving) MerlotColors.Accent else MerlotColors.TextMuted,
                                 fontSize = 11.sp,
+                                fontWeight = if (isMoving) FontWeight.Bold else FontWeight.Normal,
                                 modifier = Modifier.width(24.dp)
                             )
                             Text(
                                 text = category,
-                                color = MerlotColors.TextPrimary,
+                                color = if (isMoving) MerlotColors.Accent else MerlotColors.TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = { viewModel.moveCategoryUp(index) },
-                                enabled = index > 0,
-                                modifier = Modifier.size(28.dp)
-                            ) {
+                            if (isMoving) {
+                                Text("▲▼", color = MerlotColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            } else {
                                 Icon(
-                                    Icons.Default.KeyboardArrowUp, "Move up",
-                                    tint = if (index > 0) MerlotColors.Accent else MerlotColors.TextMuted.copy(alpha = 0.3f),
-                                    modifier = Modifier.size(20.dp)
+                                    Icons.Default.KeyboardArrowUp, null,
+                                    tint = MerlotColors.TextMuted.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            }
-                            IconButton(
-                                onClick = { viewModel.moveCategoryDown(index) },
-                                enabled = index < uiState.categoryOrder.size - 1,
-                                modifier = Modifier.size(28.dp)
-                            ) {
                                 Icon(
-                                    Icons.Default.KeyboardArrowDown, "Move down",
-                                    tint = if (index < uiState.categoryOrder.size - 1) MerlotColors.Accent else MerlotColors.TextMuted.copy(alpha = 0.3f),
-                                    modifier = Modifier.size(20.dp)
+                                    Icons.Default.KeyboardArrowDown, null,
+                                    tint = MerlotColors.TextMuted.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
@@ -632,14 +680,14 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = { viewModel.saveCategoryOrder() },
+                            onClick = { movingIndex = -1; viewModel.saveCategoryOrder() },
                             colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Save Order", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                         Button(
-                            onClick = { viewModel.resetCategoryOrder() },
+                            onClick = { movingIndex = -1; viewModel.resetCategoryOrder() },
                             colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2, contentColor = MerlotColors.TextPrimary),
                             shape = RoundedCornerShape(8.dp)
                         ) {

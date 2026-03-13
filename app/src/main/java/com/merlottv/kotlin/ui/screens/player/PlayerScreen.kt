@@ -202,30 +202,41 @@ fun PlayerScreen(
         }
     }
 
-    // Track position periodically
+    // Track position periodically + save progress every 30 seconds
     LaunchedEffect(player) {
+        var saveCounter = 0
         while (true) {
             delay(3000)
             try {
                 if (player.isPlaying) {
                     currentPosition = player.currentPosition
                     totalDuration = player.duration.coerceAtLeast(0)
+                    // Save progress every ~30 seconds (10 cycles × 3s)
+                    saveCounter++
+                    if (saveCounter >= 10) {
+                        saveCounter = 0
+                        val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
+                        watchProgressStore?.saveProgress(
+                            id, currentPosition, totalDuration, title, poster, contentType
+                        )
+                    }
                 }
             } catch (_: Exception) {}
         }
     }
 
-    // Save progress on dispose
+    // Save progress on dispose using GlobalScope so it survives composable disposal
     DisposableEffect(Unit) {
         onDispose {
             val pos = player.currentPosition
             val dur = player.duration.coerceAtLeast(0)
             val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
-            scope.launch {
-                try {
+            // Use runBlocking to ensure save completes before player is released
+            try {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                     watchProgressStore?.saveProgress(id, pos, dur, title, poster, contentType)
-                } catch (_: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
             player.release()
         }
     }
