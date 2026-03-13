@@ -105,6 +105,7 @@ fun PlayerScreen(
     var subtitlesEnabled by remember { mutableStateOf(false) }
     var selectedSubtitleLang by remember { mutableStateOf("eng") }
     var subtitleSize by remember { mutableStateOf(1.0f) }
+    var subtitleFont by remember { mutableStateOf("default") }
     var activeSubtitle by remember { mutableStateOf<Subtitle?>(null) }
 
     val watchProgressStore = remember {
@@ -164,6 +165,7 @@ fun PlayerScreen(
             subtitlesEnabled = settingsStore.subtitlesEnabled.first()
             selectedSubtitleLang = settingsStore.subtitleLanguage.first()
             subtitleSize = settingsStore.subtitleSize.first()
+            subtitleFont = settingsStore.subtitleFont.first()
         }
 
         // Resume from saved position
@@ -294,6 +296,26 @@ fun PlayerScreen(
                     }
                 }
             },
+            update = { playerView ->
+                playerView.subtitleView?.apply {
+                    val typeface = when (subtitleFont) {
+                        "monospace" -> android.graphics.Typeface.MONOSPACE
+                        "serif" -> android.graphics.Typeface.SERIF
+                        "sans-serif" -> android.graphics.Typeface.SANS_SERIF
+                        else -> android.graphics.Typeface.DEFAULT
+                    }
+                    val style = androidx.media3.ui.CaptionStyleCompat(
+                        android.graphics.Color.WHITE,
+                        android.graphics.Color.argb(128, 0, 0, 0),
+                        android.graphics.Color.TRANSPARENT,
+                        androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                        android.graphics.Color.BLACK,
+                        typeface
+                    )
+                    setStyle(style)
+                    setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f * subtitleSize)
+                }
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -373,6 +395,7 @@ fun PlayerScreen(
                 enabled = subtitlesEnabled,
                 selectedLang = selectedSubtitleLang,
                 currentSize = subtitleSize,
+                currentFont = subtitleFont,
                 activeSubtitle = activeSubtitle,
                 onToggle = { enabled ->
                     subtitlesEnabled = enabled
@@ -403,6 +426,10 @@ fun PlayerScreen(
                 onSizeChange = { size ->
                     subtitleSize = size
                     scope.launch { settingsStore?.setSubtitleSize(size) }
+                },
+                onFontChange = { font ->
+                    subtitleFont = font
+                    scope.launch { settingsStore?.setSubtitleFont(font) }
                 },
                 onClose = { showSubtitleMenu = false }
             )
@@ -474,10 +501,12 @@ private fun SubtitleMenuPanel(
     enabled: Boolean,
     selectedLang: String,
     currentSize: Float,
+    currentFont: String,
     activeSubtitle: Subtitle?,
     onToggle: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
     onSizeChange: (Float) -> Unit,
+    onFontChange: (String) -> Unit,
     onClose: () -> Unit
 ) {
     // Get unique languages
@@ -553,6 +582,41 @@ private fun SubtitleMenuPanel(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(label, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
+                    if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Font controls
+            Text("Font", color = MerlotColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+            val fonts = listOf("default" to "Default", "monospace" to "Monospace", "serif" to "Serif", "sans-serif" to "Sans Serif")
+            fonts.forEach { (fontKey, fontLabel) ->
+                val isSelected = currentFont == fontKey
+                var isFocused by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            when {
+                                isFocused -> FocusedGrey.copy(alpha = 0.3f)
+                                isSelected -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                else -> Color.Transparent
+                            }
+                        )
+                        .then(if (isFocused) Modifier.border(1.dp, FocusedGrey, RoundedCornerShape(6.dp)) else Modifier)
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
+                                onFontChange(fontKey); true
+                            } else false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(fontLabel, color = if (isSelected) MerlotColors.Accent else MerlotColors.White, fontSize = 12.sp)
                     if (isSelected) Text("✓", color = MerlotColors.Accent, fontSize = 12.sp)
                 }
             }

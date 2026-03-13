@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
 import org.json.JSONObject
 
 private val Context.favoritesDataStore: DataStore<Preferences> by preferencesDataStore(name = "favorites")
@@ -39,6 +40,9 @@ class FavoritesDataStore(private val context: Context) {
         // VOD metadata stored as JSON map: id -> {name, poster, type, ...}
         private fun vodMetaKey(profileId: String) = stringPreferencesKey("fav_vod_meta_$profileId")
         private val LEGACY_VOD_META = stringPreferencesKey("fav_vod_meta")
+
+        // Custom named favorites lists: JSON object { "listName": ["vodId1", "vodId2", ...], ... }
+        val CUSTOM_LISTS = stringPreferencesKey("custom_favorites_lists")
     }
 
     // =============== Profile-aware favorites ===============
@@ -119,6 +123,83 @@ class FavoritesDataStore(private val context: Context) {
                 }
             } catch (_: Exception) {}
             result
+        }
+    }
+
+    // =============== Custom Named Favorites Lists ===============
+
+    fun getCustomLists(): Flow<Map<String, List<String>>> = context.favoritesDataStore.data.map { prefs ->
+        val raw = prefs[CUSTOM_LISTS] ?: "{}"
+        val result = mutableMapOf<String, List<String>>()
+        try {
+            val json = JSONObject(raw)
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val listName = keys.next()
+                val arr = json.getJSONArray(listName)
+                val ids = mutableListOf<String>()
+                for (i in 0 until arr.length()) {
+                    ids.add(arr.getString(i))
+                }
+                result[listName] = ids
+            }
+        } catch (_: Exception) {}
+        result
+    }
+
+    suspend fun createCustomList(name: String) {
+        context.favoritesDataStore.edit { prefs ->
+            val raw = prefs[CUSTOM_LISTS] ?: "{}"
+            val json = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
+            if (!json.has(name)) {
+                json.put(name, JSONArray())
+            }
+            prefs[CUSTOM_LISTS] = json.toString()
+        }
+    }
+
+    suspend fun deleteCustomList(name: String) {
+        context.favoritesDataStore.edit { prefs ->
+            val raw = prefs[CUSTOM_LISTS] ?: "{}"
+            val json = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
+            json.remove(name)
+            prefs[CUSTOM_LISTS] = json.toString()
+        }
+    }
+
+    suspend fun addToCustomList(listName: String, vodId: String) {
+        context.favoritesDataStore.edit { prefs ->
+            val raw = prefs[CUSTOM_LISTS] ?: "{}"
+            val json = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
+            val arr = if (json.has(listName)) json.getJSONArray(listName) else JSONArray()
+            // Avoid duplicates
+            var found = false
+            for (i in 0 until arr.length()) {
+                if (arr.getString(i) == vodId) { found = true; break }
+            }
+            if (!found) {
+                arr.put(vodId)
+            }
+            json.put(listName, arr)
+            prefs[CUSTOM_LISTS] = json.toString()
+        }
+    }
+
+    suspend fun removeFromCustomList(listName: String, vodId: String) {
+        context.favoritesDataStore.edit { prefs ->
+            val raw = prefs[CUSTOM_LISTS] ?: "{}"
+            val json = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
+            if (json.has(listName)) {
+                val arr = json.getJSONArray(listName)
+                val newArr = JSONArray()
+                for (i in 0 until arr.length()) {
+                    if (arr.getString(i) != vodId) {
+                        newArr.put(arr.getString(i))
+                    }
+                }
+                json.put(listName, newArr)
+                prefs[CUSTOM_LISTS] = json.toString()
+            }
         }
     }
 

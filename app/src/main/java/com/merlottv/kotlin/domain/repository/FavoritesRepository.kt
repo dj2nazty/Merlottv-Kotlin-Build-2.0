@@ -12,4 +12,11 @@ interface FavoritesRepository {
     suspend fun toggleFavoriteVodWithMeta(vodId: String, meta: FavoriteVodMeta)
     suspend fun isFavoriteChannel(channelId: String): Boolean
     suspend fun isFavoriteVod(vodId: String): Boolean
+
+    // Custom named favorites lists
+    fun getCustomLists(): Flow<Map<String, List<String>>>
+    suspend fun createCustomList(name: String)
+    suspend fun deleteCustomList(name: String)
+    suspend fun addToCustomList(listName: String, vodId: String)
+    suspend fun removeFromCustomList(listName: String, vodId: String)
 }

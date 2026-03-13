@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Hd
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.ClosedCaptionDisabled
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -112,9 +114,16 @@ private fun FullscreenPlayer(
     }
 
     // Request focus for D-pad input — with safety delay
+    // Also re-capture focus when quick menu closes so channel up/down works again
     LaunchedEffect(Unit) {
         delay(100)
         try { focusRequester.requestFocus() } catch (_: Exception) {}
+    }
+    LaunchedEffect(uiState.showQuickMenu) {
+        if (!uiState.showQuickMenu) {
+            delay(100)
+            try { focusRequester.requestFocus() } catch (_: Exception) {}
+        }
     }
 
     Box(
@@ -123,43 +132,48 @@ private fun FullscreenPlayer(
             .background(MerlotColors.Black)
             .focusRequester(focusRequester)
             .focusable()
-            .onKeyEvent { event ->
+            .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
-                    when (event.key) {
-                        Key.DirectionUp -> {
-                            viewModel.channelUp()
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            viewModel.channelDown()
-                            true
-                        }
-                        Key.DirectionLeft -> {
-                            // D-pad Left → exit fullscreen and show categories
-                            viewModel.exitFullscreen()
-                            viewModel.showCategories()
-                            true
-                        }
-                        Key.DirectionCenter, Key.Enter -> {
-                            if (uiState.showQuickMenu) {
-                                // If quick menu is open, close it
+                    // When quick menu is open, let Up/Down/OK/Enter pass through
+                    // so the menu items can handle focus navigation and selection
+                    if (uiState.showQuickMenu) {
+                        when (event.key) {
+                            Key.Back -> {
                                 viewModel.hideQuickMenu()
-                            } else {
-                                viewModel.showQuickMenu()
+                                true
                             }
-                            true
+                            // Let all other keys pass through to menu items
+                            else -> false
                         }
-                        Key.Back -> {
-                            if (uiState.showQuickMenu) {
-                                viewModel.hideQuickMenu()
-                            } else if (uiState.showOverlay) {
-                                viewModel.hideOverlay()
-                            } else {
+                    } else {
+                        when (event.key) {
+                            Key.DirectionUp -> {
+                                viewModel.channelUp()
+                                true
+                            }
+                            Key.DirectionDown -> {
+                                viewModel.channelDown()
+                                true
+                            }
+                            Key.DirectionLeft -> {
                                 viewModel.exitFullscreen()
+                                viewModel.showCategories()
+                                true
                             }
-                            true
+                            Key.DirectionCenter, Key.Enter -> {
+                                viewModel.showQuickMenu()
+                                true
+                            }
+                            Key.Back -> {
+                                if (uiState.showOverlay) {
+                                    viewModel.hideOverlay()
+                                } else {
+                                    viewModel.exitFullscreen()
+                                }
+                                true
+                            }
+                            else -> false
                         }
-                        else -> false
                     }
                 } else false
             }
@@ -264,6 +278,9 @@ private fun FullscreenPlayer(
                 onToggleFavorite = {
                     viewModel.toggleCurrentChannelFavorite()
                 },
+                onToggleSubtitles = {
+                    viewModel.toggleSubtitles()
+                },
                 onChannelInfoClick = {
                     viewModel.hideQuickMenu()
                     viewModel.toggleOverlay()
@@ -279,6 +296,7 @@ private fun QuickMenuOverlay(
     uiState: LiveTvUiState,
     onLastWatchedClick: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleSubtitles: () -> Unit,
     onChannelInfoClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -332,6 +350,15 @@ private fun QuickMenuOverlay(
             iconTint = if (isFavorite) MerlotColors.Accent else MerlotColors.TextMuted,
             enabled = currentChannel != null,
             onClick = onToggleFavorite
+        )
+
+        // Toggle CC / Subtitles
+        QuickMenuItem(
+            icon = if (uiState.subtitlesEnabled) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled,
+            label = if (uiState.subtitlesEnabled) "Subtitles: ON" else "Subtitles: OFF",
+            iconTint = if (uiState.subtitlesEnabled) MerlotColors.Accent else MerlotColors.TextMuted,
+            enabled = true,
+            onClick = onToggleSubtitles
         )
 
         // Channel info

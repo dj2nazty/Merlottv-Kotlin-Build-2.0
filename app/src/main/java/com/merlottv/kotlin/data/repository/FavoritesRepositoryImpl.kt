@@ -47,4 +47,25 @@ class FavoritesRepositoryImpl @Inject constructor(
     override suspend fun isFavoriteVod(vodId: String): Boolean {
         return favoritesDataStore.favoriteVod.first().contains(vodId)
     }
+
+    // Custom named favorites lists
+
+    override fun getCustomLists(): Flow<Map<String, List<String>>> =
+        favoritesDataStore.getCustomLists()
+
+    override suspend fun createCustomList(name: String) {
+        favoritesDataStore.createCustomList(name)
+    }
+
+    override suspend fun deleteCustomList(name: String) {
+        favoritesDataStore.deleteCustomList(name)
+    }
+
+    override suspend fun addToCustomList(listName: String, vodId: String) {
+        favoritesDataStore.addToCustomList(listName, vodId)
+    }
+
+    override suspend fun removeFromCustomList(listName: String, vodId: String) {
+        favoritesDataStore.removeFromCustomList(listName, vodId)
+    }
 }

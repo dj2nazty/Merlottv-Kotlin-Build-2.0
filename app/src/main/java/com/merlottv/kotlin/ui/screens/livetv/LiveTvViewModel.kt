@@ -63,7 +63,9 @@ data class LiveTvUiState(
     val showCategories: Boolean = true,
     // Quick menu (OK button popup)
     val showQuickMenu: Boolean = false,
-    val lastWatchedChannel: Channel? = null
+    val lastWatchedChannel: Channel? = null,
+    // Subtitles (embedded CC)
+    val subtitlesEnabled: Boolean = false
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -479,6 +481,17 @@ class LiveTvViewModel @Inject constructor(
         val channelId = _uiState.value.selectedChannel?.id ?: return
         toggleFavorite(channelId)
         hideQuickMenu()
+    }
+
+    fun toggleSubtitles() {
+        val enabled = !_uiState.value.subtitlesEnabled
+        _uiState.value = _uiState.value.copy(subtitlesEnabled = enabled)
+        try {
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled)
+                .build()
+        } catch (_: Exception) {}
     }
 
     fun exitFullscreen() {

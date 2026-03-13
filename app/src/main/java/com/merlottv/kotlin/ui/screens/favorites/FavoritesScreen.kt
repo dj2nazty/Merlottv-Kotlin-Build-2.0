@@ -21,13 +21,19 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -65,6 +71,7 @@ fun FavoritesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -86,8 +93,8 @@ fun FavoritesScreen(
             )
             Spacer(modifier = Modifier.width(16.dp))
 
-            val tabs = listOf("All", "Movies", "Series", "Channels")
-            tabs.forEach { tab ->
+            val builtInTabs = listOf("All", "Movies", "Series", "Channels")
+            builtInTabs.forEach { tab ->
                 val isSelected = uiState.selectedTab == tab
                 var isFocused by remember { mutableStateOf(false) }
 
@@ -129,6 +136,105 @@ fun FavoritesScreen(
                                 (event.key == Key.DirectionCenter || event.key == Key.Enter)
                             ) {
                                 viewModel.selectTab(tab)
+                                true
+                            } else false
+                        }
+                )
+            }
+
+            // Custom list tabs
+            uiState.customLists.keys.forEach { listName ->
+                val isSelected = uiState.selectedTab == listName
+                var isFocused by remember { mutableStateOf(false) }
+
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { viewModel.selectTab(listName) },
+                    label = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.List, null, modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(listName, fontSize = 12.sp)
+                            if (isFocused || isSelected) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Delete list",
+                                    modifier = Modifier
+                                        .height(14.dp)
+                                        .onFocusChanged { }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                viewModel.deleteList(listName)
+                                                true
+                                            } else false
+                                        }
+                                )
+                            }
+                        }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MerlotColors.Accent,
+                        selectedLabelColor = MerlotColors.Black,
+                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                    ),
+                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = false,
+                        borderColor = Color(0xFF888888),
+                        borderWidth = 2.dp
+                    ) else FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected
+                    ),
+                    modifier = Modifier
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                            ) {
+                                viewModel.selectTab(listName)
+                                true
+                            } else false
+                        }
+                )
+            }
+
+            // "+" button to create a new list
+            run {
+                var isFocused by remember { mutableStateOf(false) }
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.showCreateListDialog() },
+                    label = {
+                        Icon(Icons.Default.Add, contentDescription = "Create list", modifier = Modifier.height(14.dp))
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                    ),
+                    border = if (isFocused) FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = false,
+                        borderColor = Color(0xFF888888),
+                        borderWidth = 2.dp
+                    ) else FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = false
+                    ),
+                    modifier = Modifier
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                            ) {
+                                viewModel.showCreateListDialog()
                                 true
                             } else false
                         }
@@ -194,10 +300,16 @@ fun FavoritesScreen(
                 }
             }
             else -> {
-                // VOD favorites (All / Movies / Series)
+                // VOD favorites (All / Movies / Series / Custom lists)
+                val isCustomList = uiState.customLists.containsKey(uiState.selectedTab)
                 val items = uiState.filteredVodMetas
-                if (items.isEmpty() && uiState.favoriteVodIds.isEmpty()) {
+                if (items.isEmpty() && !isCustomList && uiState.favoriteVodIds.isEmpty()) {
                     EmptyState("No favorites yet", "Add movies or shows to your favorites")
+                } else if (items.isEmpty() && isCustomList) {
+                    EmptyState(
+                        "\"${uiState.selectedTab}\" is empty",
+                        "Add VOD items to this list"
+                    )
                 } else if (items.isEmpty()) {
                     EmptyState(
                         "No ${uiState.selectedTab.lowercase()} in favorites",
@@ -221,6 +333,131 @@ fun FavoritesScreen(
             }
         }
     }
+
+    // Create list dialog overlay
+    if (uiState.showCreateListDialog) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.6f))
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                        viewModel.hideCreateListDialog()
+                        true
+                    } else false
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(320.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.92f))
+                    .border(1.dp, Color(0xFF888888), RoundedCornerShape(12.dp))
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Create New List",
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = uiState.newListName,
+                    onValueChange = { viewModel.updateNewListName(it) },
+                    label = { Text("List name", color = MerlotColors.TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MerlotColors.White,
+                        unfocusedTextColor = MerlotColors.TextPrimary,
+                        focusedBorderColor = MerlotColors.Accent,
+                        unfocusedBorderColor = Color(0xFF888888),
+                        cursorColor = MerlotColors.Accent
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Cancel button
+                    run {
+                        var isFocused by remember { mutableStateOf(false) }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isFocused) FocusedGrey else MerlotColors.Surface2)
+                                .then(
+                                    if (isFocused) Modifier.border(2.dp, Color(0xFF888888), RoundedCornerShape(8.dp))
+                                    else Modifier
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                    ) {
+                                        viewModel.hideCreateListDialog()
+                                        true
+                                    } else false
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                color = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // Create button
+                    run {
+                        var isFocused by remember { mutableStateOf(false) }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isFocused) FocusedGrey else MerlotColors.Accent)
+                                .then(
+                                    if (isFocused) Modifier.border(2.dp, Color(0xFF888888), RoundedCornerShape(8.dp))
+                                    else Modifier
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                    ) {
+                                        viewModel.createList(uiState.newListName)
+                                        true
+                                    } else false
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Create",
+                                color = if (isFocused) MerlotColors.White else MerlotColors.Black,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    } // end outer Box
 }
 
 @Composable
