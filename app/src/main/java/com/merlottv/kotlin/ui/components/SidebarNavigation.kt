@@ -38,9 +38,11 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.merlottv.kotlin.R
 import com.merlottv.kotlin.ui.navigation.Screen
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
@@ -183,12 +185,21 @@ private fun SidebarItem(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = screen.icon,
-            contentDescription = screen.title,
-            tint = iconColor,
-            modifier = Modifier.size(24.dp)
-        )
+        if (screen is Screen.SpaceX) {
+            Icon(
+                painter = painterResource(R.drawable.ic_spacex_x),
+                contentDescription = screen.title,
+                tint = iconColor,
+                modifier = Modifier.size(24.dp)
+            )
+        } else {
+            Icon(
+                imageVector = screen.icon,
+                contentDescription = screen.title,
+                tint = iconColor,
+                modifier = Modifier.size(24.dp)
+            )
+        }
 
         if (isExpanded) {
             Spacer(modifier = Modifier.width(12.dp))

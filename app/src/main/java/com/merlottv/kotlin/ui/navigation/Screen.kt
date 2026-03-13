@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Rocket
 import androidx.compose.material.icons.filled.SportsFootball
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -24,6 +25,7 @@ sealed class Screen(
     data object Vod : Screen("vod", "VOD", Icons.Default.Movie)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
     data object Sports : Screen("sports", "Sports", Icons.Default.SportsFootball)
+    data object SpaceX : Screen("spacex", "SpaceX", Icons.Default.Rocket)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 
     // Profile picker
@@ -52,6 +54,6 @@ sealed class Screen(
     }
 
     companion object {
-        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Sports, Settings)
+        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Sports, SpaceX, Settings)
     }
 }

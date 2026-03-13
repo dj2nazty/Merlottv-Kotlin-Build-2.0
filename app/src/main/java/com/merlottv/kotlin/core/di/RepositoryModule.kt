@@ -5,11 +5,13 @@ import com.merlottv.kotlin.data.repository.ChannelRepositoryImpl
 import com.merlottv.kotlin.data.repository.EpgRepositoryImpl
 import com.merlottv.kotlin.data.repository.EspnRepositoryImpl
 import com.merlottv.kotlin.data.repository.FavoritesRepositoryImpl
+import com.merlottv.kotlin.data.repository.SpaceXRepositoryImpl
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.ChannelRepository
 import com.merlottv.kotlin.domain.repository.EpgRepository
 import com.merlottv.kotlin.domain.repository.EspnRepository
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
+import com.merlottv.kotlin.domain.repository.SpaceXRepository
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -39,4 +41,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindEspnRepository(impl: EspnRepositoryImpl): EspnRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSpaceXRepository(impl: SpaceXRepositoryImpl): SpaceXRepository
 }
