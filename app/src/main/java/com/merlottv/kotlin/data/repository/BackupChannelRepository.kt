@@ -11,12 +11,16 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Loads and caches channels from backup M3U sources.
  * Used for auto-failover when a primary channel stream fails.
+ *
+ * v2.25.0: Increased parallelism (3→5), tighter timeouts for backup downloads,
+ * dedicated OkHttpClient to not block main playlist loading.
  */
 @Singleton
 class BackupChannelRepository @Inject constructor(
@@ -24,10 +28,18 @@ class BackupChannelRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val settingsDataStore: SettingsDataStore
 ) {
+    @Volatile
     private var cachedBackupChannels: List<Channel> = emptyList()
+    @Volatile
     private var cacheTimestamp: Long = 0L
     private val cacheDuration = 30 * 60 * 1000L // 30 minutes
-    private val boundedIo = Dispatchers.IO.limitedParallelism(3)
+    private val boundedIo = Dispatchers.IO.limitedParallelism(5) // Bumped from 3→5
+
+    // Dedicated client with tighter timeouts for backup source downloads
+    private val backupClient = okHttpClient.newBuilder()
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .build()
 
     // Pre-compiled regex for normalizeName — avoids recompilation per call
     private val qualityTagRegex = Regex("\\b(HD|FHD|UHD|4K|SD|LQ|H\\.?265|H\\.?264|HEVC)\\b", RegexOption.IGNORE_CASE)
@@ -78,7 +90,7 @@ class BackupChannelRepository @Inject constructor(
                     async {
                         try {
                             val request = Request.Builder().url(url).build()
-                            val response = okHttpClient.newCall(request).execute()
+                            val response = backupClient.newCall(request).execute()
                             response.use { resp ->
                                 val body = resp.body
                                 if (body != null) {

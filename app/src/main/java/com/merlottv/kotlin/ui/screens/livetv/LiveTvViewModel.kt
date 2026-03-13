@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.repository.BackupChannelRepository
 import com.merlottv.kotlin.domain.model.Channel
@@ -26,6 +27,7 @@ import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -94,32 +96,43 @@ class LiveTvViewModel @Inject constructor(
     private var failoverMessageJob: Job? = null
 
     /**
-     * Zero-buffer ExoPlayer configuration for live TV:
-     * - minBufferMs = 1500ms: Absolute minimum data to hold before starting playback
-     * - maxBufferMs = 8000ms: Small ceiling so player never stockpiles and wastes memory
-     * - bufferForPlaybackMs = 500ms: Start playback after only 500ms of data (near-instant)
-     * - bufferForPlaybackAfterRebufferMs = 1000ms: After a rebuffer, resume after 1s (fast recovery)
-     * - HTTP connect/read timeouts = 8s: Fail fast on dead streams
-     * - prioritizeTimeOverSizeThresholds = true: Prefer time-based buffering, not byte-based
+     * Optimized ExoPlayer configuration for live TV:
+     *
+     * v2.25.0 improvements:
+     * - BandwidthMeter: Tracks network speed so ExoPlayer picks the best quality automatically
+     * - Aggressive low-latency buffers: 800ms min, 6s max for live streams
+     * - Near-instant playback start: only 300ms buffered data needed
+     * - Fast rebuffer recovery: 800ms (was 1000ms)
+     * - HTTP timeouts: 6s connect, 6s read — fail fast on dead streams
+     * - Cross-protocol redirects enabled for CDN flexibility
      */
     val player: ExoPlayer = run {
+        // BandwidthMeter tracks download speed and helps ExoPlayer pick optimal quality
+        val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
+            .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
+            .build()
+
         val loadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
             .setBufferDurationsMs(
-                /* minBufferMs */ 1_500,
-                /* maxBufferMs */ 8_000,
-                /* bufferForPlaybackMs */ 500,
-                /* bufferForPlaybackAfterRebufferMs */ 1_000
+                /* minBufferMs */                  800,   // Bare minimum data to hold (was 1500)
+                /* maxBufferMs */                  6_000, // Small ceiling for live TV (was 8000)
+                /* bufferForPlaybackMs */           300,   // Start after 300ms of data (was 500) — near-instant
+                /* bufferForPlaybackAfterRebufferMs */ 800 // Fast recovery after stall (was 1000)
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .setTargetBufferBytes(C.LENGTH_UNSET)
             .build()
 
-        // HTTP data source with tight timeouts for fast failover
+        // HTTP data source with tight timeouts for fast failover on dead streams
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(8_000)
-            .setReadTimeoutMs(8_000)
+            .setConnectTimeoutMs(6_000)   // Was 8000 — fail faster on unreachable hosts
+            .setReadTimeoutMs(6_000)      // Was 8000 — fail faster on hung connections
             .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(mapOf(
+                "Connection" to "keep-alive" // Hint to reuse connections
+            ))
+            .setTransferListener(bandwidthMeter) // Feed download speed data to meter
 
         val dataSourceFactory = DefaultDataSource.Factory(application, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -127,6 +140,7 @@ class LiveTvViewModel @Inject constructor(
         ExoPlayer.Builder(application)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setBandwidthMeter(bandwidthMeter)
             .build()
             .apply {
                 playWhenReady = true
@@ -149,14 +163,25 @@ class LiveTvViewModel @Inject constructor(
     }
 
     init {
-        loadChannels()
+        // Launch channels + EPG + backup pre-warm ALL in parallel for fastest startup
+        loadChannelsAndEpgParallel()
         observeFavorites()
-        loadEpgInBackground()
+        preWarmBackupCache()
     }
 
-    private fun loadChannels() {
+    /**
+     * v2.25.0: Load channels and EPG data in parallel instead of sequentially.
+     * Previously: loadChannels() → then loadEpgInBackground() (sequential)
+     * Now: both launch concurrently, shaving seconds off startup time.
+     */
+    private fun loadChannelsAndEpgParallel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
+
+            // Launch EPG loading concurrently — don't wait for channels to finish first
+            val epgJob = launch { loadEpgInternal() }
+
+            // Load channels (this is the blocking path for UI)
             try {
                 val playlists = settingsDataStore.playlists.first()
                 val enabledUrls = playlists.filter { it.enabled }.map { it.url }
@@ -212,6 +237,9 @@ class LiveTvViewModel @Inject constructor(
                 Log.e("LiveTvVM", "Failed to load channels", e)
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
+
+            // EPG continues loading in background — we don't wait for it
+            // epgJob will complete whenever the XML downloads finish
         }
     }
 
@@ -246,18 +274,32 @@ class LiveTvViewModel @Inject constructor(
         }
     }
 
-    private fun loadEpgInBackground() {
-        viewModelScope.launch {
+    private suspend fun loadEpgInternal() {
+        try {
+            val defaultUrls = DefaultData.EPG_SOURCES.map { it.url }
+            val customSources = settingsDataStore.customEpgSources.first()
+            val customUrls = customSources.filter { it.enabled }.map { it.url }
+            val allUrls = (defaultUrls + customUrls).distinct()
+            withContext(Dispatchers.IO) {
+                epgRepository.loadEpg(allUrls)
+            }
+        } catch (e: Exception) {
+            Log.e("LiveTvVM", "EPG load failed", e)
+        }
+    }
+
+    /**
+     * v2.25.0: Pre-warm backup channel cache in background during startup.
+     * Previously backup sources were only loaded on first failover (cold miss = several seconds delay).
+     * Now they load silently in the background so failover is instant when needed.
+     */
+    private fun preWarmBackupCache() {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val defaultUrls = DefaultData.EPG_SOURCES.map { it.url }
-                val customSources = settingsDataStore.customEpgSources.first()
-                val customUrls = customSources.filter { it.enabled }.map { it.url }
-                val allUrls = (defaultUrls + customUrls).distinct()
-                withContext(Dispatchers.IO) {
-                    epgRepository.loadEpg(allUrls)
-                }
-            } catch (e: Exception) {
-                Log.e("LiveTvVM", "EPG load failed", e)
+                // Trigger cache load — findBackupStream calls ensureCacheLoaded() internally
+                backupChannelRepository.findBackupStream("__prewarm__")
+            } catch (_: Exception) {
+                // Silently ignore — this is best-effort pre-warming
             }
         }
     }

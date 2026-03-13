@@ -37,7 +37,7 @@ class EpgRepositoryImpl @Inject constructor(
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val boundedIo = Dispatchers.IO.limitedParallelism(3)
+    private val boundedIo = Dispatchers.IO.limitedParallelism(4) // Bumped from 3→4 for faster parallel EPG downloads
 
     override suspend fun loadEpg(urls: List<String>) {
         withContext(boundedIo) {
