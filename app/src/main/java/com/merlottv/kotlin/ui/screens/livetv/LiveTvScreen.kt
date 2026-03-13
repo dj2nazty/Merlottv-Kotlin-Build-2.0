@@ -84,6 +84,15 @@ import java.util.Locale
 fun LiveTvScreen(
     viewModel: LiveTvViewModel = hiltViewModel()
 ) {
+    // Keep screen awake while Live TV is active
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     val uiState by viewModel.uiState.collectAsState()
 
     if (uiState.isFullscreen && uiState.selectedChannel != null) {
