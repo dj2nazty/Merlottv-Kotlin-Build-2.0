@@ -52,7 +52,7 @@ class SettingsDataStore(private val context: Context) {
 
         // Live TV buffer duration (milliseconds) — adjustable 300ms to 3000ms
         val BUFFER_DURATION_MS = intPreferencesKey("live_tv_buffer_duration_ms")
-        const val DEFAULT_BUFFER_MS = 800 // 0.8 seconds default
+        const val DEFAULT_BUFFER_MS = 1000 // 1.0 second default (matches TiviMate)
 
         // Subtitle settings
         val SUBTITLES_ENABLED = booleanPreferencesKey("subtitles_enabled")

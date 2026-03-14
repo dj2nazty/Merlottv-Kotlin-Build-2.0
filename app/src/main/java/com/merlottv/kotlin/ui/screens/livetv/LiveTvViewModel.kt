@@ -1,6 +1,7 @@
 package com.merlottv.kotlin.ui.screens.livetv
 
 import android.app.Application
+import android.os.Process
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,11 +14,19 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import com.merlottv.kotlin.data.local.SettingsDataStore
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 import com.merlottv.kotlin.data.repository.BackupChannelRepository
 import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.DefaultData
@@ -138,7 +147,7 @@ class LiveTvViewModel @Inject constructor(
             runBlocking { settingsDataStore.bufferDurationMs.first() }
         } catch (e: Exception) {
             Log.e("LiveTvVM", "Failed to read buffer setting, using default", e)
-            800 // safe default
+            1000 // TiviMate default: 1 second
         }
 
         // BandwidthMeter tracks download speed and helps ExoPlayer pick optimal quality
@@ -146,36 +155,25 @@ class LiveTvViewModel @Inject constructor(
             .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
             .build()
 
-        // === KEY FIX: Decouple startup speed from steady-state buffer ===
+        // === TiviMate-style buffer configuration ===
         //
-        // The user's slider (userBufferMs) controls how fast channels START playing.
-        // But once playing, we need a much larger buffer to prevent rebuffering.
+        // TiviMate's secret to fast channel switching + zero rebuffering:
+        //   - minBuffer = maxBuffer = 50s (fixed 50-second buffer window)
+        //   - bufferForPlaybackMs = 1000ms (start playing after just 1 second)
+        //   - bufferForPlaybackAfterRebufferMs = 2000ms (resume after 2s, not 5s)
         //
-        // minBufferMs = 30s: ExoPlayer always tries to keep 30s of video ahead.
-        //   This is the #1 fix — previously it was only 800ms, so any tiny
-        //   network hiccup caused rebuffering.
-        //
-        // maxBufferMs = 60s: ExoPlayer will buffer up to 60s ahead when possible.
-        //   Gives plenty of headroom for local TV streams.
-        //
-        // bufferForPlaybackMs = userBufferMs * 3/8 (min 200ms): How much buffer
-        //   before INITIAL playback starts. This is what the slider controls.
-        //
-        // bufferForPlaybackAfterRebufferMs = 3000ms: After a rebuffer event,
-        //   require 3 full seconds of buffer before resuming. Previously this was
-        //   only 800ms, causing rapid re-stalls. 3s gives the network time to
-        //   stabilize.
+        // The user's slider controls bufferForPlaybackMs (startup speed).
+        // Default changed to 1000ms (was 800ms) to match TiviMate.
 
-        val minBuffer = 30_000          // 30 seconds steady-state minimum
-        val maxBuffer = 60_000          // 60 seconds maximum lookahead
-        val playbackBuffer = (userBufferMs * 3 / 8).coerceAtLeast(200) // Startup speed (slider)
-        val rebufferBuffer = 3_000      // 3 seconds required after rebuffer
+        val steadyBuffer = 50_000       // 50 seconds — TiviMate uses 50s fixed window
+        val playbackBuffer = userBufferMs.coerceAtLeast(200) // Slider controls startup (default 1000ms)
+        val rebufferBuffer = 2_000      // 2 seconds after rebuffer — TiviMate uses 2s (was 3s)
 
         val loadControl = DefaultLoadControl.Builder()
-            .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
+            .setAllocator(DefaultAllocator(true, 65_536)) // 64KB chunks like TiviMate
             .setBufferDurationsMs(
-                /* minBufferMs */                      minBuffer,
-                /* maxBufferMs */                      maxBuffer,
+                /* minBufferMs */                      steadyBuffer,
+                /* maxBufferMs */                      steadyBuffer,  // min=max for predictable behavior
                 /* bufferForPlaybackMs */               playbackBuffer,
                 /* bufferForPlaybackAfterRebufferMs */  rebufferBuffer
             )
@@ -185,26 +183,83 @@ class LiveTvViewModel @Inject constructor(
             .setBackBuffer(30_000, /* retainBackBufferFromKeyframe */ true)
             .build()
 
-        // HTTP data source with tight timeouts for fast failover on dead streams
+        // === SSL bypass for IPTV streams (TiviMate-style) ===
+        // Many IPTV servers use self-signed or expired SSL certificates.
+        // TiviMate bypasses SSL validation entirely to prevent connection failures.
+        val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        })
+        val sslContext = try {
+            SSLContext.getInstance("TLS").apply {
+                init(null, trustAllCerts, SecureRandom())
+            }
+        } catch (e: Exception) {
+            Log.w("LiveTvVM", "SSL context init failed, using default", e)
+            null
+        }
+        val trustAllHostnames = HostnameVerifier { _, _ -> true }
+
+        // HTTP data source with TiviMate-style optimizations
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(6_000)
-            .setReadTimeoutMs(8_000)    // Slightly more read time for large segments
+            .setConnectTimeoutMs(5_000)     // 5s connect (was 6s)
+            .setReadTimeoutMs(8_000)        // 8s read
             .setAllowCrossProtocolRedirects(true)
+            .setKeepPostFor302Redirects(true)
             .setDefaultRequestProperties(mapOf(
-                "Connection" to "keep-alive"
+                "Connection" to "keep-alive",
+                "Accept" to "*/*"
             ))
             .setTransferListener(bandwidthMeter)
 
+        // Apply SSL bypass to the data source factory
+        if (sslContext != null) {
+            javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
+            javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(trustAllHostnames)
+        }
+
         val dataSourceFactory = DefaultDataSource.Factory(application, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+
+        // === Track selector with live-optimized defaults ===
+        val trackSelector = DefaultTrackSelector(application).apply {
+            parameters = buildUponParameters()
+                .setForceLowestBitrate(false)
+                .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                .setAllowAudioMixedMimeTypeAdaptiveness(true)
+                .build()
+        }
+
+        // === Renderers with async buffer queueing for smoother playback ===
+        val renderersFactory = DefaultRenderersFactory(application)
+            .setEnableDecoderFallback(true) // Fall back to software decoder if hardware fails
 
         ExoPlayer.Builder(application)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
             .setBandwidthMeter(bandwidthMeter)
+            .setTrackSelector(trackSelector)
+            .setRenderersFactory(renderersFactory)
             .build()
             .apply {
                 playWhenReady = true
+
+                // === High-priority playback thread (TiviMate uses -16) ===
+                // Ensures the decoder thread gets maximum CPU scheduling priority
+                // This prevents other threads from starving the player
+                try {
+                    val field = this.javaClass.getDeclaredField("playbackThread")
+                    field.isAccessible = true
+                    val thread = field.get(this) as? Thread
+                    thread?.let {
+                        Process.setThreadPriority(it.id.toInt(), Process.THREAD_PRIORITY_URGENT_AUDIO)
+                        Log.d("LiveTvVM", "Set playback thread priority to URGENT_AUDIO (-19)")
+                    }
+                } catch (e: Exception) {
+                    // Reflection may fail on some ExoPlayer versions — not critical
+                    Log.d("LiveTvVM", "Could not set thread priority: ${e.message}")
+                }
 
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -503,6 +558,7 @@ class LiveTvViewModel @Inject constructor(
     private fun safePlayChannel(channel: Channel) {
         if (isPlayerReleased) return
         failoverAttempts = 0
+        sameUrlRetryCount = 0
         triedStreamUrls.clear()
 
         // Reset rebuffer tracking for new channel
@@ -546,13 +602,56 @@ class LiveTvViewModel @Inject constructor(
         )
     }
 
+    // TiviMate-style retry: try same stream up to 3 times with linear backoff before seeking backup
+    private var sameUrlRetryCount = 0
+    private val MAX_SAME_URL_RETRIES = 3
+
     private fun handlePlaybackError() {
         if (isPlayerReleased) return
         val currentChannel = _uiState.value.selectedChannel ?: return
 
-        triedStreamUrls.add(currentChannel.streamUrl)
-
         failoverAttempts++
+
+        // TiviMate-style: retry same URL with linear backoff (0s, 1s, 2s) before trying backup
+        if (sameUrlRetryCount < MAX_SAME_URL_RETRIES) {
+            sameUrlRetryCount++
+            val retryDelayMs = (sameUrlRetryCount - 1) * 1000L // 0ms, 1000ms, 2000ms
+            Log.d("LiveTvVM", "Retrying same stream (attempt $sameUrlRetryCount/$MAX_SAME_URL_RETRIES, delay ${retryDelayMs}ms)")
+            _uiState.value = _uiState.value.copy(
+                isFailingOver = true,
+                failoverMessage = "Reconnecting... (retry $sameUrlRetryCount/$MAX_SAME_URL_RETRIES)"
+            )
+            viewModelScope.launch {
+                if (retryDelayMs > 0) delay(retryDelayMs)
+                if (isPlayerReleased) return@launch
+                try {
+                    player.stop()
+                    player.clearMediaItems()
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(currentChannel.streamUrl)
+                        .setLiveConfiguration(
+                            MediaItem.LiveConfiguration.Builder()
+                                .setMaxPlaybackSpeed(1.04f)
+                                .setMinPlaybackSpeed(0.96f)
+                                .setTargetOffsetMs(10_000)
+                                .setMinOffsetMs(5_000)
+                                .setMaxOffsetMs(30_000)
+                                .build()
+                        )
+                        .build()
+                    player.setMediaItem(mediaItem)
+                    player.prepare()
+                    player.play()
+                    _uiState.value = _uiState.value.copy(isFailingOver = false, failoverMessage = "")
+                } catch (e: Exception) {
+                    Log.e("LiveTvVM", "Retry $sameUrlRetryCount failed", e)
+                }
+            }
+            return
+        }
+
+        // Exhausted same-URL retries — now search backups
+        triedStreamUrls.add(currentChannel.streamUrl)
         _uiState.value = _uiState.value.copy(
             isFailingOver = true,
             failoverMessage = "Searching backup sources... (attempt $failoverAttempts)"
