@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.EpgChannel
+import com.merlottv.kotlin.domain.model.EpgEntry
 import com.merlottv.kotlin.domain.repository.EpgRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +22,9 @@ data class TvGuideUiState(
     val isLoading: Boolean = true,
     val channels: List<EpgChannel> = emptyList(),
     val error: String? = null,
-    val loadingMessage: String = "Loading TV Guide..."
+    val loadingMessage: String = "Loading TV Guide...",
+    val selectedProgram: EpgEntry? = null,
+    val isSyncing: Boolean = false
 )
 
 @HiltViewModel
@@ -41,31 +44,58 @@ class TvGuideViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = TvGuideUiState(
                 isLoading = true,
-                loadingMessage = "Downloading EPG data..."
+                loadingMessage = "Loading TV Guide..."
             )
             try {
-                // Merge default + custom EPG sources
-                val defaultUrls = DefaultData.EPG_SOURCES.map { it.url }
-                val customSources = settingsDataStore.customEpgSources.first()
-                val customUrls = customSources.filter { it.enabled }.map { it.url }
-                val allUrls = (defaultUrls + customUrls).distinct()
+                val allUrls = getEpgUrls()
 
-                _uiState.value = _uiState.value.copy(
-                    loadingMessage = "Downloading EPG data from ${allUrls.size} sources..."
-                )
-
-                withContext(Dispatchers.IO) {
-                    epgRepository.loadEpg(allUrls)
+                // Step 1: Try loading from DB (instant if data exists)
+                val cachedChannels = try {
+                    epgRepository.getAllEpgChannels().first()
+                } catch (_: Exception) {
+                    emptyList()
                 }
 
-                _uiState.value = _uiState.value.copy(loadingMessage = "Processing program data...")
+                val filtered = cachedChannels
+                    .filter { it.programs.isNotEmpty() }
+                    .sortedBy { it.name.lowercase() }
 
-                epgRepository.getAllEpgChannels().collect { channels ->
-                    val filtered = channels.filter { it.programs.isNotEmpty() }
-                        .sortedBy { it.name.lowercase() }
+                if (filtered.isNotEmpty()) {
+                    // Show cached data immediately
                     _uiState.value = TvGuideUiState(
                         isLoading = false,
                         channels = filtered
+                    )
+                    Log.d("TvGuideVM", "Loaded ${filtered.size} channels from cache")
+                }
+
+                // Step 2: If stale, refresh in background
+                if (epgRepository.isEpgStale()) {
+                    _uiState.value = _uiState.value.copy(
+                        isSyncing = true,
+                        loadingMessage = if (filtered.isEmpty())
+                            "Downloading EPG data from ${allUrls.size} sources..."
+                        else "Updating EPG data..."
+                    )
+                    // If no cached data, show loading state
+                    if (filtered.isEmpty()) {
+                        _uiState.value = _uiState.value.copy(isLoading = true)
+                    }
+
+                    withContext(Dispatchers.IO) {
+                        epgRepository.loadEpg(allUrls)
+                    }
+                }
+
+                // Step 3: Observe live updates from Room
+                epgRepository.getAllEpgChannels().collect { channels ->
+                    val updated = channels
+                        .filter { it.programs.isNotEmpty() }
+                        .sortedBy { it.name.lowercase() }
+                    _uiState.value = TvGuideUiState(
+                        isLoading = false,
+                        channels = updated,
+                        isSyncing = false
                     )
                 }
             } catch (e: Exception) {
@@ -76,6 +106,17 @@ class TvGuideViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    private suspend fun getEpgUrls(): List<String> {
+        val defaultUrls = DefaultData.EPG_SOURCES.map { it.url }
+        val customSources = settingsDataStore.customEpgSources.first()
+        val customUrls = customSources.filter { it.enabled }.map { it.url }
+        return (defaultUrls + customUrls).distinct()
+    }
+
+    fun selectProgram(program: EpgEntry?) {
+        _uiState.value = _uiState.value.copy(selectedProgram = program)
     }
 
     fun retry() {

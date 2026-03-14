@@ -1,5 +1,9 @@
 package com.merlottv.kotlin.data.repository
 
+import android.util.Log
+import com.merlottv.kotlin.data.local.db.EpgDao
+import com.merlottv.kotlin.data.local.db.toDomain
+import com.merlottv.kotlin.data.local.db.toEntity
 import com.merlottv.kotlin.data.parser.XmltvParser
 import com.merlottv.kotlin.domain.model.EpgChannel
 import com.merlottv.kotlin.domain.model.EpgEntry
@@ -9,6 +13,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
@@ -21,110 +27,193 @@ import javax.inject.Singleton
 @Singleton
 class EpgRepositoryImpl @Inject constructor(
     private val xmltvParser: XmltvParser,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val epgDao: EpgDao
 ) : EpgRepository {
 
-    private val _channels = MutableStateFlow<List<EpgChannel>>(emptyList())
+    companion object {
+        private const val TAG = "EpgRepo"
+        private const val STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000L // 4 hours
+    }
 
-    // Indexed by lowercase channelId for O(1) lookup instead of O(n) full-list scan
+    // In-memory fast path for LiveTvViewModel.getCurrentProgram() (non-suspend)
     @Volatile
     private var programIndex: Map<String, List<EpgEntry>> = emptyMap()
 
-    // Dedicated client with longer timeouts for large EPG files
     private val epgClient = okHttpClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val boundedIo = Dispatchers.IO.limitedParallelism(4) // Bumped from 3→4 for faster parallel EPG downloads
+    private val boundedIo = Dispatchers.IO.limitedParallelism(4)
 
     override suspend fun loadEpg(urls: List<String>) {
         withContext(boundedIo) {
-            val allChannels = mutableListOf<EpgChannel>()
-            val allPrograms = mutableListOf<EpgEntry>()
+            // Check if DB data is fresh enough
+            val lastUpdate = epgDao.getLastUpdateTime()
+            if (lastUpdate != null && (System.currentTimeMillis() - lastUpdate) < STALE_THRESHOLD_MS) {
+                Log.d(TAG, "EPG data is fresh (${(System.currentTimeMillis() - lastUpdate) / 60000}min old), loading from DB")
+                loadFromDb()
+                return@withContext
+            }
 
-            supervisorScope {
-                val results = urls.map { url ->
-                    async {
-                        try {
-                            val request = Request.Builder()
-                                .url(url)
-                                .header("Accept-Encoding", "gzip")
-                                .build()
-                            val response = epgClient.newCall(request).execute()
-                            response.use { resp ->
-                                if (resp.isSuccessful) {
-                                    val body = resp.body
-                                    if (body != null) {
-                                        xmltvParser.parseStream(body.byteStream())
-                                    } else {
-                                        Pair(emptyList(), emptyList())
-                                    }
+            // Data is stale or missing — download from network
+            Log.d(TAG, "EPG data stale or missing, downloading from ${urls.size} sources")
+            downloadAndStore(urls)
+        }
+    }
+
+    override suspend fun forceRefresh(urls: List<String>) {
+        withContext(boundedIo) {
+            Log.d(TAG, "Force refreshing EPG from ${urls.size} sources")
+            downloadAndStore(urls)
+        }
+    }
+
+    override suspend fun isEpgStale(): Boolean {
+        val lastUpdate = epgDao.getLastUpdateTime() ?: return true
+        return (System.currentTimeMillis() - lastUpdate) >= STALE_THRESHOLD_MS
+    }
+
+    private suspend fun downloadAndStore(urls: List<String>) {
+        val allChannels = mutableListOf<EpgChannel>()
+        val allPrograms = mutableListOf<EpgEntry>()
+
+        supervisorScope {
+            val results = urls.map { url ->
+                async {
+                    try {
+                        val request = Request.Builder()
+                            .url(url)
+                            .header("Accept-Encoding", "gzip")
+                            .build()
+                        val response = epgClient.newCall(request).execute()
+                        response.use { resp ->
+                            if (resp.isSuccessful) {
+                                val body = resp.body
+                                if (body != null) {
+                                    xmltvParser.parseStream(body.byteStream())
                                 } else {
-                                    Pair(emptyList<EpgChannel>(), emptyList<EpgEntry>())
+                                    Pair(emptyList(), emptyList())
                                 }
+                            } else {
+                                Pair(emptyList<EpgChannel>(), emptyList<EpgEntry>())
                             }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            Pair(emptyList<EpgChannel>(), emptyList<EpgEntry>())
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to download EPG from $url", e)
+                        Pair(emptyList<EpgChannel>(), emptyList<EpgEntry>())
                     }
-                }.awaitAll()
-
-                for ((channels, programs) in results) {
-                    allChannels.addAll(channels)
-                    allPrograms.addAll(programs)
                 }
-            }
+            }.awaitAll()
 
-            // De-duplicate channels by ID using a set (avoids creating intermediate list)
-            val seenChannelIds = HashSet<String>(allChannels.size)
-            val uniqueChannels = ArrayList<EpgChannel>(allChannels.size / 2)
-            for (ch in allChannels) {
-                if (seenChannelIds.add(ch.id)) {
-                    uniqueChannels.add(ch)
-                }
+            for ((channels, programs) in results) {
+                allChannels.addAll(channels)
+                allPrograms.addAll(programs)
             }
-            _channels.value = uniqueChannels
+        }
 
-            // Build indexed map with dedup in a SINGLE PASS:
-            // Groups by channelId while deduplicating, then sorts each group.
-            // Avoids: Triple allocation per entry, intermediate deduped list, double iteration.
-            val tempIndex = HashMap<String, MutableList<EpgEntry>>(uniqueChannels.size)
-            val seenPrograms = HashSet<Long>(allPrograms.size)
-            for (entry in allPrograms) {
-                val key = entry.channelId.lowercase()
-                // Composite hash key avoids Triple allocation — hash channelId+startTime+title
-                val dedupKey = (key.hashCode().toLong() * 31 + entry.startTime) * 31 + entry.title.hashCode()
-                if (seenPrograms.add(dedupKey)) {
-                    tempIndex.getOrPut(key) { ArrayList() }.add(entry)
-                }
+        // De-duplicate channels by ID
+        val seenChannelIds = HashSet<String>(allChannels.size)
+        val uniqueChannels = ArrayList<EpgChannel>(allChannels.size / 2)
+        for (ch in allChannels) {
+            if (seenChannelIds.add(ch.id)) {
+                uniqueChannels.add(ch)
             }
-            // Sort each channel's program list in-place (avoids creating new sorted copies)
-            for ((_, programs) in tempIndex) {
-                programs.sortBy { it.startTime }
+        }
+
+        // Deduplicate programs
+        val tempIndex = HashMap<String, MutableList<EpgEntry>>(uniqueChannels.size)
+        val seenPrograms = HashSet<Long>(allPrograms.size)
+        for (entry in allPrograms) {
+            val key = entry.channelId.lowercase()
+            val dedupKey = (key.hashCode().toLong() * 31 + entry.startTime) * 31 + entry.title.hashCode()
+            if (seenPrograms.add(dedupKey)) {
+                tempIndex.getOrPut(key) { ArrayList() }.add(entry)
+            }
+        }
+        for ((_, programs) in tempIndex) {
+            programs.sortBy { it.startTime }
+        }
+
+        // Update in-memory index
+        programIndex = tempIndex
+
+        // Store to Room DB
+        val now = System.currentTimeMillis()
+        val channelEntities = uniqueChannels.map { it.toEntity(lastUpdated = now) }
+        val programEntities = tempIndex.values.flatten().map { it.toEntity() }
+
+        try {
+            epgDao.replaceAll(channelEntities, programEntities)
+            // Clean up expired programs older than 6 hours
+            epgDao.deleteExpiredPrograms(now - 6 * 3600_000L)
+            Log.d(TAG, "Stored ${channelEntities.size} channels and ${programEntities.size} programs to DB")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to store EPG to DB", e)
+        }
+    }
+
+    private suspend fun loadFromDb() {
+        // Populate in-memory index from DB for fast getCurrentProgram() lookups
+        val now = System.currentTimeMillis()
+        val windowStart = now - 6 * 3600_000L
+        val windowEnd = now + 24 * 3600_000L
+
+        try {
+            val channels = epgDao.getAllChannels().first()
+            val programs = epgDao.getAllProgramsInWindow(windowStart, windowEnd).first()
+
+            val tempIndex = HashMap<String, MutableList<EpgEntry>>()
+            for (entity in programs) {
+                val key = entity.channelId.lowercase()
+                tempIndex.getOrPut(key) { ArrayList() }.add(entity.toDomain())
+            }
+            for ((_, progs) in tempIndex) {
+                progs.sortBy { it.startTime }
             }
             programIndex = tempIndex
+            Log.d(TAG, "Loaded ${channels.size} channels, ${programs.size} programs from DB")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load from DB", e)
         }
     }
 
     override fun getEpgForChannel(channelId: String): Flow<List<EpgEntry>> {
-        // O(1) map lookup instead of O(n) filter + sort over entire program list
-        val programs = programIndex[channelId.lowercase()] ?: emptyList()
-        return MutableStateFlow(programs)
+        // Fast in-memory path first
+        val memPrograms = programIndex[channelId.lowercase()]
+        if (memPrograms != null) {
+            return MutableStateFlow(memPrograms)
+        }
+        // Fallback to Room
+        val now = System.currentTimeMillis()
+        return epgDao.getProgramsForChannel(
+            channelId,
+            now - 6 * 3600_000L,
+            now + 24 * 3600_000L
+        ).map { entities -> entities.map { it.toDomain() } }
     }
 
     override fun getAllEpgChannels(): Flow<List<EpgChannel>> {
-        return _channels.map { channels ->
+        val now = System.currentTimeMillis()
+        val windowStart = now - 6 * 3600_000L
+        val windowEnd = now + 24 * 3600_000L
+
+        return epgDao.getAllChannels().combine(
+            epgDao.getAllProgramsInWindow(windowStart, windowEnd)
+        ) { channels, programs ->
+            val programsByChannel = programs.groupBy { it.channelId.lowercase() }
             channels.map { ch ->
-                ch.copy(programs = programIndex[ch.id.lowercase()] ?: emptyList())
+                ch.toDomain(
+                    programs = programsByChannel[ch.id.lowercase()]?.map { it.toDomain() } ?: emptyList()
+                )
             }
         }
     }
 
     override fun getCurrentProgram(channelId: String): EpgEntry? {
-        // O(1) map lookup + small per-channel list scan instead of O(n) full-list scan
+        // Fast in-memory path (non-suspend, needed by LiveTvViewModel)
         val now = System.currentTimeMillis()
         val channelPrograms = programIndex[channelId.lowercase()] ?: return null
         return channelPrograms.find { it.startTime <= now && it.endTime >= now }

@@ -9,4 +9,6 @@ interface EpgRepository {
     fun getEpgForChannel(channelId: String): Flow<List<EpgEntry>>
     fun getAllEpgChannels(): Flow<List<EpgChannel>>
     fun getCurrentProgram(channelId: String): EpgEntry?
+    suspend fun isEpgStale(): Boolean
+    suspend fun forceRefresh(urls: List<String>)
 }

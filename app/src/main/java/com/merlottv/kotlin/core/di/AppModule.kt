@@ -1,10 +1,13 @@
 package com.merlottv.kotlin.core.di
 
 import android.content.Context
+import androidx.room.Room
 import com.merlottv.kotlin.data.local.FavoritesDataStore
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
+import com.merlottv.kotlin.data.local.db.EpgDao
+import com.merlottv.kotlin.data.local.db.MerlotDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -38,5 +41,19 @@ object AppModule {
     @Singleton
     fun provideProfileDataStore(@ApplicationContext context: Context): ProfileDataStore {
         return ProfileDataStore(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideMerlotDatabase(@ApplicationContext context: Context): MerlotDatabase {
+        return Room.databaseBuilder(context, MerlotDatabase::class.java, "merlot_epg.db")
+            .fallbackToDestructiveMigration()
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideEpgDao(db: MerlotDatabase): EpgDao {
+        return db.epgDao()
     }
 }
