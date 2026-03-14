@@ -68,6 +68,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.model.Video
+import com.merlottv.kotlin.ui.components.TrailerPlayer
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 /** Grey color for focused buttons throughout the app */
@@ -87,8 +88,9 @@ fun VodDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playButtonFocusRequester = remember { FocusRequester() }
 
-    // In-app trailer player state
-    var showingTrailerUrl by remember { mutableStateOf<String?>(null) }
+    // In-app trailer player state — native player for ytId, WebView fallback for search
+    var showingTrailerYtId by remember { mutableStateOf<String?>(null) }
+    var showingTrailerSearchUrl by remember { mutableStateOf<String?>(null) }
 
     // Auto-navigate to player when stream is selected
     LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
@@ -431,15 +433,15 @@ fun VodDetailScreen(
                                 if (uiState.trailerYtId != null || uiState.trailerSearchQuery != null) {
                                     var trailerFocused by remember { mutableStateOf(false) }
 
-                                    // Helper: open trailer in-app via WebView
+                                    // Helper: open trailer — native player for ytId, WebView for search fallback
                                     val launchTrailer = {
                                         val ytId = uiState.trailerYtId
                                         val searchQuery = uiState.trailerSearchQuery
                                         if (ytId != null) {
-                                            showingTrailerUrl = "https://www.youtube.com/watch?v=$ytId"
+                                            showingTrailerYtId = ytId
                                         } else if (searchQuery != null) {
                                             val encoded = java.net.URLEncoder.encode(searchQuery, "UTF-8")
-                                            showingTrailerUrl = "https://www.youtube.com/results?search_query=$encoded"
+                                            showingTrailerSearchUrl = "https://www.youtube.com/results?search_query=$encoded"
                                         }
                                     }
 
@@ -691,11 +693,19 @@ fun VodDetailScreen(
             }
         }
 
-        // ─── In-App Trailer Player Overlay ───
-        showingTrailerUrl?.let { url ->
+        // ─── In-App Trailer Player Overlay (Native ExoPlayer) ───
+        showingTrailerYtId?.let { ytId ->
+            TrailerPlayer(
+                ytVideoId = ytId,
+                onDismiss = { showingTrailerYtId = null }
+            )
+        }
+
+        // ─── WebView Fallback (search query only, no direct ytId) ───
+        showingTrailerSearchUrl?.let { url ->
             com.merlottv.kotlin.ui.components.YouTubeWebPlayer(
                 url = url,
-                onDismiss = { showingTrailerUrl = null }
+                onDismiss = { showingTrailerSearchUrl = null }
             )
         }
     }

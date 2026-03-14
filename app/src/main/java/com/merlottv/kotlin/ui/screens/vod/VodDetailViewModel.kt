@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
+import com.merlottv.kotlin.data.youtube.TmdbTrailerRepository
 import com.merlottv.kotlin.domain.model.Meta
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.model.Stream
@@ -55,6 +56,7 @@ class VodDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val addonRepository: AddonRepository,
     private val favoritesRepository: FavoritesRepository,
+    private val tmdbTrailerRepository: TmdbTrailerRepository,
     application: Application
 ) : ViewModel() {
 
@@ -141,13 +143,33 @@ class VodDetailViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             val meta = addonRepository.getMeta(type, id)
             // Extract trailer YouTube ID from trailerStreams
-            val trailerYtId = meta?.trailerStreams
+            var trailerYtId = meta?.trailerStreams
                 ?.firstOrNull { it.ytId.isNotEmpty() }?.ytId
-            // YouTube search fallback — generates a search query for ANY title
+
+            // TMDB fallback — find trailer via TMDB API when addon has none
+            if (trailerYtId == null && meta != null && meta.name.isNotEmpty()) {
+                try {
+                    val imdbId = if (id.startsWith("tt")) id else null
+                    val tmdbYtId = tmdbTrailerRepository.findTrailerId(
+                        imdbId = imdbId,
+                        title = meta.name,
+                        year = meta.year,
+                        type = type
+                    )
+                    if (tmdbYtId != null) {
+                        trailerYtId = tmdbYtId
+                    }
+                } catch (_: Exception) {
+                    // TMDB failed — fall through to search fallback
+                }
+            }
+
+            // YouTube search fallback — only if both addon and TMDB failed
             val trailerSearch = if (trailerYtId == null && meta != null && meta.name.isNotEmpty()) {
                 val yearSuffix = if (meta.year.isNotEmpty()) " ${meta.year}" else ""
                 "${meta.name}$yearSuffix official trailer"
             } else null
+
             if (meta != null && meta.videos.isNotEmpty()) {
                 val seasons = meta.videos
                     .map { it.season }
