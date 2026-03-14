@@ -13,6 +13,7 @@ import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Video
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
+import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -140,36 +141,17 @@ class VodDetailViewModel @Inject constructor(
 
     private fun loadMeta() {
         viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
             _uiState.value = _uiState.value.copy(isLoading = true)
             val meta = addonRepository.getMeta(type, id)
-            // Extract trailer YouTube ID from trailerStreams
-            var trailerYtId = meta?.trailerStreams
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.d("VodDetail", "getMeta completed in ${elapsed}ms")
+
+            // Extract trailer YouTube ID from addon trailerStreams (instant, no network)
+            val addonTrailerYtId = meta?.trailerStreams
                 ?.firstOrNull { it.ytId.isNotEmpty() }?.ytId
 
-            // TMDB fallback — find trailer via TMDB API when addon has none
-            if (trailerYtId == null && meta != null && meta.name.isNotEmpty()) {
-                try {
-                    val imdbId = if (id.startsWith("tt")) id else null
-                    val tmdbYtId = tmdbTrailerRepository.findTrailerId(
-                        imdbId = imdbId,
-                        title = meta.name,
-                        year = meta.year,
-                        type = type
-                    )
-                    if (tmdbYtId != null) {
-                        trailerYtId = tmdbYtId
-                    }
-                } catch (_: Exception) {
-                    // TMDB failed — fall through to search fallback
-                }
-            }
-
-            // YouTube search fallback — only if both addon and TMDB failed
-            val trailerSearch = if (trailerYtId == null && meta != null && meta.name.isNotEmpty()) {
-                val yearSuffix = if (meta.year.isNotEmpty()) " ${meta.year}" else ""
-                "${meta.name}$yearSuffix official trailer"
-            } else null
-
+            // Show UI IMMEDIATELY — don't wait for TMDB trailer lookup
             if (meta != null && meta.videos.isNotEmpty()) {
                 val seasons = meta.videos
                     .map { it.season }
@@ -186,16 +168,44 @@ class VodDetailViewModel @Inject constructor(
                     seasons = seasons,
                     selectedSeason = firstSeason,
                     episodesForSeason = episodes,
-                    trailerYtId = trailerYtId,
-                    trailerSearchQuery = trailerSearch
+                    trailerYtId = addonTrailerYtId
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     meta = meta,
-                    trailerYtId = trailerYtId,
-                    trailerSearchQuery = trailerSearch
+                    trailerYtId = addonTrailerYtId
                 )
+            }
+
+            // TMDB trailer lookup runs in BACKGROUND — doesn't block the detail screen
+            if (addonTrailerYtId == null && meta != null && meta.name.isNotEmpty()) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val imdbId = if (id.startsWith("tt")) id else null
+                        val tmdbYtId = tmdbTrailerRepository.findTrailerId(
+                            imdbId = imdbId,
+                            title = meta.name,
+                            year = meta.year,
+                            type = type
+                        )
+                        if (tmdbYtId != null) {
+                            _uiState.value = _uiState.value.copy(trailerYtId = tmdbYtId)
+                            Log.d("VodDetail", "TMDB trailer found: $tmdbYtId")
+                        } else {
+                            // YouTube search fallback
+                            val yearSuffix = if (meta.year.isNotEmpty()) " ${meta.year}" else ""
+                            _uiState.value = _uiState.value.copy(
+                                trailerSearchQuery = "${meta.name}$yearSuffix official trailer"
+                            )
+                        }
+                    } catch (_: Exception) {
+                        val yearSuffix = if (meta.year.isNotEmpty()) " ${meta.year}" else ""
+                        _uiState.value = _uiState.value.copy(
+                            trailerSearchQuery = "${meta.name}$yearSuffix official trailer"
+                        )
+                    }
+                }
             }
         }
     }

@@ -10,10 +10,15 @@ import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Video
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.squareup.moshi.Moshi
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
@@ -36,8 +41,9 @@ class AddonRepositoryImpl @Inject constructor(
     // Per-request client with shorter timeout for catalog/meta fetches
     private val fastClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
-            .callTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .callTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.SECONDS)
             .build()
     }
 
@@ -95,55 +101,89 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun getMeta(type: String, id: String): Meta? {
         return withContext(Dispatchers.IO) {
-            var bestMeta: Meta? = null
-            for (addon in _addons.value) {
-                try {
-                    val base = addon.url.removeSuffix("/manifest.json")
-                    val url = "$base/meta/$type/$id.json"
-                    val request = Request.Builder().url(url).build()
-                    val response = fastClient.newCall(request).execute()
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: continue
-                        val meta = parseMetaResponse(body) ?: continue
-
-                        // For movies, return first successful result
-                        if (type != "series") return@withContext meta
-
-                        // For series, we need the videos/episodes list.
-                        // Keep the first result as fallback, but prefer a response with videos.
-                        if (meta.videos.isNotEmpty()) {
-                            return@withContext meta  // Has episodes — use this one
+            val startTime = System.currentTimeMillis()
+            // Query ALL addons in parallel for massive speed improvement
+            val results = supervisorScope {
+                _addons.value.map { addon ->
+                    async(Dispatchers.IO) {
+                        withTimeoutOrNull(7000L) {
+                            try {
+                                val base = addon.url.removeSuffix("/manifest.json")
+                                val url = "$base/meta/$type/$id.json"
+                                val request = Request.Builder().url(url).build()
+                                val response = fastClient.newCall(request).execute()
+                                if (response.isSuccessful) {
+                                    val body = response.body?.string()
+                                    if (body != null) parseMetaResponse(body) else null
+                                } else null
+                            } catch (e: Exception) {
+                                null
+                            }
                         }
-                        // Store as fallback (has metadata but no episodes)
-                        if (bestMeta == null) bestMeta = meta
                     }
-                } catch (e: Exception) {
-                    continue
+                }.awaitAll()
+            }.filterNotNull()
+
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.d("AddonRepo", "getMeta parallel: ${results.size} results in ${elapsed}ms")
+
+            if (results.isEmpty()) return@withContext null
+
+            // For movies, return the richest result (most fields populated)
+            if (type != "series") {
+                return@withContext results.maxByOrNull {
+                    (if (it.description.isNotEmpty()) 1 else 0) +
+                    (if (it.poster.isNotEmpty()) 1 else 0) +
+                    (if (it.background.isNotEmpty()) 1 else 0) +
+                    (if (it.imdbRating.isNotEmpty()) 1 else 0) +
+                    it.genres.size + it.cast.size +
+                    it.trailerStreams.size
                 }
             }
-            bestMeta
+
+            // For series, prefer one with episodes/videos
+            val withVideos = results.filter { it.videos.isNotEmpty() }
+            if (withVideos.isNotEmpty()) {
+                return@withContext withVideos.maxByOrNull { it.videos.size }
+            }
+            // Fallback: return richest metadata even without episodes
+            results.maxByOrNull {
+                (if (it.description.isNotEmpty()) 1 else 0) +
+                (if (it.poster.isNotEmpty()) 1 else 0) +
+                it.genres.size + it.cast.size
+            }
         }
     }
 
     override suspend fun getStreams(type: String, id: String): List<Stream> {
         return withContext(Dispatchers.IO) {
-            val allStreams = mutableListOf<Stream>()
-            for (addon in _addons.value) {
-                try {
-                    val base = addon.url.removeSuffix("/manifest.json")
-                    val url = "$base/stream/$type/$id.json"
-                    val request = Request.Builder().url(url).build()
-                    val response = fastClient.newCall(request).execute()
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: continue
-                        val streams = parseStreamResponse(body, addon.name, addon.logo)
-                        allStreams.addAll(streams)
+            val startTime = System.currentTimeMillis()
+            // Query ALL addons in parallel for faster stream discovery
+            val results = supervisorScope {
+                _addons.value.map { addon ->
+                    async(Dispatchers.IO) {
+                        withTimeoutOrNull(7000L) {
+                            try {
+                                val base = addon.url.removeSuffix("/manifest.json")
+                                val url = "$base/stream/$type/$id.json"
+                                val request = Request.Builder().url(url).build()
+                                val response = fastClient.newCall(request).execute()
+                                if (response.isSuccessful) {
+                                    val body = response.body?.string()
+                                    if (body != null) parseStreamResponse(body, addon.name, addon.logo)
+                                    else emptyList()
+                                } else emptyList()
+                            } catch (e: Exception) {
+                                emptyList()
+                            }
+                        } ?: emptyList()
                     }
-                } catch (e: Exception) {
-                    continue
-                }
-            }
-            allStreams
+                }.awaitAll()
+            }.flatten()
+
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.d("AddonRepo", "getStreams parallel: ${results.size} streams in ${elapsed}ms")
+            results
         }
     }
 
