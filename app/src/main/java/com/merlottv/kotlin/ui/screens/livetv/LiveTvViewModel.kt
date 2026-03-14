@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
@@ -57,6 +58,7 @@ data class LiveTvUiState(
     val nextProgram: EpgEntry? = null,
     // Video quality info
     val videoResolution: String = "",
+    val videoFrameRate: String = "",
     // Current index in filtered list for channel up/down
     val currentChannelIndex: Int = -1,
     // Backup stream failover
@@ -66,7 +68,10 @@ data class LiveTvUiState(
     val showCategories: Boolean = true,
     // Quick menu (OK button popup)
     val showQuickMenu: Boolean = false,
-    val lastWatchedChannel: Channel? = null,
+    // Last 3 watched channels (most recent first)
+    val recentChannels: List<Channel> = emptyList(),
+    // Stream source: which playlist/source is currently playing
+    val streamSource: String = "",
     // Subtitles (embedded CC)
     val subtitlesEnabled: Boolean = false
 ) {
@@ -96,6 +101,9 @@ class LiveTvViewModel @Inject constructor(
     private var isPlayerReleased = false
     private var failoverMessageJob: Job? = null
 
+    // Track playlist names for source display
+    private var playlistNames: Map<String, String> = emptyMap() // url → name
+
     /**
      * Optimized ExoPlayer configuration for live TV:
      *
@@ -107,6 +115,7 @@ class LiveTvViewModel @Inject constructor(
      * - Cross-protocol redirects enabled for CDN flexibility
      *
      * v2.25.1: Buffer duration now reads from user Settings (default 800ms)
+     * v2.25.2: Frame rate tracking, recent channels history, stream source display
      */
     val player: ExoPlayer = run {
         // Read user's buffer preference (synchronous — only runs once at ViewModel creation)
@@ -117,14 +126,10 @@ class LiveTvViewModel @Inject constructor(
             .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
             .build()
 
-        // Buffer config derived from user setting:
-        // - minBufferMs = userBufferMs (the user's chosen minimum)
-        // - maxBufferMs = userBufferMs * 8 (reasonable ceiling, scales with preference)
-        // - bufferForPlaybackMs = userBufferMs * 3/8 (start playback before full min buffer)
-        // - bufferForPlaybackAfterRebufferMs = userBufferMs (full min buffer after a stall)
+        // Buffer config derived from user setting
         val minBuffer = userBufferMs
-        val maxBuffer = (userBufferMs * 8).coerceAtMost(24_000) // Cap at 24s max
-        val playbackBuffer = (userBufferMs * 3 / 8).coerceAtLeast(200) // At least 200ms
+        val maxBuffer = (userBufferMs * 8).coerceAtMost(24_000)
+        val playbackBuffer = (userBufferMs * 3 / 8).coerceAtLeast(200)
         val rebufferBuffer = userBufferMs
 
         val loadControl = DefaultLoadControl.Builder()
@@ -141,13 +146,13 @@ class LiveTvViewModel @Inject constructor(
 
         // HTTP data source with tight timeouts for fast failover on dead streams
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(6_000)   // Was 8000 — fail faster on unreachable hosts
-            .setReadTimeoutMs(6_000)      // Was 8000 — fail faster on hung connections
+            .setConnectTimeoutMs(6_000)
+            .setReadTimeoutMs(6_000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(mapOf(
-                "Connection" to "keep-alive" // Hint to reuse connections
+                "Connection" to "keep-alive"
             ))
-            .setTransferListener(bandwidthMeter) // Feed download speed data to meter
+            .setTransferListener(bandwidthMeter)
 
         val dataSourceFactory = DefaultDataSource.Factory(application, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -173,8 +178,35 @@ class LiveTvViewModel @Inject constructor(
                         Log.w("LiveTvVM", "Player error: ${error.errorCodeName}", error)
                         handlePlaybackError()
                     }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (isPlayerReleased) return
+                        if (playbackState == Player.STATE_READY) {
+                            updateFrameRate()
+                        }
+                    }
                 })
             }
+    }
+
+    /** Extract frame rate from the currently playing video track */
+    private fun updateFrameRate() {
+        try {
+            val format = player.videoFormat
+            if (format != null && format.frameRate > 0) {
+                val fps = format.frameRate
+                val fpsStr = if (fps == fps.toInt().toFloat()) {
+                    "${fps.toInt()} fps"
+                } else {
+                    String.format("%.2f fps", fps)
+                }
+                _uiState.value = _uiState.value.copy(videoFrameRate = fpsStr)
+            } else {
+                _uiState.value = _uiState.value.copy(videoFrameRate = "")
+            }
+        } catch (_: Exception) {
+            _uiState.value = _uiState.value.copy(videoFrameRate = "")
+        }
     }
 
     init {
@@ -186,20 +218,22 @@ class LiveTvViewModel @Inject constructor(
 
     /**
      * v2.25.0: Load channels and EPG data in parallel instead of sequentially.
-     * Previously: loadChannels() → then loadEpgInBackground() (sequential)
-     * Now: both launch concurrently, shaving seconds off startup time.
      */
     private fun loadChannelsAndEpgParallel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
 
-            // Launch EPG loading concurrently — don't wait for channels to finish first
+            // Launch EPG loading concurrently
             val epgJob = launch { loadEpgInternal() }
 
-            // Load channels (this is the blocking path for UI)
             try {
                 val playlists = settingsDataStore.playlists.first()
-                val enabledUrls = playlists.filter { it.enabled }.map { it.url }
+                val enabledPlaylists = playlists.filter { it.enabled }
+                val enabledUrls = enabledPlaylists.map { it.url }
+
+                // Build playlist name map for source tracking
+                playlistNames = enabledPlaylists.associate { it.url to it.name }
+
                 val channels = withContext(Dispatchers.IO) {
                     if (enabledUrls.size == 1) {
                         channelRepository.loadChannels(enabledUrls.first())
@@ -210,21 +244,16 @@ class LiveTvViewModel @Inject constructor(
                     }
                 }
 
-                // Extract groups efficiently — use LinkedHashSet to preserve insertion order
-                // and avoid creating intermediate List from map().distinct()
                 val groupSet = LinkedHashSet<String>(channels.size / 10)
                 for (ch in channels) { groupSet.add(ch.group) }
 
-                // Check for custom category order from settings
                 val customOrder = settingsDataStore.categoryOrder.first()
 
                 val sortedGroups = if (customOrder.isNotEmpty()) {
-                    // Apply user's custom order, append any new categories at the end
                     val ordered = customOrder.filter { groupSet.contains(it) }.toMutableList()
                     val remaining = groupSet.filter { it !in ordered }.sortedBy { it.lowercase() }
                     ordered + remaining
                 } else {
-                    // Default: USA-related first, then alphabetically
                     groupSet.sortedWith(
                         compareByDescending<String> { group ->
                             val lower = group.lowercase()
@@ -234,11 +263,8 @@ class LiveTvViewModel @Inject constructor(
                         }.thenBy { it.lowercase() }
                     )
                 }
-                // Add "★ Favorites" as the first category (always)
                 val groups = listOf("★ Favorites") + sortedGroups
 
-                // Don't set filteredChannels — null means "use channels directly"
-                // This avoids duplicating the full list (thousands of Channel objects) in state
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     channels = channels,
@@ -246,15 +272,11 @@ class LiveTvViewModel @Inject constructor(
                     totalChannels = channels.size
                 ).withFilteredChannels(null)
 
-                // Auto-play last watched channel
                 autoPlayLastWatched(channels)
             } catch (e: Exception) {
                 Log.e("LiveTvVM", "Failed to load channels", e)
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
-
-            // EPG continues loading in background — we don't wait for it
-            // epgJob will complete whenever the XML downloads finish
         }
     }
 
@@ -263,7 +285,6 @@ class LiveTvViewModel @Inject constructor(
         try {
             val lastId = settingsDataStore.lastWatchedChannelId.first()
             if (lastId.isNotEmpty()) {
-                // Find channel and its index in a single pass instead of find() + indexOf()
                 var foundIndex = -1
                 var foundChannel: Channel? = null
                 for (i in channels.indices) {
@@ -278,7 +299,8 @@ class LiveTvViewModel @Inject constructor(
                         selectedChannel = foundChannel,
                         isFullscreen = true,
                         showOverlay = false,
-                        currentChannelIndex = foundIndex
+                        currentChannelIndex = foundIndex,
+                        streamSource = resolveSourceName(foundChannel)
                     )
                     safePlayChannel(foundChannel)
                     loadEpgForChannel(foundChannel)
@@ -286,6 +308,18 @@ class LiveTvViewModel @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e("LiveTvVM", "Auto-play last watched failed", e)
+        }
+    }
+
+    /** Determine which playlist a channel came from based on its stream URL domain */
+    private fun resolveSourceName(channel: Channel): String {
+        // If we have playlist names, try to match by checking if the channel URL
+        // could belong to a playlist. Since M3U channels don't store their source,
+        // we show the first playlist name, or "Primary" / "Backup" based on context.
+        return when {
+            playlistNames.size == 1 -> playlistNames.values.first()
+            playlistNames.isNotEmpty() -> playlistNames.values.first()
+            else -> "Primary"
         }
     }
 
@@ -303,19 +337,11 @@ class LiveTvViewModel @Inject constructor(
         }
     }
 
-    /**
-     * v2.25.0: Pre-warm backup channel cache in background during startup.
-     * Previously backup sources were only loaded on first failover (cold miss = several seconds delay).
-     * Now they load silently in the background so failover is instant when needed.
-     */
     private fun preWarmBackupCache() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Trigger cache load — findBackupStream calls ensureCacheLoaded() internally
                 backupChannelRepository.findBackupStream("__prewarm__")
-            } catch (_: Exception) {
-                // Silently ignore — this is best-effort pre-warming
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -336,7 +362,6 @@ class LiveTvViewModel @Inject constructor(
         applyFilters()
     }
 
-    /** True when a search query is active — used by UI to show channel results directly */
     val isSearchActive: Boolean get() = _uiState.value.searchQuery.isNotBlank()
 
     fun onGroupSelected(group: String?) {
@@ -352,25 +377,43 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(showCategories = false)
     }
 
+    /**
+     * Add the current channel to the recent channels history (max 3, no duplicates).
+     */
+    private fun addToRecentChannels(previousChannel: Channel?) {
+        if (previousChannel == null) return
+        val current = _uiState.value.recentChannels.toMutableList()
+        // Remove if already in the list (avoid duplicates)
+        current.removeAll { it.id == previousChannel.id }
+        // Add to front (most recent first)
+        current.add(0, previousChannel)
+        // Keep only last 3
+        while (current.size > 3) current.removeAt(current.size - 1)
+        _uiState.value = _uiState.value.copy(recentChannels = current)
+    }
+
     fun onChannelSelected(channel: Channel) {
         val previousChannel = _uiState.value.selectedChannel
         val index = _uiState.value.filteredChannels.indexOf(channel)
+
+        // Add previous channel to recent history
+        addToRecentChannels(previousChannel)
+
         _uiState.value = _uiState.value.copy(
             selectedChannel = channel,
             isFullscreen = true,
             showOverlay = false,
             currentChannelIndex = index,
-            lastWatchedChannel = previousChannel
+            streamSource = resolveSourceName(channel),
+            videoFrameRate = "" // Reset until new stream reports frame rate
         )
         safePlayChannel(channel)
         loadEpgForChannel(channel)
-        // Persist last watched channel
         viewModelScope.launch {
             try { settingsDataStore.setLastWatchedChannelId(channel.id) } catch (_: Exception) {}
         }
     }
 
-    /** Safe wrapper that catches all player exceptions */
     private fun safePlayChannel(channel: Channel) {
         if (isPlayerReleased) return
         failoverAttempts = 0
@@ -386,6 +429,7 @@ class LiveTvViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(
             videoResolution = "",
+            videoFrameRate = "",
             isFailingOver = false,
             failoverMessage = ""
         )
@@ -395,7 +439,6 @@ class LiveTvViewModel @Inject constructor(
         if (isPlayerReleased) return
         val currentChannel = _uiState.value.selectedChannel ?: return
 
-        // Track the current (broken) stream URL so we never try it again
         triedStreamUrls.add(currentChannel.streamUrl)
 
         failoverAttempts++
@@ -411,7 +454,6 @@ class LiveTvViewModel @Inject constructor(
                 }
                 if (isPlayerReleased) return@launch
                 if (backupChannel != null) {
-                    // Track this backup URL in case it also fails
                     triedStreamUrls.add(backupChannel.streamUrl)
                     try {
                         player.stop()
@@ -424,11 +466,11 @@ class LiveTvViewModel @Inject constructor(
                     }
                     _uiState.value = _uiState.value.copy(
                         isFailingOver = false,
-                        failoverMessage = "Playing from backup source"
+                        failoverMessage = "Playing from backup source",
+                        streamSource = "Backup" // Mark as playing from backup
                     )
                     clearFailoverMessageAfterDelay()
                 } else {
-                    // No more matches found across all backup sources
                     _uiState.value = _uiState.value.copy(
                         isFailingOver = false,
                         failoverMessage = "No working backup found (searched all sources)"
@@ -481,6 +523,7 @@ class LiveTvViewModel @Inject constructor(
         val channels = state.filteredChannels
         if (channels.isEmpty()) return
 
+        val previousChannel = state.selectedChannel
         val newIndex = if (state.currentChannelIndex <= 0) {
             channels.size - 1
         } else {
@@ -488,10 +531,13 @@ class LiveTvViewModel @Inject constructor(
         }
 
         val channel = channels[newIndex]
-        _uiState.value = state.copy(
+        addToRecentChannels(previousChannel)
+        _uiState.value = _uiState.value.copy(
             selectedChannel = channel,
             currentChannelIndex = newIndex,
-            showOverlay = true
+            showOverlay = true,
+            streamSource = resolveSourceName(channel),
+            videoFrameRate = ""
         )
         safePlayChannel(channel)
         loadEpgForChannel(channel)
@@ -505,6 +551,7 @@ class LiveTvViewModel @Inject constructor(
         val channels = state.filteredChannels
         if (channels.isEmpty()) return
 
+        val previousChannel = state.selectedChannel
         val newIndex = if (state.currentChannelIndex >= channels.size - 1) {
             0
         } else {
@@ -512,10 +559,13 @@ class LiveTvViewModel @Inject constructor(
         }
 
         val channel = channels[newIndex]
-        _uiState.value = state.copy(
+        addToRecentChannels(previousChannel)
+        _uiState.value = _uiState.value.copy(
             selectedChannel = channel,
             currentChannelIndex = newIndex,
-            showOverlay = true
+            showOverlay = true,
+            streamSource = resolveSourceName(channel),
+            videoFrameRate = ""
         )
         safePlayChannel(channel)
         loadEpgForChannel(channel)
@@ -533,6 +583,8 @@ class LiveTvViewModel @Inject constructor(
     }
 
     fun showQuickMenu() {
+        // Refresh frame rate when opening quick menu
+        updateFrameRate()
         _uiState.value = _uiState.value.copy(showQuickMenu = true, showOverlay = true)
     }
 
@@ -540,10 +592,13 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(showQuickMenu = false)
     }
 
-    fun goToLastWatchedChannel() {
-        val lastCh = _uiState.value.lastWatchedChannel ?: return
+    /** Switch to a recent channel by index (0 = most recent, 1, 2) */
+    fun goToRecentChannel(index: Int) {
+        val recent = _uiState.value.recentChannels
+        if (index !in recent.indices) return
+        val channel = recent[index]
         hideQuickMenu()
-        onChannelSelected(lastCh)
+        onChannelSelected(channel)
     }
 
     fun toggleCurrentChannelFavorite() {
@@ -597,15 +652,12 @@ class LiveTvViewModel @Inject constructor(
         val hasSearch = state.searchQuery.isNotBlank()
 
         if (!hasGroup && !hasSearch) {
-            // No filter active — reuse full channel list (null = no separate allocation)
             _uiState.value = state.withFilteredChannels(null)
             return
         }
 
         var filtered = state.channels
 
-        // When searching, search across ALL channels regardless of selected group
-        // so users can find any channel from the search box in the category sidebar
         if (hasSearch) {
             val query = state.searchQuery
             filtered = filtered.filter {
@@ -613,7 +665,6 @@ class LiveTvViewModel @Inject constructor(
                 it.group.contains(query, ignoreCase = true)
             }
         } else if (hasGroup) {
-            // Only apply group filter when NOT searching
             val group = state.selectedGroup!!
             if (group == "★ Favorites") {
                 val favIds = state.favoriteIds

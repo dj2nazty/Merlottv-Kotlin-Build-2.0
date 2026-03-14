@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.ClosedCaptionDisabled
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -245,9 +246,9 @@ private fun FullscreenPlayer(
             }
         }
 
-        // Channel switch indicator (top-right, brief)
+        // Channel name badge (top-right) — shows during quick menu only
         AnimatedVisibility(
-            visible = uiState.showOverlay,
+            visible = uiState.showQuickMenu,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -255,19 +256,41 @@ private fun FullscreenPlayer(
                 .padding(16.dp)
         ) {
             uiState.selectedChannel?.let { ch ->
-                Row(
+                Column(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MerlotColors.Black.copy(alpha = 0.7f))
+                        .background(MerlotColors.Black.copy(alpha = 0.8f))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalAlignment = Alignment.End
                 ) {
                     Text(
-                        text = "CH ${ch.number}",
+                        text = ch.name,
                         color = MerlotColors.Accent,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    // Show frame rate if available
+                    if (uiState.videoFrameRate.isNotEmpty()) {
+                        Text(
+                            text = "${uiState.videoResolution} • ${uiState.videoFrameRate}",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    } else if (uiState.videoResolution.isNotEmpty()) {
+                        Text(
+                            text = uiState.videoResolution,
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                    // Show stream source
+                    if (uiState.streamSource.isNotEmpty()) {
+                        Text(
+                            text = "Source: ${uiState.streamSource}",
+                            color = MerlotColors.TextMuted.copy(alpha = 0.7f),
+                            fontSize = 9.sp
+                        )
+                    }
                 }
             }
         }
@@ -281,19 +304,14 @@ private fun FullscreenPlayer(
         ) {
             QuickMenuOverlay(
                 uiState = uiState,
-                onLastWatchedClick = {
-                    viewModel.goToLastWatchedChannel()
-                    viewModel.hideQuickMenu()
+                onRecentChannelClick = { index ->
+                    viewModel.goToRecentChannel(index)
                 },
                 onToggleFavorite = {
                     viewModel.toggleCurrentChannelFavorite()
                 },
                 onToggleSubtitles = {
                     viewModel.toggleSubtitles()
-                },
-                onChannelInfoClick = {
-                    viewModel.hideQuickMenu()
-                    viewModel.toggleOverlay()
                 },
                 onDismiss = { viewModel.hideQuickMenu() }
             )
@@ -304,10 +322,9 @@ private fun FullscreenPlayer(
 @Composable
 private fun QuickMenuOverlay(
     uiState: LiveTvUiState,
-    onLastWatchedClick: () -> Unit,
+    onRecentChannelClick: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleSubtitles: () -> Unit,
-    onChannelInfoClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val firstItemFocusRequester = remember { FocusRequester() }
@@ -321,7 +338,7 @@ private fun QuickMenuOverlay(
 
     Column(
         modifier = Modifier
-            .width(320.dp)
+            .width(340.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MerlotColors.Black.copy(alpha = 0.92f))
             .border(1.dp, Color(0xFF888888).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
@@ -340,18 +357,66 @@ private fun QuickMenuOverlay(
             color = MerlotColors.Accent,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(bottom = 4.dp)
         )
 
-        // Last watched channel option
-        val lastChannel = uiState.lastWatchedChannel
-        QuickMenuItem(
-            icon = Icons.Default.Tv,
-            label = if (lastChannel != null) "Last: ${lastChannel.name}" else "No previous channel",
-            enabled = lastChannel != null,
-            onClick = onLastWatchedClick,
-            focusRequester = firstItemFocusRequester
-        )
+        // Stream source indicator
+        if (uiState.streamSource.isNotEmpty()) {
+            Text(
+                text = "Playing from: ${uiState.streamSource}",
+                color = MerlotColors.TextMuted,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+
+        // Frame rate + resolution info
+        val infoLine = buildString {
+            if (uiState.videoResolution.isNotEmpty()) {
+                append(uiState.videoResolution)
+                val qualityLabel = getQualityLabel(uiState.videoResolution)
+                if (qualityLabel.isNotEmpty()) append(" • $qualityLabel")
+            }
+            if (uiState.videoFrameRate.isNotEmpty()) {
+                if (isNotEmpty()) append(" • ")
+                append(uiState.videoFrameRate)
+            }
+        }
+        if (infoLine.isNotEmpty()) {
+            Text(
+                text = infoLine,
+                color = MerlotColors.Accent.copy(alpha = 0.8f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        } else {
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        // Recent channels (last 3)
+        val recentChannels = uiState.recentChannels
+        if (recentChannels.isNotEmpty()) {
+            Text(
+                text = "RECENT CHANNELS",
+                color = MerlotColors.TextMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 2.dp)
+            )
+            recentChannels.forEachIndexed { index, channel ->
+                QuickMenuItem(
+                    icon = Icons.Default.Tv,
+                    label = channel.name,
+                    enabled = true,
+                    onClick = { onRecentChannelClick(index) },
+                    focusRequester = if (index == 0) firstItemFocusRequester else null
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+        }
 
         // Add/Remove from favorites
         QuickMenuItem(
@@ -359,7 +424,8 @@ private fun QuickMenuOverlay(
             label = if (isFavorite) "Remove from Favorites" else "Add to Favorites",
             iconTint = if (isFavorite) MerlotColors.Accent else MerlotColors.TextMuted,
             enabled = currentChannel != null,
-            onClick = onToggleFavorite
+            onClick = onToggleFavorite,
+            focusRequester = if (recentChannels.isEmpty()) firstItemFocusRequester else null
         )
 
         // Toggle CC / Subtitles
@@ -371,12 +437,12 @@ private fun QuickMenuOverlay(
             onClick = onToggleSubtitles
         )
 
-        // Channel info
+        // Close button (replaces old "Channel Info")
         QuickMenuItem(
-            icon = Icons.Default.Info,
-            label = "Channel Info",
+            icon = Icons.Default.Close,
+            label = "Close",
             enabled = true,
-            onClick = onChannelInfoClick
+            onClick = onDismiss
         )
     }
 }
