@@ -38,6 +38,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.LaunchStatus
 import com.merlottv.kotlin.domain.model.SpaceXLaunch
+import com.merlottv.kotlin.ui.components.MerlotLoadingScreen
 import com.merlottv.kotlin.ui.components.TrailerPlayer
 import com.merlottv.kotlin.ui.components.TrailerPlayerEntryPoint
 import com.merlottv.kotlin.ui.components.YouTubeWebPlayer
@@ -239,20 +240,9 @@ fun SpaceXScreen(
             }
         }
 
-        // ─── URL Resolving Spinner ───
+        // ─── Branded Loading Screen while resolving URL ───
         if (isResolvingUrl) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.7f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = MerlotColors.Accent)
-                    Spacer(Modifier.height(12.dp))
-                    Text("Finding live stream...", color = MerlotColors.TextMuted, fontSize = 12.sp)
-                }
-            }
+            MerlotLoadingScreen()
         }
 
         // ─── Native ExoPlayer Overlay ───

@@ -263,19 +263,20 @@ fun PlayerScreen(
         }
     }
 
-    // Save progress on dispose using GlobalScope so it survives composable disposal
+    // Save progress on dispose — release player immediately, save async via GlobalScope
     DisposableEffect(Unit) {
         onDispose {
             val pos = player.currentPosition
             val dur = player.duration.coerceAtLeast(0)
             val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
-            // Use runBlocking to ensure save completes before player is released
-            try {
-                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                    watchProgressStore?.saveProgress(id, pos, dur, title, poster, contentType)
-                }
-            } catch (_: Exception) {}
+            // Release player FIRST to free memory immediately (critical for Live TV transition)
             player.release()
+            // Save progress async — survives composable disposal via GlobalScope
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    watchProgressStore?.saveProgress(id, pos, dur, title, poster, contentType)
+                } catch (_: Exception) {}
+            }
         }
     }
 

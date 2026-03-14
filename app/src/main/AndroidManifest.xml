@@ -21,6 +21,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MerlotTV"
         android:usesCleartextTraffic="true"
+        android:largeHeap="true"
         android:banner="@drawable/tv_banner">
 
         <activity

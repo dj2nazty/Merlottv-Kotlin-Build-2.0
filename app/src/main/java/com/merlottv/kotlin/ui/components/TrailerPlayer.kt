@@ -96,11 +96,13 @@ fun TrailerPlayer(
     var streamResult by remember { mutableStateOf<YouTubeStreamResult?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var extractionFailed by remember { mutableStateOf(false) }
+    var showBrandedIntro by remember { mutableStateOf(true) }
 
     // Extract streams on launch
     LaunchedEffect(ytVideoId) {
         isLoading = true
         extractionFailed = false
+        showBrandedIntro = true
         val result = withContext(Dispatchers.IO) {
             try {
                 extractor.extract(ytVideoId)
@@ -119,6 +121,14 @@ fun TrailerPlayer(
         }
     }
 
+    // Branded intro timer — show pulsing logo for 5 seconds then transition to video
+    LaunchedEffect(showBrandedIntro, isLoading) {
+        if (showBrandedIntro) {
+            kotlinx.coroutines.delay(5000L)
+            showBrandedIntro = false
+        }
+    }
+
     // If extraction failed, fall back to WebView player
     if (extractionFailed) {
         YouTubeWebPlayer(
@@ -128,25 +138,19 @@ fun TrailerPlayer(
         return
     }
 
-    // Loading state
-    if (isLoading) {
+    // Branded loading screen — shown during extraction AND as a 5-second intro
+    if (isLoading || showBrandedIntro) {
         BackHandler { onDismiss() }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
                 .onPreviewKeyEvent { event ->
                     if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                         onDismiss(); true
                     } else false
-                },
-            contentAlignment = Alignment.Center
+                }
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(color = MerlotColors.Accent)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Loading trailer...", color = MerlotColors.TextMuted, fontSize = 12.sp)
-            }
+            MerlotLoadingScreen()
         }
         return
     }
@@ -220,8 +224,12 @@ fun TrailerPlayer(
         player = exoPlayer
 
         onDispose {
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
             exoPlayer.release()
             player = null
+            // Hint GC to reclaim ExoPlayer buffer memory before Live TV player allocates
+            System.gc()
         }
     }
 

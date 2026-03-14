@@ -178,9 +178,11 @@ class LiveTvViewModel @Inject constructor(
                 /* bufferForPlaybackAfterRebufferMs */  rebufferBuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setTargetBufferBytes(C.LENGTH_UNSET)
-            // Back-buffer: retain 30s of already-played data
-            .setBackBuffer(30_000, /* retainBackBufferFromKeyframe */ true)
+            // Cap buffer at 40MB to prevent OOM after ExoPlayer transitions (trailer → live)
+            // 40MB covers ~50s for streams up to 6.5Mbps; higher bitrates get slightly less buffer
+            .setTargetBufferBytes(40 * 1024 * 1024)
+            // Back-buffer: retain 10s (was 30s) to reduce total memory footprint
+            .setBackBuffer(10_000, /* retainBackBufferFromKeyframe */ true)
             .build()
 
         // === SSL bypass for IPTV streams (TiviMate-style) ===
@@ -351,6 +353,27 @@ class LiveTvViewModel @Inject constructor(
     }
 
     init {
+        // Global exception handler — prevents app crash if ExoPlayer throws OOM or unexpected error
+        viewModelScope.launch {
+            val handler = Thread.UncaughtExceptionHandler { thread, throwable ->
+                Log.e("LiveTvVM", "Uncaught on ${thread.name}: ${throwable.message}", throwable)
+                if (throwable is OutOfMemoryError) {
+                    // Emergency: release player buffers to free memory
+                    try {
+                        player.stop()
+                        player.clearMediaItems()
+                    } catch (_: Exception) {}
+                }
+            }
+            // Set on the playback thread if accessible
+            try {
+                val field = player.javaClass.getDeclaredField("playbackThread")
+                field.isAccessible = true
+                val thread = field.get(player) as? Thread
+                thread?.uncaughtExceptionHandler = handler
+            } catch (_: Exception) {}
+        }
+
         // Launch channels + EPG + backup pre-warm ALL in parallel for fastest startup
         loadChannelsAndEpgParallel()
         observeFavorites()
