@@ -7,6 +7,7 @@ import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -59,15 +60,20 @@ class HomeViewModel @Inject constructor(
     private fun loadCatalogs() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
+            Log.d("HomeViewModel", "Starting loadCatalogs")
             try {
                 val addons = addonRepository.getAllAddons().first()
+                Log.d("HomeViewModel", "Got ${addons.size} addons: ${addons.map { it.name }}")
 
                 val manifests = supervisorScope {
                     addons.map { addon ->
                         async(Dispatchers.IO) {
                             try {
-                                addonRepository.fetchManifest(addon.url) ?: addon
-                            } catch (_: Exception) {
+                                val m = addonRepository.fetchManifest(addon.url)
+                                Log.d("HomeViewModel", "Manifest for ${addon.name}: catalogs=${m?.catalogs?.size ?: 0}")
+                                m ?: addon
+                            } catch (e: Exception) {
+                                Log.e("HomeViewModel", "Manifest fetch failed for ${addon.name}: ${e.message}")
                                 addon
                             }
                         }
@@ -94,6 +100,7 @@ class HomeViewModel @Inject constructor(
                 }
                 // Hide Torbox "Your Media" catalogs from display
                 jobs.removeAll { it.addonName.contains("torbox", true) && it.catalogName.contains("your media", true) }
+                Log.d("HomeViewModel", "Total catalog jobs: ${jobs.size}")
 
                 // Simple awaitAll with bounded dispatcher — single state emission
                 // avoids the overhead of Channel-based progressive loading which
@@ -157,6 +164,7 @@ class HomeViewModel @Inject constructor(
                         sorted.firstOrNull()?.items?.take(5) ?: emptyList()
                     }
 
+                Log.d("HomeViewModel", "Loaded ${sorted.size} catalog rows, ${heroItems.size} hero items")
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     featuredItems = heroItems,
@@ -164,6 +172,7 @@ class HomeViewModel @Inject constructor(
                     error = null
                 )
             } catch (e: Exception) {
+                Log.e("HomeViewModel", "loadCatalogs failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = e.message

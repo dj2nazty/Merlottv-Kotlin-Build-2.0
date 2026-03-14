@@ -78,7 +78,7 @@ fun SidebarNavigation(
         label = "sidebarWidth"
     )
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box {
         Column(
             modifier = modifier
                 .width(sidebarWidth)

@@ -81,6 +81,27 @@ fun HomeScreen(
                     Text("Loading catalogs...", color = MerlotColors.TextMuted, fontSize = 12.sp)
                 }
             }
+            uiState.catalogRows.isEmpty() && !uiState.isLoading -> {
+                // No data loaded — show error or empty state
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "No content available",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 14.sp
+                    )
+                    if (uiState.error != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            uiState.error ?: "",
+                            color = MerlotColors.Warn,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
