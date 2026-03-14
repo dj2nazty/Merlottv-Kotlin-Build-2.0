@@ -134,7 +134,12 @@ class LiveTvViewModel @Inject constructor(
      */
     val player: ExoPlayer = run {
         // Read user's buffer preference (synchronous — only runs once at ViewModel creation)
-        val userBufferMs = runBlocking { settingsDataStore.bufferDurationMs.first() }
+        val userBufferMs = try {
+            runBlocking { settingsDataStore.bufferDurationMs.first() }
+        } catch (e: Exception) {
+            Log.e("LiveTvVM", "Failed to read buffer setting, using default", e)
+            800 // safe default
+        }
 
         // BandwidthMeter tracks download speed and helps ExoPlayer pick optimal quality
         val bandwidthMeter = DefaultBandwidthMeter.Builder(application)

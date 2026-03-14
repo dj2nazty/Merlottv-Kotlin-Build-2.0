@@ -63,8 +63,10 @@ class FavoritesViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FavoritesUiState())
     val uiState: StateFlow<FavoritesUiState> = _uiState.asStateFlow()
 
-    // Track which IDs we've already tried to repair, so we don't loop
+    // Track which IDs we've already tried to repair, so we don't loop.
+    // Cleared on profile switch (when the VOD set changes significantly).
     private val repairedIds = mutableSetOf<String>()
+    private var lastVodIds: Set<String> = emptySet()
 
     init {
         viewModelScope.launch {
@@ -74,6 +76,16 @@ class FavoritesViewModel @Inject constructor(
         }
         viewModelScope.launch {
             favoritesRepository.getFavoriteVodIds().collect { ids ->
+                // Detect profile switch: if more than 1 item changed at once,
+                // the underlying flatMapLatest re-emitted for a new profile.
+                // Clear repairedIds so metadata repair runs for the new profile's items.
+                if (lastVodIds.isNotEmpty() && ids != lastVodIds) {
+                    val changed = (ids - lastVodIds).size + (lastVodIds - ids).size
+                    if (changed > 1) {
+                        repairedIds.clear()
+                    }
+                }
+                lastVodIds = ids
                 _uiState.value = _uiState.value.copy(favoriteVodIds = ids)
                 // Auto-repair missing metadata
                 repairMissingMetadata(ids)

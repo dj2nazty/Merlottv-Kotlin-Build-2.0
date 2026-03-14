@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,8 +48,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.R
@@ -79,7 +78,7 @@ fun SidebarNavigation(
         label = "sidebarWidth"
     )
 
-    Box {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = modifier
                 .width(sidebarWidth)
@@ -127,17 +126,13 @@ fun SidebarNavigation(
                 contentAlignment = Alignment.Center
             ) {
                 if (isExpanded) {
-                    // Show active profile name + avatar when expanded
                     val activeProfile = profiles.find { it.id == activeProfileId }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (activeProfile != null) {
-                            ProfileAvatar(
-                                profile = activeProfile,
-                                size = 24
-                            )
+                            ProfileAvatar(profile = activeProfile, size = 24)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = activeProfile.name,
@@ -158,7 +153,6 @@ fun SidebarNavigation(
                         }
                     }
                 } else {
-                    // Show M or profile avatar when collapsed
                     val activeProfile = profiles.find { it.id == activeProfileId }
                     if (activeProfile != null && activeProfile.avatarUrl.isNotEmpty()) {
                         ProfileAvatar(profile = activeProfile, size = 28)
@@ -187,7 +181,7 @@ fun SidebarNavigation(
             }
         }
 
-        // Profile picker overlay
+        // Profile picker overlay — rendered OVER everything
         if (showProfilePicker) {
             ProfilePickerOverlay(
                 profiles = profiles,
@@ -211,6 +205,16 @@ private fun ProfilePickerOverlay(
     onSelectProfile: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // Focus requester for the first profile row — auto-focus on open
+    val firstProfileFocus = remember { FocusRequester() }
+
+    // Auto-focus the first profile when overlay opens
+    LaunchedEffect(Unit) {
+        try {
+            firstProfileFocus.requestFocus()
+        } catch (_: Exception) {}
+    }
+
     // Full-screen semi-transparent backdrop
     Box(
         modifier = Modifier
@@ -221,11 +225,10 @@ private fun ProfilePickerOverlay(
                     onDismiss()
                     true
                 } else false
-            }
-            .focusable(),
+            },
         contentAlignment = Alignment.TopStart
     ) {
-        // Profile picker card — positioned near the top-left
+        // Profile picker card
         Column(
             modifier = Modifier
                 .padding(start = 80.dp, top = 32.dp)
@@ -244,19 +247,19 @@ private fun ProfilePickerOverlay(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            profiles.forEach { profile ->
+            profiles.forEachIndexed { index, profile ->
                 val isActive = profile.id == activeProfileId
                 ProfileRow(
                     profile = profile,
                     isActive = isActive,
-                    onSelect = { onSelectProfile(profile.id) }
+                    onSelect = { onSelectProfile(profile.id) },
+                    modifier = if (index == 0) Modifier.focusRequester(firstProfileFocus) else Modifier
                 )
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Close hint
             Text(
                 text = "Press BACK to close",
                 color = MerlotColors.TextMuted,
@@ -270,12 +273,13 @@ private fun ProfilePickerOverlay(
 private fun ProfileRow(
     profile: UserProfile,
     isActive: Boolean,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(
@@ -300,6 +304,10 @@ private fun ProfileRow(
                             onSelect()
                             true
                         }
+                        Key.Back -> {
+                            // Let Back bubble up to the overlay backdrop
+                            false
+                        }
                         else -> false
                     }
                 } else false
@@ -307,12 +315,10 @@ private fun ProfileRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar
         ProfileAvatar(profile = profile, size = 32)
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Profile name
         Text(
             text = profile.name,
             color = if (isActive) MerlotColors.Accent else MerlotColors.TextPrimary,
@@ -323,7 +329,6 @@ private fun ProfileRow(
             modifier = Modifier.weight(1f)
         )
 
-        // Active checkmark
         if (isActive) {
             Icon(
                 imageVector = Icons.Default.Check,
@@ -349,7 +354,6 @@ private fun ProfileAvatar(
                 .clip(CircleShape)
         )
     } else {
-        // Color circle with first letter
         val colorInt = ProfileDataStore.AVATAR_COLORS.getOrElse(profile.colorIndex) {
             ProfileDataStore.AVATAR_COLORS[0]
         }
@@ -380,9 +384,7 @@ private fun SidebarItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Single focus state source — no MutableInteractionSource split
     var isFocused by remember { mutableStateOf(false) }
-
     val focusedGrey = Color(0xFF666666)
 
     val backgroundColor by animateColorAsState(

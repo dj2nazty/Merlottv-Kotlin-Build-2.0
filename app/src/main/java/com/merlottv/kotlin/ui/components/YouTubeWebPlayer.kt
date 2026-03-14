@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,13 +28,18 @@ import androidx.compose.ui.viewinterop.AndroidView
 /**
  * Fullscreen in-app YouTube player using WebView.
  *
- * v2.25.4 improvements:
- * - Pure fullscreen embed — NO YouTube UI, NO title bar, NO recommendations
- * - Uses YouTube IFrame Player API with controls=0, showinfo=0, fs=0
- * - Injects custom HTML that forces the video to fill the entire screen
- * - D-pad Left OR Back exits the trailer at any time
- * - For search fallback: loads YouTube Data API search → auto-embeds first result
- * - No close button visible — completely clean fullscreen experience
+ * v2.26.1 fix: YouTube error 152-4 (embed blocked from WebView).
+ * YouTube's July 2025 update blocked iframe embeds loaded via loadDataWithBaseURL()
+ * because WebViews don't send proper HTTP Referer headers from injected HTML.
+ *
+ * FIX: Load the YouTube embed URL directly via loadUrl() instead of injecting
+ * custom HTML. This sends proper HTTP headers that YouTube accepts.
+ * The embed URL params hide all YouTube UI (controls=0, showinfo=0, etc.).
+ *
+ * For search fallback: We load YouTube's mobile search page, let the user's
+ * query auto-play the first result via YouTube's own UI, then hide controls.
+ *
+ * D-pad Left OR Back exits the trailer at any time.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -44,7 +50,38 @@ fun YouTubeWebPlayer(
     BackHandler { onDismiss() }
 
     val videoId = remember(url) { extractYouTubeId(url) }
-    val isSearchUrl = remember(url) { url.contains("search_query=") || url.contains("results?") }
+    val isSearchUrl = remember(url) {
+        url.contains("search_query=") || url.contains("results?")
+    }
+
+    // Build the final URL to load
+    val embedUrl = remember(url, videoId, isSearchUrl) {
+        when {
+            videoId != null -> {
+                // Direct embed URL — YouTube accepts this from WebView loadUrl()
+                "https://www.youtube.com/embed/$videoId?autoplay=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&playsinline=1"
+            }
+            isSearchUrl -> {
+                // Search fallback: extract query and build search embed
+                val query = url.substringAfter("search_query=")
+                    .substringBefore("&")
+                    .let { try { java.net.URLDecoder.decode(it, "UTF-8") } catch (_: Exception) { it } }
+                val encoded = try { java.net.URLEncoder.encode(query, "UTF-8") } catch (_: Exception) { query.replace(" ", "+") }
+                // Use YouTube's embed search playlist feature
+                "https://www.youtube.com/embed?listType=search&list=$encoded&autoplay=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&playsinline=1"
+            }
+            else -> {
+                // Unknown format — try to extract ID and embed, or load directly
+                val extractedId = extractYouTubeId(url)
+                if (extractedId != null) {
+                    "https://www.youtube.com/embed/$extractedId?autoplay=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&playsinline=1"
+                } else {
+                    // Last resort — load as-is
+                    url
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -70,13 +107,23 @@ fun YouTubeWebPlayer(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
 
-                    // Prevent any navigation away from our embed page
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?
                         ): Boolean {
-                            // Block all navigation — keep the embed locked
+                            val requestUrl = request?.url?.toString() ?: return true
+                            // Allow YouTube embed URLs to load normally
+                            if (requestUrl.contains("youtube.com/embed") ||
+                                requestUrl.contains("youtube.com/watch") ||
+                                requestUrl.contains("googlevideo.com") ||
+                                requestUrl.contains("youtube.com/api") ||
+                                requestUrl.contains("youtube.com/iframe") ||
+                                requestUrl.contains("accounts.google.com") ||
+                                requestUrl.contains("googleapis.com")) {
+                                return false // Allow these URLs
+                            }
+                            // Block navigation to other pages
                             return true
                         }
                     }
@@ -91,193 +138,18 @@ fun YouTubeWebPlayer(
                         useWideViewPort = true
                         cacheMode = WebSettings.LOAD_DEFAULT
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        // Set a proper user agent so YouTube treats us as a real browser
+                        userAgentString = "Mozilla/5.0 (Linux; Android 12; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     }
                     setBackgroundColor(android.graphics.Color.BLACK)
 
-                    if (videoId != null) {
-                        // Direct video ID — load clean fullscreen embed
-                        loadDataWithBaseURL(
-                            "https://www.youtube.com",
-                            buildEmbedHtml(videoId),
-                            "text/html",
-                            "UTF-8",
-                            null
-                        )
-                    } else if (isSearchUrl) {
-                        // Search fallback — extract query and use YouTube search API
-                        val query = url.substringAfter("search_query=")
-                            .substringBefore("&")
-                            .let { java.net.URLDecoder.decode(it, "UTF-8") }
-                        loadDataWithBaseURL(
-                            "https://www.youtube.com",
-                            buildSearchEmbedHtml(query),
-                            "text/html",
-                            "UTF-8",
-                            null
-                        )
-                    } else {
-                        // Unknown format — try to embed directly
-                        loadDataWithBaseURL(
-                            "https://www.youtube.com",
-                            buildEmbedHtml(url),
-                            "text/html",
-                            "UTF-8",
-                            null
-                        )
-                    }
+                    // Load the embed URL directly — proper HTTP headers are sent
+                    loadUrl(embedUrl)
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
     }
-}
-
-/**
- * Build a clean fullscreen YouTube embed HTML page.
- * Uses the IFrame Player API with all UI elements hidden:
- * - controls=0: No player controls
- * - showinfo=0: No video title/info bar
- * - rel=0: No related videos at the end
- * - modestbranding=1: Minimal YouTube branding
- * - iv_load_policy=3: No annotations
- * - fs=0: No fullscreen button (we ARE fullscreen)
- * - autoplay=1: Start immediately
- * - playsinline=1: Play inline (not in YouTube app)
- *
- * The HTML uses CSS to make the iframe fill 100% of the viewport
- * with zero margins, padding, or scrollbars.
- */
-fun buildEmbedHtml(videoId: String): String {
-    // If it looks like a full URL rather than just an ID, try to extract the ID
-    val id = extractYouTubeId(videoId) ?: videoId
-
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <style>
-            * { margin: 0; padding: 0; overflow: hidden; }
-            html, body { width: 100%; height: 100%; background: #000; }
-            iframe {
-                position: absolute;
-                top: 0; left: 0;
-                width: 100%; height: 100%;
-                border: none;
-            }
-        </style>
-    </head>
-    <body>
-        <iframe
-            src="https://www.youtube.com/embed/$id?autoplay=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=1&origin=https://www.youtube.com"
-            allow="autoplay; encrypted-media"
-            allowfullscreen>
-        </iframe>
-    </body>
-    </html>
-    """.trimIndent()
-}
-
-/**
- * Build an HTML page that searches YouTube for the query and auto-embeds
- * the first result. Uses the YouTube oEmbed API (no API key needed) as a
- * fallback, but primarily constructs the embed URL from a known search pattern.
- *
- * Flow:
- * 1. Fetches YouTube search results page
- * 2. Extracts the first video ID from the response
- * 3. Embeds that video in a clean fullscreen iframe
- * 4. If extraction fails, shows the search query as a direct embed search
- */
-fun buildSearchEmbedHtml(query: String): String {
-    val urlEncodedQuery = try {
-        java.net.URLEncoder.encode(query, "UTF-8")
-    } catch (_: Exception) {
-        query.replace(" ", "+")
-    }
-
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <style>
-            * { margin: 0; padding: 0; overflow: hidden; }
-            html, body { width: 100%; height: 100%; background: #000; }
-            iframe {
-                position: absolute;
-                top: 0; left: 0;
-                width: 100%; height: 100%;
-                border: none;
-            }
-            #loading {
-                position: absolute;
-                top: 50%; left: 50%;
-                transform: translate(-50%, -50%);
-                color: #fff;
-                font-family: sans-serif;
-                font-size: 18px;
-                text-align: center;
-            }
-            .spinner {
-                width: 40px; height: 40px;
-                border: 4px solid rgba(255,255,255,0.3);
-                border-top: 4px solid #fff;
-                border-radius: 50%;
-                animation: spin 1s linear infinite;
-                margin: 0 auto 16px;
-            }
-            @keyframes spin { to { transform: rotate(360deg); } }
-        </style>
-    </head>
-    <body>
-        <div id="loading">
-            <div class="spinner"></div>
-            Loading trailer...
-        </div>
-        <iframe id="player" style="display:none"
-            allow="autoplay; encrypted-media"
-            allowfullscreen>
-        </iframe>
-        <script>
-            // Fetch YouTube search page and extract first video ID
-            fetch('https://www.youtube.com/results?search_query=$urlEncodedQuery')
-                .then(r => r.text())
-                .then(html => {
-                    // Extract first video ID from search results
-                    var match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-                    if (match && match[1]) {
-                        playVideo(match[1]);
-                    } else {
-                        // Fallback: try another pattern
-                        match = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
-                        if (match && match[1]) {
-                            playVideo(match[1]);
-                        } else {
-                            // Last resort: just embed the search as a playlist-like embed
-                            document.getElementById('loading').innerHTML = 'Trailer not found';
-                        }
-                    }
-                })
-                .catch(function() {
-                    // If fetch fails (CORS), use a direct embed with search
-                    // YouTube embed supports a search-based "listType=search" parameter
-                    var frame = document.getElementById('player');
-                    frame.src = 'https://www.youtube.com/embed?listType=search&list=$urlEncodedQuery&autoplay=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&playsinline=1';
-                    frame.style.display = 'block';
-                    document.getElementById('loading').style.display = 'none';
-                });
-
-            function playVideo(videoId) {
-                var frame = document.getElementById('player');
-                frame.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&playsinline=1&enablejsapi=1&origin=https://www.youtube.com';
-                frame.style.display = 'block';
-                document.getElementById('loading').style.display = 'none';
-            }
-        </script>
-    </body>
-    </html>
-    """.trimIndent()
 }
 
 /**
