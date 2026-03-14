@@ -21,6 +21,9 @@ class ProfilePickerViewModel @Inject constructor(
     val profiles: StateFlow<List<UserProfile>> = profileDataStore.profiles
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val activeProfileId: StateFlow<String> = profileDataStore.activeProfileId
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "default")
+
     /** True if a profile was already selected (auto-redirect to Home) */
     private val _hasExistingProfile = MutableStateFlow<Boolean?>(null)
     val hasExistingProfile: StateFlow<Boolean?> = _hasExistingProfile.asStateFlow()

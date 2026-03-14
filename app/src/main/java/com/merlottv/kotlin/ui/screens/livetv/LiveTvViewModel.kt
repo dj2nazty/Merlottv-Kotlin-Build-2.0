@@ -73,7 +73,14 @@ data class LiveTvUiState(
     // Stream source: which playlist/source is currently playing
     val streamSource: String = "",
     // Subtitles (embedded CC)
-    val subtitlesEnabled: Boolean = false
+    val subtitlesEnabled: Boolean = false,
+    // Rebuffer tracking — shows how many times the stream has rebuffered
+    val rebufferCount: Int = 0,
+    val isBuffering: Boolean = false,
+    val lastRebufferDurationMs: Long = 0L,
+    val totalRebufferMs: Long = 0L,
+    // Bitrate info
+    val videoBitrateKbps: Int = 0
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -104,18 +111,26 @@ class LiveTvViewModel @Inject constructor(
     // Track playlist names for source display
     private var playlistNames: Map<String, String> = emptyMap() // url → name
 
+    // Rebuffer tracking state
+    private var rebufferStartTime = 0L
+    private var sessionRebufferCount = 0
+    private var sessionTotalRebufferMs = 0L
+    private var wasPlayingBeforeBuffer = false
+
     /**
      * Optimized ExoPlayer configuration for live TV:
      *
-     * v2.25.0 improvements:
-     * - BandwidthMeter: Tracks network speed so ExoPlayer picks the best quality automatically
-     * - Adjustable buffer duration: user-configurable 0.3s–3.0s via Settings slider
-     * - Near-instant playback start based on user's chosen buffer
-     * - HTTP timeouts: 6s connect, 6s read — fail fast on dead streams
-     * - Cross-protocol redirects enabled for CDN flexibility
-     *
-     * v2.25.1: Buffer duration now reads from user Settings (default 800ms)
-     * v2.25.2: Frame rate tracking, recent channels history, stream source display
+     * v2.25.0: BandwidthMeter, adjustable buffer, fast failover
+     * v2.25.1: User-configurable buffer slider (0.3s–3.0s)
+     * v2.25.2: Frame rate, recent channels, stream source display
+     * v2.25.3: FIXED post-load rebuffering:
+     *   - Decoupled startup buffer from steady-state buffer
+     *   - Slider controls STARTUP speed only (bufferForPlaybackMs)
+     *   - Steady-state buffer is always 30s min / 60s max — prevents mid-stream rebuffering
+     *   - After rebuffer, requires 3s buffer before resuming (prevents rapid re-stalls)
+     *   - Back-buffer retains 30s of played data to handle brief seek-backs
+     *   - Live offset set to 10s behind edge for network headroom
+     *   - Rebuffer tracking: count, duration, bitrate displayed in quick menu
      */
     val player: ExoPlayer = run {
         // Read user's buffer preference (synchronous — only runs once at ViewModel creation)
@@ -126,28 +141,49 @@ class LiveTvViewModel @Inject constructor(
             .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
             .build()
 
-        // Buffer config derived from user setting
-        val minBuffer = userBufferMs
-        val maxBuffer = (userBufferMs * 8).coerceAtMost(24_000)
-        val playbackBuffer = (userBufferMs * 3 / 8).coerceAtLeast(200)
-        val rebufferBuffer = userBufferMs
+        // === KEY FIX: Decouple startup speed from steady-state buffer ===
+        //
+        // The user's slider (userBufferMs) controls how fast channels START playing.
+        // But once playing, we need a much larger buffer to prevent rebuffering.
+        //
+        // minBufferMs = 30s: ExoPlayer always tries to keep 30s of video ahead.
+        //   This is the #1 fix — previously it was only 800ms, so any tiny
+        //   network hiccup caused rebuffering.
+        //
+        // maxBufferMs = 60s: ExoPlayer will buffer up to 60s ahead when possible.
+        //   Gives plenty of headroom for local TV streams.
+        //
+        // bufferForPlaybackMs = userBufferMs * 3/8 (min 200ms): How much buffer
+        //   before INITIAL playback starts. This is what the slider controls.
+        //
+        // bufferForPlaybackAfterRebufferMs = 3000ms: After a rebuffer event,
+        //   require 3 full seconds of buffer before resuming. Previously this was
+        //   only 800ms, causing rapid re-stalls. 3s gives the network time to
+        //   stabilize.
+
+        val minBuffer = 30_000          // 30 seconds steady-state minimum
+        val maxBuffer = 60_000          // 60 seconds maximum lookahead
+        val playbackBuffer = (userBufferMs * 3 / 8).coerceAtLeast(200) // Startup speed (slider)
+        val rebufferBuffer = 3_000      // 3 seconds required after rebuffer
 
         val loadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
             .setBufferDurationsMs(
-                /* minBufferMs */                  minBuffer,
-                /* maxBufferMs */                  maxBuffer,
-                /* bufferForPlaybackMs */           playbackBuffer,
-                /* bufferForPlaybackAfterRebufferMs */ rebufferBuffer
+                /* minBufferMs */                      minBuffer,
+                /* maxBufferMs */                      maxBuffer,
+                /* bufferForPlaybackMs */               playbackBuffer,
+                /* bufferForPlaybackAfterRebufferMs */  rebufferBuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .setTargetBufferBytes(C.LENGTH_UNSET)
+            // Back-buffer: retain 30s of already-played data
+            .setBackBuffer(30_000, /* retainBackBufferFromKeyframe */ true)
             .build()
 
         // HTTP data source with tight timeouts for fast failover on dead streams
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(6_000)
-            .setReadTimeoutMs(6_000)
+            .setReadTimeoutMs(8_000)    // Slightly more read time for large segments
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(mapOf(
                 "Connection" to "keep-alive"
@@ -164,6 +200,12 @@ class LiveTvViewModel @Inject constructor(
             .build()
             .apply {
                 playWhenReady = true
+
+                // Set live playback speed control: stay 10s behind the live edge
+                // This gives the player network headroom — if the server hiccups
+                // for a few seconds, the buffer absorbs it instead of rebuffering.
+                setMediaItem(MediaItem.Builder().build()) // will be replaced on play
+
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
                         if (isPlayerReleased) return
@@ -181,8 +223,40 @@ class LiveTvViewModel @Inject constructor(
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (isPlayerReleased) return
-                        if (playbackState == Player.STATE_READY) {
-                            updateFrameRate()
+                        when (playbackState) {
+                            Player.STATE_READY -> {
+                                updateFrameRate()
+                                updateBitrate()
+                                // Track rebuffer end
+                                if (wasPlayingBeforeBuffer && rebufferStartTime > 0) {
+                                    val rebufferDuration = System.currentTimeMillis() - rebufferStartTime
+                                    sessionTotalRebufferMs += rebufferDuration
+                                    rebufferStartTime = 0L
+                                    _uiState.value = _uiState.value.copy(
+                                        isBuffering = false,
+                                        lastRebufferDurationMs = rebufferDuration,
+                                        totalRebufferMs = sessionTotalRebufferMs
+                                    )
+                                    Log.d("LiveTvVM", "Rebuffer ended: ${rebufferDuration}ms (total: ${sessionRebufferCount} rebuffers, ${sessionTotalRebufferMs}ms)")
+                                }
+                                wasPlayingBeforeBuffer = false
+                            }
+                            Player.STATE_BUFFERING -> {
+                                // Only count as rebuffer if we were already playing
+                                if (_uiState.value.selectedChannel != null && !_uiState.value.isBuffering) {
+                                    val isRebuffer = _uiState.value.videoResolution.isNotEmpty() // Was playing if we had video
+                                    if (isRebuffer) {
+                                        sessionRebufferCount++
+                                        rebufferStartTime = System.currentTimeMillis()
+                                        wasPlayingBeforeBuffer = true
+                                        _uiState.value = _uiState.value.copy(
+                                            isBuffering = true,
+                                            rebufferCount = sessionRebufferCount
+                                        )
+                                        Log.d("LiveTvVM", "Rebuffer #$sessionRebufferCount started")
+                                    }
+                                }
+                            }
                         }
                     }
                 })
@@ -207,6 +281,18 @@ class LiveTvViewModel @Inject constructor(
         } catch (_: Exception) {
             _uiState.value = _uiState.value.copy(videoFrameRate = "")
         }
+    }
+
+    /** Extract video bitrate from the currently playing track */
+    private fun updateBitrate() {
+        try {
+            val format = player.videoFormat
+            if (format != null && format.bitrate > 0) {
+                _uiState.value = _uiState.value.copy(
+                    videoBitrateKbps = format.bitrate / 1000
+                )
+            }
+        } catch (_: Exception) {}
     }
 
     init {
@@ -418,10 +504,30 @@ class LiveTvViewModel @Inject constructor(
         if (isPlayerReleased) return
         failoverAttempts = 0
         triedStreamUrls.clear()
+
+        // Reset rebuffer tracking for new channel
+        sessionRebufferCount = 0
+        sessionTotalRebufferMs = 0L
+        rebufferStartTime = 0L
+        wasPlayingBeforeBuffer = false
+
         try {
             player.stop()
             player.clearMediaItems()
-            player.setMediaItem(MediaItem.fromUri(channel.streamUrl))
+            // Build media item with live configuration for better live stream handling
+            val mediaItem = MediaItem.Builder()
+                .setUri(channel.streamUrl)
+                .setLiveConfiguration(
+                    MediaItem.LiveConfiguration.Builder()
+                        .setMaxPlaybackSpeed(1.04f)     // Catch up gently if behind
+                        .setMinPlaybackSpeed(0.96f)     // Slow down gently if too far ahead
+                        .setTargetOffsetMs(10_000)      // Target 10s behind live edge
+                        .setMinOffsetMs(5_000)          // Never closer than 5s to edge
+                        .setMaxOffsetMs(30_000)         // Never more than 30s behind
+                        .build()
+                )
+                .build()
+            player.setMediaItem(mediaItem)
             player.prepare()
             player.play()
         } catch (e: Exception) {
@@ -430,8 +536,13 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             videoResolution = "",
             videoFrameRate = "",
+            videoBitrateKbps = 0,
             isFailingOver = false,
-            failoverMessage = ""
+            failoverMessage = "",
+            rebufferCount = 0,
+            isBuffering = false,
+            lastRebufferDurationMs = 0L,
+            totalRebufferMs = 0L
         )
     }
 
@@ -458,7 +569,19 @@ class LiveTvViewModel @Inject constructor(
                     try {
                         player.stop()
                         player.clearMediaItems()
-                        player.setMediaItem(MediaItem.fromUri(backupChannel.streamUrl))
+                        val mediaItem = MediaItem.Builder()
+                            .setUri(backupChannel.streamUrl)
+                            .setLiveConfiguration(
+                                MediaItem.LiveConfiguration.Builder()
+                                    .setMaxPlaybackSpeed(1.04f)
+                                    .setMinPlaybackSpeed(0.96f)
+                                    .setTargetOffsetMs(10_000)
+                                    .setMinOffsetMs(5_000)
+                                    .setMaxOffsetMs(30_000)
+                                    .build()
+                            )
+                            .build()
+                        player.setMediaItem(mediaItem)
                         player.prepare()
                         player.play()
                     } catch (e: Exception) {

@@ -246,6 +246,37 @@ private fun FullscreenPlayer(
             }
         }
 
+        // Buffering indicator (bottom-right) — shows during rebuffering
+        AnimatedVisibility(
+            visible = uiState.isBuffering,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MerlotColors.Black.copy(alpha = 0.7f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CircularProgressIndicator(
+                    color = MerlotColors.Accent,
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp
+                )
+                Text(
+                    text = "Buffering...",
+                    color = MerlotColors.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
         // Channel name badge (top-right) — shows during quick menu only
         AnimatedVisibility(
             visible = uiState.showQuickMenu,
@@ -370,7 +401,7 @@ private fun QuickMenuOverlay(
             )
         }
 
-        // Frame rate + resolution info
+        // Frame rate + resolution + bitrate info
         val infoLine = buildString {
             if (uiState.videoResolution.isNotEmpty()) {
                 append(uiState.videoResolution)
@@ -381,6 +412,14 @@ private fun QuickMenuOverlay(
                 if (isNotEmpty()) append(" • ")
                 append(uiState.videoFrameRate)
             }
+            if (uiState.videoBitrateKbps > 0) {
+                if (isNotEmpty()) append(" • ")
+                if (uiState.videoBitrateKbps >= 1000) {
+                    append(String.format("%.1f Mbps", uiState.videoBitrateKbps / 1000f))
+                } else {
+                    append("${uiState.videoBitrateKbps} Kbps")
+                }
+            }
         }
         if (infoLine.isNotEmpty()) {
             Text(
@@ -388,10 +427,33 @@ private fun QuickMenuOverlay(
                 color = MerlotColors.Accent.copy(alpha = 0.8f),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 8.dp)
+                modifier = Modifier.padding(bottom = 4.dp)
             )
         } else {
             Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        // Rebuffer stats
+        if (uiState.rebufferCount > 0 || uiState.totalRebufferMs > 0L) {
+            val rebufferInfo = buildString {
+                append("Rebuffers: ${uiState.rebufferCount}")
+                if (uiState.totalRebufferMs > 0L) {
+                    append(" • Total: ${String.format("%.1f", uiState.totalRebufferMs / 1000f)}s")
+                }
+            }
+            Text(
+                text = rebufferInfo,
+                color = if (uiState.rebufferCount >= 3) Color(0xFFFF6B6B) else MerlotColors.TextMuted,
+                fontSize = 9.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        } else {
+            Text(
+                text = "No rebuffers",
+                color = Color(0xFF4CAF50),
+                fontSize = 9.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
         }
 
         // Recent channels (last 3)
