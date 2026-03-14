@@ -2,6 +2,7 @@
 
 package com.merlottv.kotlin.ui.screens.spacex
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -28,6 +29,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,8 +38,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.LaunchStatus
 import com.merlottv.kotlin.domain.model.SpaceXLaunch
+import com.merlottv.kotlin.ui.components.TrailerPlayer
+import com.merlottv.kotlin.ui.components.TrailerPlayerEntryPoint
 import com.merlottv.kotlin.ui.components.YouTubeWebPlayer
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import dagger.hilt.android.EntryPointAccessors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -48,9 +56,53 @@ fun SpaceXScreen(
     viewModel: SpaceXViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    // In-app video player state
-    var showingVideoUrl by remember { mutableStateOf<String?>(null) }
+    // Get the YouTube extractor for URL resolution
+    val extractor = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            TrailerPlayerEntryPoint::class.java
+        ).youTubeExtractor()
+    }
+
+    // In-app video player state — native player uses ytVideoId, WebView uses url
+    var showingYtVideoId by remember { mutableStateOf<String?>(null) }
+    var showingWebViewUrl by remember { mutableStateOf<String?>(null) }
+    var isResolvingUrl by remember { mutableStateOf(false) }
+
+    // Resolve a YouTube URL to a video ID and launch native player
+    val launchVideo: (String) -> Unit = { url ->
+        scope.launch {
+            // First try direct video ID extraction from URL
+            val directId = extractor.extractVideoId(url)
+            if (directId != null) {
+                Log.d("SpaceXScreen", "Direct video ID: $directId from $url")
+                showingYtVideoId = directId
+                return@launch
+            }
+
+            // For channel live URLs (@SpaceX/live), resolve to actual video ID
+            if (url.contains("/@") || url.contains("/live") || url.contains("/channel/")) {
+                Log.d("SpaceXScreen", "Resolving live URL: $url")
+                isResolvingUrl = true
+                val resolvedId = withContext(Dispatchers.IO) {
+                    extractor.resolveLiveVideoId(url)
+                }
+                isResolvingUrl = false
+                if (resolvedId != null) {
+                    Log.d("SpaceXScreen", "Resolved to video ID: $resolvedId")
+                    showingYtVideoId = resolvedId
+                    return@launch
+                }
+            }
+
+            // Fallback to WebView if we can't extract/resolve a video ID
+            Log.d("SpaceXScreen", "Falling back to WebView for: $url")
+            showingWebViewUrl = url
+        }
+    }
 
     // Lazy load — only fetch data when this screen is first composed
     LaunchedEffect(Unit) { viewModel.onScreenVisible() }
@@ -106,7 +158,7 @@ fun SpaceXScreen(
                 CountdownHeroCard(
                     launch = nextLaunch,
                     countdownText = uiState.countdownText,
-                    onWatchLive = { url -> showingVideoUrl = url }
+                    onWatchLive = launchVideo
                 )
                 Spacer(Modifier.height(12.dp))
             }
@@ -176,22 +228,46 @@ fun SpaceXScreen(
                     when (uiState.selectedTab) {
                         SpaceXTab.Upcoming -> LaunchList(
                             launches = uiState.upcomingLaunches,
-                            onWatchLive = { url -> showingVideoUrl = url }
+                            onWatchLive = launchVideo
                         )
                         SpaceXTab.Past -> LaunchList(
                             launches = uiState.pastLaunches,
-                            onWatchLive = { url -> showingVideoUrl = url }
+                            onWatchLive = launchVideo
                         )
                     }
                 }
             }
         }
 
-        // ─── In-App YouTube Player Overlay ───
-        showingVideoUrl?.let { url ->
+        // ─── URL Resolving Spinner ───
+        if (isResolvingUrl) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = MerlotColors.Accent)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Finding live stream...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                }
+            }
+        }
+
+        // ─── Native ExoPlayer Overlay ───
+        showingYtVideoId?.let { ytId ->
+            TrailerPlayer(
+                ytVideoId = ytId,
+                onDismiss = { showingYtVideoId = null }
+            )
+        }
+
+        // ─── WebView Fallback Overlay ───
+        showingWebViewUrl?.let { url ->
             YouTubeWebPlayer(
                 url = url,
-                onDismiss = { showingVideoUrl = null }
+                onDismiss = { showingWebViewUrl = null }
             )
         }
     }

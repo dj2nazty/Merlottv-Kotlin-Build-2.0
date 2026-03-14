@@ -111,6 +111,82 @@ class YouTubeExtractor @Inject constructor(
     }
 
     /**
+     * Extract a YouTube video ID from various URL formats.
+     * Returns null if the URL is not a recognized YouTube URL.
+     *
+     * Supported formats:
+     * - https://www.youtube.com/watch?v=VIDEO_ID
+     * - https://youtu.be/VIDEO_ID
+     * - https://www.youtube.com/live/VIDEO_ID
+     * - https://www.youtube.com/embed/VIDEO_ID
+     * - https://www.youtube.com/shorts/VIDEO_ID
+     */
+    fun extractVideoId(url: String): String? {
+        // youtu.be/VIDEO_ID
+        val shortMatch = Regex("""youtu\.be/([a-zA-Z0-9_-]{11})""").find(url)
+        if (shortMatch != null) return shortMatch.groupValues[1]
+
+        // youtube.com/watch?v=VIDEO_ID
+        val watchMatch = Regex("""[?&]v=([a-zA-Z0-9_-]{11})""").find(url)
+        if (watchMatch != null) return watchMatch.groupValues[1]
+
+        // youtube.com/live/VIDEO_ID or /embed/VIDEO_ID or /shorts/VIDEO_ID
+        val pathMatch = Regex("""youtube\.com/(?:live|embed|shorts)/([a-zA-Z0-9_-]{11})""").find(url)
+        if (pathMatch != null) return pathMatch.groupValues[1]
+
+        return null
+    }
+
+    /**
+     * Resolve a YouTube channel/live URL to the current live video ID.
+     * Works for URLs like: https://www.youtube.com/@SpaceX/live
+     *
+     * Fetches the page HTML and extracts the canonical video ID.
+     * Returns null if no live stream is currently active or resolution fails.
+     */
+    suspend fun resolveLiveVideoId(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Resolving live URL: $url")
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Live URL fetch failed: ${response.code}")
+                response.close()
+                return@withContext null
+            }
+
+            val html = response.body?.string() ?: return@withContext null
+
+            // Look for canonical URL: <link rel="canonical" href="https://www.youtube.com/watch?v=VIDEO_ID">
+            val canonicalMatch = Regex("""<link\s+rel="canonical"\s+href="[^"]*[?&]v=([a-zA-Z0-9_-]{11})""").find(html)
+            if (canonicalMatch != null) {
+                val videoId = canonicalMatch.groupValues[1]
+                Log.d(TAG, "Resolved live URL to video ID: $videoId")
+                return@withContext videoId
+            }
+
+            // Fallback: look for videoId in embedded JSON
+            val jsonMatch = Regex(""""videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"""").find(html)
+            if (jsonMatch != null) {
+                val videoId = jsonMatch.groupValues[1]
+                Log.d(TAG, "Resolved live URL to video ID (JSON): $videoId")
+                return@withContext videoId
+            }
+
+            Log.w(TAG, "Could not find video ID in live page HTML")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Live URL resolution failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Extract playable stream URLs for a YouTube video ID.
      * Returns null if all client attempts fail.
      */
