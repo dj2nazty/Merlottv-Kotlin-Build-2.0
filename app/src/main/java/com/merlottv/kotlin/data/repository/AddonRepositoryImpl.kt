@@ -208,17 +208,21 @@ class AddonRepositoryImpl @Inject constructor(
                         if (addon.catalogs.isEmpty()) listOf("top") else return@withContext emptyList()
                     }
 
-                val results = mutableListOf<MetaPreview>()
-                for (catalogId in searchCatalogs) {
-                    try {
-                        val url = "$base/catalog/$type/$catalogId/search=$encodedQuery.json"
-                        val request = Request.Builder().url(url).build()
-                        val response = fastClient.newCall(request).execute()
-                        if (response.isSuccessful) {
-                            val body = response.body?.string() ?: continue
-                            results.addAll(parseCatalogResponse(body))
+                // Parallelize multi-catalog search within each addon
+                val results = supervisorScope {
+                    searchCatalogs.map { catalogId ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val url = "$base/catalog/$type/$catalogId/search=$encodedQuery.json"
+                                val request = Request.Builder().url(url).build()
+                                val response = fastClient.newCall(request).execute()
+                                if (response.isSuccessful) {
+                                    val body = response.body?.string()
+                                    if (body != null) parseCatalogResponse(body) else emptyList()
+                                } else emptyList()
+                            } catch (_: Exception) { emptyList() }
                         }
-                    } catch (_: Exception) { /* skip this catalog */ }
+                    }.awaitAll().flatten()
                 }
                 results
             } catch (e: Exception) {

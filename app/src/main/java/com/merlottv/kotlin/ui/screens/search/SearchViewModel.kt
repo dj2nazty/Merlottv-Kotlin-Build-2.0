@@ -1,5 +1,6 @@
 package com.merlottv.kotlin.ui.screens.search
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.domain.model.Addon
@@ -17,12 +18,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 data class SearchUiState(
     val query: String = "",
     val results: List<MetaPreview> = emptyList(),
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val resultCount: Int = 0,       // Total results found so far
+    val searchTimeMs: Long = 0L     // How long the search took
 )
 
 @HiltViewModel
@@ -33,10 +37,14 @@ class SearchViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
     private var searchJob: Job? = null
-    private val searchDispatcher = Dispatchers.IO.limitedParallelism(6)
+    private val searchDispatcher = Dispatchers.IO.limitedParallelism(8)
 
     // Cache fetched manifests so we don't re-fetch every search
     private var resolvedAddons: List<Addon>? = null
+
+    // Search result cache — instant repeat searches (NuvioTV-style)
+    private val searchCache = ConcurrentHashMap<String, List<MetaPreview>>()
+    private val CACHE_MAX_SIZE = 50
 
     init {
         // Pre-fetch manifests in background so first search is fast
@@ -45,11 +53,6 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Fetch manifests for all addons to discover their actual catalogs.
-     * Without this, only Cinemeta (which has hardcoded catalogs) supports search.
-     * With manifests, Torbox, Torrentio, IMDB Catalogs, Netflix etc. catalogs are discovered.
-     */
     private suspend fun resolveAddons(): List<Addon> {
         resolvedAddons?.let { return it }
         val base = addonRepository.getAllAddons().first()
@@ -72,33 +75,102 @@ class SearchViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(query = query)
         searchJob?.cancel()
         if (query.length < 2) {
-            _uiState.value = _uiState.value.copy(results = emptyList(), isLoading = false)
+            _uiState.value = _uiState.value.copy(results = emptyList(), isLoading = false, resultCount = 0)
             return
         }
+
+        // Check cache first — instant results for repeat searches
+        val cacheKey = query.trim().lowercase()
+        searchCache[cacheKey]?.let { cached ->
+            Log.d("SearchVM", "Cache hit for '$query': ${cached.size} results")
+            _uiState.value = _uiState.value.copy(
+                results = cached,
+                isLoading = false,
+                resultCount = cached.size,
+                searchTimeMs = 0
+            )
+            return
+        }
+
         searchJob = viewModelScope.launch {
             delay(300) // debounce
+            val startTime = System.currentTimeMillis()
             _uiState.value = _uiState.value.copy(isLoading = true)
+
             try {
-                // Use resolved addons (with fetched manifests) for proper catalog discovery
                 val addons = resolveAddons()
 
-                // Search ALL addons in parallel (including Torbox, Torrentio)
-                val allResults = supervisorScope {
-                    addons.flatMap { addon ->
+                // === Progressive results — show results as each addon responds ===
+                // Track accumulated results with thread-safe collection
+                val accumulatedResults = java.util.Collections.synchronizedList(mutableListOf<MetaPreview>())
+                var hasRenderedFirst = false
+
+                supervisorScope {
+                    // Launch each addon+type search as independent coroutine
+                    val jobs = addons.flatMap { addon ->
                         listOf("movie", "series").map { type ->
                             async(searchDispatcher) {
                                 try {
-                                    addonRepository.searchCatalog(addon, type, query)
+                                    val results = addonRepository.searchCatalog(addon, type, query)
+                                    if (results.isNotEmpty()) {
+                                        accumulatedResults.addAll(results)
+                                        // Deduplicate by type:id (NuvioTV-style)
+                                        val unique = synchronized(accumulatedResults) {
+                                            accumulatedResults.distinctBy { "${it.type}:${it.id}" }
+                                        }
+
+                                        // Progressive rendering — update UI as results arrive
+                                        if (!hasRenderedFirst) {
+                                            hasRenderedFirst = true
+                                            // First result renders instantly
+                                            _uiState.value = _uiState.value.copy(
+                                                results = unique,
+                                                isLoading = true, // Still loading more
+                                                resultCount = unique.size
+                                            )
+                                        } else {
+                                            // Subsequent results — adaptive debounce
+                                            _uiState.value = _uiState.value.copy(
+                                                results = unique,
+                                                resultCount = unique.size
+                                            )
+                                        }
+                                    }
+                                    results
                                 } catch (_: Exception) {
                                     emptyList()
                                 }
                             }
                         }
-                    }.awaitAll().flatten()
+                    }
+                    jobs.awaitAll()
                 }
-                val unique = allResults.distinctBy { it.id }
-                _uiState.value = _uiState.value.copy(results = unique, isLoading = false)
+
+                val elapsed = System.currentTimeMillis() - startTime
+                // Final deduplicated results
+                val finalResults = accumulatedResults.distinctBy { "${it.type}:${it.id}" }
+
+                Log.d("SearchVM", "Search '$query': ${finalResults.size} results in ${elapsed}ms")
+
+                // Cache results for instant repeat searches
+                if (finalResults.isNotEmpty()) {
+                    // Evict oldest entries if cache is full
+                    if (searchCache.size >= CACHE_MAX_SIZE) {
+                        searchCache.keys.take(searchCache.size - CACHE_MAX_SIZE + 1).forEach {
+                            searchCache.remove(it)
+                        }
+                    }
+                    searchCache[cacheKey] = finalResults
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    results = finalResults,
+                    isLoading = false,
+                    resultCount = finalResults.size,
+                    searchTimeMs = elapsed
+                )
             } catch (e: Exception) {
+                Log.e("SearchVM", "Search failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
         }

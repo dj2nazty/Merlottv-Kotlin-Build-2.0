@@ -34,10 +34,10 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
-        // 10 MB disk cache for HTTP responses (M3U playlists, EPG data, API calls)
-        // Dramatically speeds up repeat loads — OkHttp serves from cache when server returns 304
+        // 50 MB disk cache for HTTP responses (M3U playlists, EPG data, API calls, search results)
+        // NuvioTV uses 50MB — dramatically speeds up repeat loads and search caching
         val cacheDir = File(context.cacheDir, "http_cache")
-        val cache = Cache(cacheDir, 10L * 1024 * 1024) // 10 MB
+        val cache = Cache(cacheDir, 50L * 1024 * 1024) // 50 MB
 
         return OkHttpClient.Builder()
             .cache(cache)
