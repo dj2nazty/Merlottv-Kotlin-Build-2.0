@@ -206,11 +206,6 @@ class LiveTvViewModel @Inject constructor(
             .apply {
                 playWhenReady = true
 
-                // Set live playback speed control: stay 10s behind the live edge
-                // This gives the player network headroom — if the server hiccups
-                // for a few seconds, the buffer absorbs it instead of rebuffering.
-                setMediaItem(MediaItem.Builder().build()) // will be replaced on play
-
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
                         if (isPlayerReleased) return

@@ -198,12 +198,12 @@ private fun CreateProfileDialog(
                 onClick = onDismiss,
                 modifier = Modifier
                     .onFocusChanged { closeFocused = it.isFocused }
-                    .focusable()
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                             onDismiss(); true
                         } else false
                     }
+                    .focusable()
             ) {
                 Icon(
                     Icons.Default.Close, "Close",
@@ -292,7 +292,6 @@ private fun CreateProfileDialog(
                     ),
                     modifier = Modifier
                         .onFocusChanged { chipFocused = it.isFocused }
-                        .focusable()
                         .then(
                             if (chipFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
                             else Modifier
@@ -302,6 +301,7 @@ private fun CreateProfileDialog(
                                 avatarTab = tab; true
                             } else false
                         }
+                        .focusable()
                 )
             }
         }
@@ -321,7 +321,6 @@ private fun CreateProfileDialog(
                             .clip(CircleShape)
                             .background(Color(color))
                             .onFocusChanged { colorFocused = it.isFocused }
-                            .focusable()
                             .then(
                                 if (colorFocused) Modifier.border(2.dp, MerlotColors.White, CircleShape)
                                 else Modifier
@@ -332,7 +331,8 @@ private fun CreateProfileDialog(
                                     selectedAvatarUrl = "" // Clear avatar when choosing color
                                     true
                                 } else false
-                            },
+                            }
+                            .focusable(),
                         contentAlignment = Alignment.Center
                     ) {
                         if (index == selectedColor && selectedAvatarUrl.isEmpty()) {
@@ -360,13 +360,13 @@ private fun CreateProfileDialog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .onFocusChanged { imgFocused = it.isFocused }
-                            .focusable()
                             .onPreviewKeyEvent { event ->
                                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                                     selectedAvatarUrl = url
                                     true
                                 } else false
                             }
+                            .focusable()
                     ) {
                         Box {
                             AsyncImage(
@@ -420,7 +420,6 @@ private fun CreateProfileDialog(
                 .fillMaxWidth()
                 .height(48.dp)
                 .onFocusChanged { confirmFocused = it.isFocused }
-                .focusable()
                 .then(
                     if (confirmFocused) Modifier.border(2.dp, MerlotColors.White, RoundedCornerShape(8.dp))
                     else Modifier
@@ -432,6 +431,7 @@ private fun CreateProfileDialog(
                         true
                     } else false
                 }
+                .focusable()
         ) {
             Text(
                 "Create Profile",
@@ -451,12 +451,12 @@ private fun ProfileCard(profile: UserProfile, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                     onClick(); true
                 } else false
             }
+            .focusable()
     ) {
         if (profile.avatarUrl.isNotEmpty()) {
             // Show avatar image
@@ -515,12 +515,12 @@ private fun AddProfileCard(onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                     onClick(); true
                 } else false
             }
+            .focusable()
     ) {
         Box(
             modifier = Modifier

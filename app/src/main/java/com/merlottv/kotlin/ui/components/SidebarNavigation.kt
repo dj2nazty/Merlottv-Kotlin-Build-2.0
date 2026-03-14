@@ -110,7 +110,6 @@ fun SidebarNavigation(
                         shape = RoundedCornerShape(8.dp)
                     )
                     .onFocusChanged { logoFocused = it.isFocused }
-                    .focusable()
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown) {
                             when (event.key) {
@@ -122,6 +121,7 @@ fun SidebarNavigation(
                             }
                         } else false
                     }
+                    .focusable()
                     .padding(horizontal = 4.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -296,7 +296,6 @@ private fun ProfileRow(
                 shape = RoundedCornerShape(8.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
@@ -312,6 +311,7 @@ private fun ProfileRow(
                     }
                 } else false
             }
+            .focusable()
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -429,7 +429,6 @@ private fun SidebarItem(
                 shape = RoundedCornerShape(8.dp)
             )
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
@@ -441,6 +440,7 @@ private fun SidebarItem(
                     }
                 } else false
             }
+            .focusable()
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
