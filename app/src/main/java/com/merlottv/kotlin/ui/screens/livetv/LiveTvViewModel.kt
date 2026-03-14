@@ -165,9 +165,9 @@ class LiveTvViewModel @Inject constructor(
         // The user's slider controls bufferForPlaybackMs (startup speed).
         // Default changed to 1000ms (was 800ms) to match TiviMate.
 
-        val steadyBuffer = 50_000       // 50 seconds — TiviMate uses 50s fixed window
+        val steadyBuffer = 90_000       // 90 seconds — aggressive buffer for zero rebuffering
         val playbackBuffer = userBufferMs.coerceAtLeast(200) // Slider controls startup (default 1000ms)
-        val rebufferBuffer = 2_000      // 2 seconds after rebuffer — TiviMate uses 2s (was 3s)
+        val rebufferBuffer = 1_500      // 1.5s after rebuffer — resume faster
 
         val loadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, 65_536)) // 64KB chunks like TiviMate
@@ -178,11 +178,11 @@ class LiveTvViewModel @Inject constructor(
                 /* bufferForPlaybackAfterRebufferMs */  rebufferBuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
-            // Cap buffer at 40MB to prevent OOM after ExoPlayer transitions (trailer → live)
-            // 40MB covers ~50s for streams up to 6.5Mbps; higher bitrates get slightly less buffer
-            .setTargetBufferBytes(40 * 1024 * 1024)
-            // Back-buffer: retain 10s (was 30s) to reduce total memory footprint
-            .setBackBuffer(10_000, /* retainBackBufferFromKeyframe */ true)
+            // Cap buffer at 120MB — covers full 90s for streams up to 10Mbps
+            // Safe on 3GB TV: 120MB is only 21% of 576MB largeHeap, leaves 456MB free
+            .setTargetBufferBytes(120 * 1024 * 1024)
+            // Back-buffer: retain 20s of played content for rewind capability
+            .setBackBuffer(20_000, /* retainBackBufferFromKeyframe */ true)
             .build()
 
         // === SSL bypass for IPTV streams (TiviMate-style) ===
@@ -230,12 +230,15 @@ class LiveTvViewModel @Inject constructor(
                 .setForceLowestBitrate(false)
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
                 .setAllowAudioMixedMimeTypeAdaptiveness(true)
+                .setAllowVideoNonSeamlessAdaptiveness(true) // Allow non-seamless resolution switches
+                .setExceedRendererCapabilitiesIfNecessary(true) // Try to play even if codec reports unsupported
                 .build()
         }
 
         // === Renderers with async buffer queueing for smoother playback ===
         val renderersFactory = DefaultRenderersFactory(application)
             .setEnableDecoderFallback(true) // Fall back to software decoder if hardware fails
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER) // Prefer hardware extensions
 
         ExoPlayer.Builder(application)
             .setLoadControl(loadControl)
@@ -600,9 +603,9 @@ class LiveTvViewModel @Inject constructor(
                     MediaItem.LiveConfiguration.Builder()
                         .setMaxPlaybackSpeed(1.04f)     // Catch up gently if behind
                         .setMinPlaybackSpeed(0.96f)     // Slow down gently if too far ahead
-                        .setTargetOffsetMs(10_000)      // Target 10s behind live edge
-                        .setMinOffsetMs(5_000)          // Never closer than 5s to edge
-                        .setMaxOffsetMs(30_000)         // Never more than 30s behind
+                        .setTargetOffsetMs(8_000)       // Target 8s behind live edge (was 10s)
+                        .setMinOffsetMs(3_000)          // Never closer than 3s to edge (was 5s)
+                        .setMaxOffsetMs(45_000)         // Allow up to 45s behind (was 30s) — prevents forced rebuffer
                         .build()
                 )
                 .build()
@@ -656,9 +659,9 @@ class LiveTvViewModel @Inject constructor(
                             MediaItem.LiveConfiguration.Builder()
                                 .setMaxPlaybackSpeed(1.04f)
                                 .setMinPlaybackSpeed(0.96f)
-                                .setTargetOffsetMs(10_000)
-                                .setMinOffsetMs(5_000)
-                                .setMaxOffsetMs(30_000)
+                                .setTargetOffsetMs(8_000)
+                                .setMinOffsetMs(3_000)
+                                .setMaxOffsetMs(45_000)
                                 .build()
                         )
                         .build()
