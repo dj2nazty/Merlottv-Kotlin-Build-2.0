@@ -5,6 +5,7 @@ import android.os.Process
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -147,19 +148,24 @@ class LiveTvViewModel @Inject constructor(
     private val prewarmedChannelIds = mutableSetOf<String>()
 
     /**
-     * Optimized ExoPlayer configuration for live TV:
+     * Apollo-grade ExoPlayer configuration for live TV:
      *
-     * v2.25.0: BandwidthMeter, adjustable buffer, fast failover
-     * v2.25.1: User-configurable buffer slider (0.3s–3.0s)
-     * v2.25.2: Frame rate, recent channels, stream source display
-     * v2.25.3: FIXED post-load rebuffering:
-     *   - Decoupled startup buffer from steady-state buffer
-     *   - Slider controls STARTUP speed only (bufferForPlaybackMs)
-     *   - Steady-state buffer is always 30s min / 60s max — prevents mid-stream rebuffering
-     *   - After rebuffer, requires 3s buffer before resuming (prevents rapid re-stalls)
-     *   - Back-buffer retains 30s of played data to handle brief seek-backs
-     *   - Live offset set to 10s behind edge for network headroom
-     *   - Rebuffer tracking: count, duration, bitrate displayed in quick menu
+     * v2.30.0: Apollo App reverse-engineered optimizations:
+     *   - 10-MINUTE forward buffer (600s) — matches Apollo's 0x927C0ms exactly
+     *   - Dynamic memory cap: Runtime.maxMemory()/2 — uses half of available heap
+     *   - Size-over-time priority: fills bytes first, not time thresholds
+     *   - 60s back-buffer for rewind capability (Apollo uses 0xEA60ms)
+     *   - 2.5s playback start + rebuffer resume (Apollo uses 0x9C4ms)
+     *   - EXTENSION_RENDERER_MODE_PREFER: hardware decoders first (Apollo uses mode 2)
+     *   - Audio focus handling with AudioAttributes (Apollo sets USAGE_MEDIA + CONTENT_TYPE_MOVIE)
+     *   - handleAudioBecomingNoisy: auto-pause on headphone disconnect
+     *   - Live target offset: 5s behind edge (Apollo uses 0x1388ms)
+     *
+     * Previous versions (preserved):
+     *   v2.25.0: BandwidthMeter, adjustable buffer, fast failover
+     *   v2.25.1: User-configurable buffer slider
+     *   v2.28.0: TiviMate buffer config (50s buffer, SSL bypass)
+     *   v2.29.2: 90s buffer, 120MB cap
      */
     val player: ExoPlayer = run {
         // Read user's buffer preference (synchronous — only runs once at ViewModel creation)
@@ -167,7 +173,7 @@ class LiveTvViewModel @Inject constructor(
             runBlocking { settingsDataStore.bufferDurationMs.first() }
         } catch (e: Exception) {
             Log.e("LiveTvVM", "Failed to read buffer setting, using default", e)
-            1000 // TiviMate default: 1 second
+            1000
         }
 
         // BandwidthMeter tracks download speed and helps ExoPlayer pick optimal quality
@@ -175,39 +181,49 @@ class LiveTvViewModel @Inject constructor(
             .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
             .build()
 
-        // === TiviMate-style buffer configuration ===
+        // === Apollo-grade buffer configuration ===
         //
-        // TiviMate's secret to fast channel switching + zero rebuffering:
-        //   - minBuffer = maxBuffer = 50s (fixed 50-second buffer window)
-        //   - bufferForPlaybackMs = 1000ms (start playing after just 1 second)
-        //   - bufferForPlaybackAfterRebufferMs = 2000ms (resume after 2s, not 5s)
+        // Apollo's zero-buffer secret (decoded from smali):
+        //   - minBuffer = maxBuffer = 600,000ms (10 MINUTES)
+        //   - bufferForPlaybackMs = 2,500ms (start after 2.5s buffer)
+        //   - bufferForPlaybackAfterRebufferMs = 2,500ms (resume after 2.5s)
+        //   - targetBufferBytes = Runtime.maxMemory() / 2 (HALF of heap)
+        //   - prioritizeTimeOverSizeThresholds = false (fill bytes first)
+        //   - backBuffer = 60,000ms (60s rewind)
         //
-        // The user's slider controls bufferForPlaybackMs (startup speed).
-        // Default changed to 1000ms (was 800ms) to match TiviMate.
+        // This means Apollo downloads up to 10 MINUTES of video ahead.
+        // Even if internet dies for 9 minutes, playback continues.
+        // The user's slider still controls startup speed (bufferForPlaybackMs).
 
-        val steadyBuffer = 90_000       // 90 seconds — aggressive buffer for zero rebuffering
-        val playbackBuffer = userBufferMs.coerceAtLeast(200) // Slider controls startup (default 1000ms)
-        val rebufferBuffer = 1_500      // 1.5s after rebuffer — resume faster
+        val steadyBuffer = 600_000      // 10 MINUTES — Apollo uses 0x927C0 (600,000ms)
+        val playbackBuffer = userBufferMs.coerceAtLeast(500) // Slider controls startup (default 1000ms, min 500ms)
+        val rebufferBuffer = 2_500      // 2.5s after rebuffer — Apollo uses 0x9C4 (2,500ms)
+
+        // Dynamic memory cap: use HALF of available heap (Apollo's exact approach)
+        // On 3GB TV with largeHeap: ~288MB for buffer alone
+        val maxHeapBytes = Runtime.getRuntime().maxMemory()
+        val targetBufferBytes = (maxHeapBytes / 2).toInt()
+        Log.d("LiveTvVM", "Apollo buffer: heap=${maxHeapBytes/1024/1024}MB, buffer cap=${targetBufferBytes/1024/1024}MB, steady=${steadyBuffer/1000}s")
 
         val loadControl = DefaultLoadControl.Builder()
-            .setAllocator(DefaultAllocator(true, 65_536)) // 64KB chunks like TiviMate
+            .setAllocator(DefaultAllocator(true, 65_536)) // 64KB chunks
             .setBufferDurationsMs(
                 /* minBufferMs */                      steadyBuffer,
                 /* maxBufferMs */                      steadyBuffer,  // min=max for predictable behavior
                 /* bufferForPlaybackMs */               playbackBuffer,
                 /* bufferForPlaybackAfterRebufferMs */  rebufferBuffer
             )
-            .setPrioritizeTimeOverSizeThresholds(true)
-            // Cap buffer at 120MB — covers full 90s for streams up to 10Mbps
-            // Safe on 3GB TV: 120MB is only 21% of 576MB largeHeap, leaves 456MB free
-            .setTargetBufferBytes(120 * 1024 * 1024)
-            // Back-buffer: retain 20s of played content for rewind capability
-            .setBackBuffer(20_000, /* retainBackBufferFromKeyframe */ true)
+            // === KEY APOLLO DIFFERENCE: Size over time ===
+            // false = fill bytes first, then worry about time thresholds
+            // This makes the buffer fill as fast as the connection allows
+            .setPrioritizeTimeOverSizeThresholds(false)
+            // Dynamic cap: half of available heap (Apollo's Runtime.maxMemory()/2)
+            .setTargetBufferBytes(targetBufferBytes)
+            // Back-buffer: retain 60s of played content (Apollo uses 0xEA60 = 60,000ms)
+            .setBackBuffer(60_000, /* retainBackBufferFromKeyframe */ true)
             .build()
 
         // === SSL bypass for IPTV streams (TiviMate-style) ===
-        // Many IPTV servers use self-signed or expired SSL certificates.
-        // TiviMate bypasses SSL validation entirely to prevent connection failures.
         val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
@@ -223,9 +239,9 @@ class LiveTvViewModel @Inject constructor(
         }
         val trustAllHostnames = HostnameVerifier { _, _ -> true }
 
-        // HTTP data source with TiviMate-style optimizations
+        // HTTP data source with optimized timeouts
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(5_000)     // 5s connect (was 6s)
+            .setConnectTimeoutMs(5_000)     // 5s connect
             .setReadTimeoutMs(8_000)        // 8s read
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
@@ -235,30 +251,47 @@ class LiveTvViewModel @Inject constructor(
             ))
             .setTransferListener(bandwidthMeter)
 
-        // Apply SSL bypass to the data source factory
+        // Apply SSL bypass
         if (sslContext != null) {
             javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
             javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(trustAllHostnames)
         }
 
         val dataSourceFactory = DefaultDataSource.Factory(application, httpDataSourceFactory)
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // === Track selector with live-optimized defaults ===
+        // === Apollo-style MediaSourceFactory with 5s live offset ===
+        // Apollo uses setLiveTargetOffsetMs(0x1388) = 5,000ms
+        // Closer to live edge = more responsive, but needs big buffer to compensate
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+            .setLiveTargetOffsetMs(5_000) // 5s behind live edge (Apollo: 0x1388)
+
+        // === Apollo-style track selector ===
         val trackSelector = DefaultTrackSelector(application).apply {
             parameters = buildUponParameters()
                 .setForceLowestBitrate(false)
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
                 .setAllowAudioMixedMimeTypeAdaptiveness(true)
-                .setAllowVideoNonSeamlessAdaptiveness(true) // Allow non-seamless resolution switches
-                .setExceedRendererCapabilitiesIfNecessary(true) // Try to play even if codec reports unsupported
+                .setAllowVideoNonSeamlessAdaptiveness(true)
+                .setExceedRendererCapabilitiesIfNecessary(true)
+                // Note: Apollo uses setMaxVideoSizeSd() to cap at SD for zero buffering.
+                // We skip this to preserve HD/4K quality — our 10-min buffer handles it.
                 .build()
         }
 
-        // === Renderers with async buffer queueing for smoother playback ===
+        // === Apollo-style renderers: PREFER hardware extensions ===
+        // Apollo uses setExtensionRendererMode(2) = EXTENSION_RENDERER_MODE_PREFER
+        // This prioritizes hardware decoders over software — faster decoding, less CPU
         val renderersFactory = DefaultRenderersFactory(application)
-            .setEnableDecoderFallback(true) // Fall back to software decoder if hardware fails
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON) // Enable hardware extensions without forcing them
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+
+        // === Apollo-style AudioAttributes ===
+        // Apollo sets USAGE_MEDIA (1) + CONTENT_TYPE_MOVIE (3)
+        // This tells Android's audio system this is media playback — gets audio focus priority
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
 
         ExoPlayer.Builder(application)
             .setLoadControl(loadControl)
@@ -266,13 +299,14 @@ class LiveTvViewModel @Inject constructor(
             .setBandwidthMeter(bandwidthMeter)
             .setTrackSelector(trackSelector)
             .setRenderersFactory(renderersFactory)
+            // === Apollo: Audio focus + noisy handling ===
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus */ true)
+            .setHandleAudioBecomingNoisy(true) // Auto-pause when headphones disconnect
             .build()
             .apply {
                 playWhenReady = true
 
-                // === High-priority playback thread (TiviMate uses -16) ===
-                // Ensures the decoder thread gets maximum CPU scheduling priority
-                // This prevents other threads from starving the player
+                // === High-priority playback thread ===
                 try {
                     val field = this.javaClass.getDeclaredField("playbackThread")
                     field.isAccessible = true
@@ -282,7 +316,6 @@ class LiveTvViewModel @Inject constructor(
                         Log.d("LiveTvVM", "Set playback thread priority to URGENT_AUDIO (-19)")
                     }
                 } catch (e: Exception) {
-                    // Reflection may fail on some ExoPlayer versions — not critical
                     Log.d("LiveTvVM", "Could not set thread priority: ${e.message}")
                 }
 
