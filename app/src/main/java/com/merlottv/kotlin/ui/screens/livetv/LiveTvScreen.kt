@@ -189,19 +189,49 @@ private fun FullscreenPlayer(
                 } else false
             }
     ) {
-        // Full-screen video player
-        AndroidView(
-            factory = { context ->
-                androidx.media3.ui.PlayerView(context).apply {
-                    useController = false
-                    player = viewModel.player
-                }
-            },
-            update = { playerView ->
-                playerView.player = viewModel.player
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+        // Full-screen video player — ExoPlayer or VLC
+        if (uiState.isUsingVlc) {
+            // VLC SurfaceView
+            AndroidView(
+                factory = { context ->
+                    android.view.SurfaceView(context).apply {
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                                viewModel.getVlcPlayer()?.vlcVout?.apply {
+                                    setVideoSurface(holder.surface, holder)
+                                    attachViews()
+                                }
+                            }
+                            override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+                                viewModel.getVlcPlayer()?.vlcVout?.setWindowSize(width, height)
+                            }
+                            override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                                try { viewModel.getVlcPlayer()?.vlcVout?.detachViews() } catch (_: Exception) {}
+                            }
+                        })
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // ExoPlayer PlayerView
+            AndroidView(
+                factory = { context ->
+                    androidx.media3.ui.PlayerView(context).apply {
+                        useController = false
+                        player = viewModel.player
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = viewModel.player
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Transparent EPG Info Overlay (slides up from bottom)
         AnimatedVisibility(
@@ -344,6 +374,9 @@ private fun FullscreenPlayer(
                 onToggleSubtitles = {
                     viewModel.toggleSubtitles()
                 },
+                onTogglePlayerEngine = {
+                    viewModel.togglePlayerEngine()
+                },
                 onDismiss = { viewModel.hideQuickMenu() }
             )
         }
@@ -356,6 +389,7 @@ private fun QuickMenuOverlay(
     onRecentChannelClick: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleSubtitles: () -> Unit,
+    onTogglePlayerEngine: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val firstItemFocusRequester = remember { FocusRequester() }
@@ -391,15 +425,18 @@ private fun QuickMenuOverlay(
             modifier = Modifier.padding(bottom = 4.dp)
         )
 
-        // Stream source indicator
-        if (uiState.streamSource.isNotEmpty()) {
-            Text(
-                text = "Playing from: ${uiState.streamSource}",
-                color = MerlotColors.TextMuted,
-                fontSize = 10.sp,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
+        // Stream source + player engine indicator
+        val sourceText = buildString {
+            if (uiState.streamSource.isNotEmpty()) append("Source: ${uiState.streamSource}")
+            if (isNotEmpty()) append(" • ")
+            append("Engine: ${if (uiState.isUsingVlc) "VLC" else "ExoPlayer"}")
         }
+        Text(
+            text = sourceText,
+            color = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.TextMuted,
+            fontSize = 10.sp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
 
         // Frame rate + resolution + bitrate info
         val infoLine = buildString {
@@ -497,6 +534,15 @@ private fun QuickMenuOverlay(
             iconTint = if (uiState.subtitlesEnabled) MerlotColors.Accent else MerlotColors.TextMuted,
             enabled = true,
             onClick = onToggleSubtitles
+        )
+
+        // Toggle Player Engine (ExoPlayer ↔ VLC)
+        QuickMenuItem(
+            icon = Icons.Default.Hd,
+            label = if (uiState.isUsingVlc) "Player: VLC" else "Player: ExoPlayer",
+            iconTint = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.Accent,
+            enabled = currentChannel != null,
+            onClick = onTogglePlayerEngine
         )
 
         // Close button (replaces old "Channel Info")
@@ -819,17 +865,41 @@ private fun ChannelListView(
     ) {
         // Full-screen player as background
         if (uiState.selectedChannel != null) {
-            AndroidView(
-                factory = { context ->
-                    androidx.media3.ui.PlayerView(context).apply {
-                        useController = false
-                    }
-                },
-                update = { playerView ->
-                    playerView.player = viewModel.player
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            if (uiState.isUsingVlc) {
+                AndroidView(
+                    factory = { context ->
+                        android.view.SurfaceView(context).apply {
+                            holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                                override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                                    viewModel.getVlcPlayer()?.vlcVout?.apply {
+                                        setVideoSurface(holder.surface, holder)
+                                        attachViews()
+                                    }
+                                }
+                                override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+                                    viewModel.getVlcPlayer()?.vlcVout?.setWindowSize(width, height)
+                                }
+                                override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                                    try { viewModel.getVlcPlayer()?.vlcVout?.detachViews() } catch (_: Exception) {}
+                                }
+                            })
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AndroidView(
+                    factory = { context ->
+                        androidx.media3.ui.PlayerView(context).apply {
+                            useController = false
+                        }
+                    },
+                    update = { playerView ->
+                        playerView.player = viewModel.player
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         } else {
             // Idle state
             Column(

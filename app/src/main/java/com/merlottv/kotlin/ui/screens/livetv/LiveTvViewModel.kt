@@ -47,6 +47,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer as VlcMediaPlayer
 import javax.inject.Inject
 
 data class LiveTvUiState(
@@ -90,7 +93,10 @@ data class LiveTvUiState(
     val lastRebufferDurationMs: Long = 0L,
     val totalRebufferMs: Long = 0L,
     // Bitrate info
-    val videoBitrateKbps: Int = 0
+    val videoBitrateKbps: Int = 0,
+    // Player engine: "exo" or "vlc"
+    val activePlayerEngine: String = "exo",
+    val isUsingVlc: Boolean = false
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -146,6 +152,141 @@ class LiveTvViewModel @Inject constructor(
     private val prewarmChannelUrls = mutableMapOf<String, String>()
     // Track which channels have been pre-warmed for faster switch detection
     private val prewarmedChannelIds = mutableSetOf<String>()
+
+    // ═══════════════════════════════════════════════════════════════════
+    // VLC Fallback Player — Apollo-style dual engine
+    // LibVLC handles codecs/containers that ExoPlayer can't (TS muxed,
+    // non-standard HLS, MPEG-TS variants common in IPTV).
+    // Auto-switches after ExoPlayer retries fail, or manual toggle.
+    // ═══════════════════════════════════════════════════════════════════
+    private var libVLC: LibVLC? = null
+    private var vlcPlayer: VlcMediaPlayer? = null
+    private var vlcBufferTimeout: Job? = null
+
+    /** Initialize LibVLC with optimized options for live TV */
+    private fun getOrCreateLibVLC(): LibVLC {
+        return libVLC ?: LibVLC(getApplication(), arrayListOf(
+            "--network-caching=2000",       // 2s network cache (VLC handles its own buffering)
+            "--live-caching=2000",           // 2s live stream cache
+            "--file-caching=1500",
+            "--clock-jitter=0",             // Reduce A/V sync jitter
+            "--clock-synchro=0",
+            "--drop-late-frames",           // Drop frames instead of rebuffering
+            "--skip-frames",
+            "--avcodec-skiploopfilter=4",    // Skip deblocking filter for speed
+            "--avcodec-skip-idct=4",
+            "--avcodec-hurry-up",
+            "--no-audio-time-stretch",      // Don't stretch audio when catching up
+            "--no-sub-autodetect-file",     // Don't waste time on subtitle detection
+            "--http-reconnect",             // Auto-reconnect on network drops
+            "--sout-keep"                   // Keep stream output alive
+        )).also { libVLC = it }
+    }
+
+    /** Play a stream URL using VLC instead of ExoPlayer */
+    fun playWithVlc(streamUrl: String) {
+        if (isPlayerReleased) return
+
+        // Stop ExoPlayer
+        try {
+            player.stop()
+            player.clearMediaItems()
+        } catch (_: Exception) {}
+
+        // Release previous VLC player if exists
+        stopVlc()
+
+        try {
+            val lib = getOrCreateLibVLC()
+            val media = Media(lib, android.net.Uri.parse(streamUrl))
+            media.setHWDecoderEnabled(true, false)  // Prefer hardware decoding
+            media.addOption(":network-caching=2000")
+
+            val vPlayer = VlcMediaPlayer(lib)
+            vPlayer.media = media
+            media.release() // VLC copies internally
+
+            vPlayer.setEventListener { event ->
+                when (event.type) {
+                    VlcMediaPlayer.Event.Playing -> {
+                        Log.d("LiveTvVM", "VLC: Playing")
+                        vlcBufferTimeout?.cancel()
+                        _uiState.value = _uiState.value.copy(
+                            isBuffering = false,
+                            isFailingOver = false,
+                            failoverMessage = ""
+                        )
+                    }
+                    VlcMediaPlayer.Event.Buffering -> {
+                        val pct = event.buffering
+                        Log.d("LiveTvVM", "VLC: Buffering ${pct}%")
+                        if (pct < 100f) {
+                            _uiState.value = _uiState.value.copy(isBuffering = true)
+                        }
+                    }
+                    VlcMediaPlayer.Event.EncounteredError -> {
+                        Log.e("LiveTvVM", "VLC: Playback error")
+                        // VLC failed too — fall back to backup search
+                        stopVlc()
+                        switchToExoPlayer()
+                        handlePlaybackError()
+                    }
+                    VlcMediaPlayer.Event.Stopped, VlcMediaPlayer.Event.EndReached -> {
+                        Log.d("LiveTvVM", "VLC: Stream ended")
+                    }
+                }
+            }
+
+            vPlayer.play()
+            vlcPlayer = vPlayer
+
+            _uiState.value = _uiState.value.copy(
+                activePlayerEngine = "vlc",
+                isUsingVlc = true,
+                isBuffering = true
+            )
+            Log.d("LiveTvVM", "VLC: Started playback for $streamUrl")
+        } catch (e: Exception) {
+            Log.e("LiveTvVM", "VLC: Failed to start", e)
+            // VLC init failed — switch back to ExoPlayer
+            switchToExoPlayer()
+        }
+    }
+
+    /** Stop VLC player and release resources */
+    private fun stopVlc() {
+        vlcBufferTimeout?.cancel()
+        try {
+            vlcPlayer?.stop()
+            vlcPlayer?.release()
+        } catch (_: Exception) {}
+        vlcPlayer = null
+    }
+
+    /** Switch back to ExoPlayer mode */
+    private fun switchToExoPlayer() {
+        stopVlc()
+        _uiState.value = _uiState.value.copy(
+            activePlayerEngine = "exo",
+            isUsingVlc = false
+        )
+    }
+
+    /** Get the VLC MediaPlayer instance (for attaching to SurfaceView in UI) */
+    fun getVlcPlayer(): VlcMediaPlayer? = vlcPlayer
+
+    /** Toggle between ExoPlayer and VLC for the current channel */
+    fun togglePlayerEngine() {
+        val currentChannel = _uiState.value.selectedChannel ?: return
+        if (_uiState.value.isUsingVlc) {
+            // Switch to ExoPlayer
+            switchToExoPlayer()
+            safePlayChannel(currentChannel)
+        } else {
+            // Switch to VLC
+            playWithVlc(currentChannel.streamUrl)
+        }
+    }
 
     /**
      * Apollo-grade ExoPlayer configuration for live TV:
@@ -653,6 +794,11 @@ class LiveTvViewModel @Inject constructor(
         rebufferStartTime = 0L
         wasPlayingBeforeBuffer = false
 
+        // If VLC is active, stop it and switch back to ExoPlayer for new channel
+        if (_uiState.value.isUsingVlc) {
+            switchToExoPlayer()
+        }
+
         try {
             player.stop()
             player.clearMediaItems()
@@ -736,7 +882,19 @@ class LiveTvViewModel @Inject constructor(
             return
         }
 
-        // Exhausted same-URL retries — now search backups
+        // Exhausted ExoPlayer retries — try VLC before searching backups
+        if (!_uiState.value.isUsingVlc) {
+            Log.d("LiveTvVM", "ExoPlayer retries exhausted — switching to VLC fallback")
+            _uiState.value = _uiState.value.copy(
+                isFailingOver = true,
+                failoverMessage = "Switching to VLC player..."
+            )
+            playWithVlc(currentChannel.streamUrl)
+            return
+        }
+
+        // Both ExoPlayer AND VLC failed — now search backups
+        switchToExoPlayer() // Reset to ExoPlayer for backup attempt
         triedStreamUrls.add(currentChannel.streamUrl)
         _uiState.value = _uiState.value.copy(
             isFailingOver = true,
@@ -1118,6 +1276,10 @@ class LiveTvViewModel @Inject constructor(
         prewarmJobs.clear()
         prewarmChannelUrls.clear()
         prewarmedChannelIds.clear()
+        // Release VLC
+        stopVlc()
+        try { libVLC?.release() } catch (_: Exception) {}
+        libVLC = null
         try { player.release() } catch (_: Exception) {}
     }
 }
