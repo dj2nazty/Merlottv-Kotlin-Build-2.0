@@ -13,15 +13,11 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 54
-        versionName = "2.32.0"
+        versionCode = 55
+        versionName = "2.33.0"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")
-
-        // Only bundle arm64 native libs — drops APK from ~196MB to ~65MB
-        // Nearly all Android TV devices are arm64-v8a
-        ndk { abiFilters += "arm64-v8a" }
 
         vectorDrawables {
             useSupportLibrary = true

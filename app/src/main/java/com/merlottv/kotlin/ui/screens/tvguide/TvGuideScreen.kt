@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,15 +41,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -58,6 +60,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.EpgChannel
 import com.merlottv.kotlin.domain.model.EpgEntry
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -85,17 +88,19 @@ private fun roundToHalfHour(timeMs: Long): Long {
 
 @Composable
 fun TvGuideScreen(
-    viewModel: TvGuideViewModel = hiltViewModel()
+    viewModel: TvGuideViewModel = hiltViewModel(),
+    onChannelSelected: (Channel) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     val channelListState = rememberLazyListState()
     val programListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
 
     var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
+    // Update time every 60 seconds
     LaunchedEffect(Unit) {
         while (true) {
             delay(60_000L)
@@ -110,111 +115,271 @@ fun TvGuideScreen(
         timelineStartMs + 6 * 60 * 60_000L
     }
 
-    LaunchedEffect(uiState.channels) {
-        if (uiState.channels.isNotEmpty()) {
+    // Auto-scroll timeline to current time on first load
+    LaunchedEffect(uiState.guideChannels) {
+        if (uiState.guideChannels.isNotEmpty()) {
             val nowOffsetPx = ((currentTimeMs - timelineStartMs) / 60_000f * PIXELS_PER_MINUTE).toInt()
             val scrollTarget = (nowOffsetPx - 200).coerceAtLeast(0)
             scrollState.scrollTo(scrollTarget)
         }
     }
 
+    // Sync LazyColumn scroll when selectedIndex changes (ViewModel-driven)
+    val selectedIndex = uiState.selectedIndex
+    LaunchedEffect(selectedIndex) {
+        if (uiState.guideChannels.isNotEmpty()) {
+            channelListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
+            programListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
+        }
+    }
+
+    // Scroll timeline when ViewModel requests (driven by LEFT/RIGHT D-pad)
+    LaunchedEffect(uiState.scrollRequest) {
+        if (uiState.scrollRequest != 0) {
+            val delta = if (uiState.scrollRequest > 0) 200 else -200
+            scrollState.animateScrollTo((scrollState.value + delta).coerceAtLeast(0))
+        }
+    }
+
+    // Report timeline scroll position to ViewModel
+    LaunchedEffect(scrollState.value) {
+        viewModel.updateTimelineAtStart(scrollState.value <= 10)
+    }
+
+    // Request focus on load
+    LaunchedEffect(Unit) {
+        delay(200)
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MerlotColors.Background)
-            .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown) {
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+
+                // Category picker is open — handle its keys
+                if (uiState.showCategoryPicker) {
+                    when (event.key) {
+                        Key.Back, Key.DirectionLeft -> {
+                            viewModel.toggleCategoryPicker()
+                            true
+                        }
+                        else -> false // Let category picker dialog handle its own keys
+                    }
+                }
+                // Default grid navigation
+                else {
                     when (event.key) {
                         Key.DirectionDown -> {
-                            focusManager.moveFocus(FocusDirection.Down)
-                            scope.launch {
-                                val target = channelListState.firstVisibleItemIndex + 1
-                                channelListState.animateScrollToItem(target)
-                                programListState.animateScrollToItem(target)
-                            }
+                            viewModel.navigate(1)
                             true
                         }
                         Key.DirectionUp -> {
-                            focusManager.moveFocus(FocusDirection.Up)
-                            scope.launch {
-                                val target = (channelListState.firstVisibleItemIndex - 1).coerceAtLeast(0)
-                                channelListState.animateScrollToItem(target)
-                                programListState.animateScrollToItem(target)
+                            viewModel.navigate(-1)
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            viewModel.scrollTimeline(1)
+                            true
+                        }
+                        Key.DirectionLeft -> {
+                            if (uiState.timelineAtStart) {
+                                viewModel.toggleCategoryPicker()
+                            } else {
+                                viewModel.scrollTimeline(-1)
+                            }
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter -> {
+                            val channel = viewModel.getSelectedChannel()
+                            if (channel != null) {
+                                viewModel.saveChannelForPlayback(channel)
+                                onChannelSelected(channel)
                             }
                             true
                         }
                         else -> false
                     }
-                } else false
+                }
             }
     ) {
         when {
-            uiState.isLoading -> LoadingState(uiState.loadingMessage, Modifier.align(Alignment.Center))
-            uiState.error != null -> ErrorState(uiState.error, viewModel, Modifier.align(Alignment.Center))
-            uiState.channels.isEmpty() -> EmptyState(viewModel, Modifier.align(Alignment.Center))
+            uiState.isLoading -> {
+                GuideLoadingState(uiState.loadingMessage, Modifier.align(Alignment.Center))
+            }
+            uiState.error != null -> {
+                GuideErrorState(uiState.error, viewModel, Modifier.align(Alignment.Center))
+            }
+            uiState.guideChannels.isEmpty() -> {
+                GuideEmptyState(viewModel, Modifier.align(Alignment.Center))
+            }
             else -> {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    GuideHeader(uiState)
+                    // Header with category selector
+                    GuideHeader(
+                        uiState = uiState,
+                        onCategoryClick = { viewModel.toggleCategoryPicker() }
+                    )
+
+                    // EPG Grid
                     Row(modifier = Modifier.fillMaxSize()) {
-                        Column(modifier = Modifier.width(CHANNEL_COL_WIDTH.dp).fillMaxHeight()) {
-                            Box(modifier = Modifier.height(TIMELINE_HEIGHT.dp).fillMaxWidth().background(MerlotColors.Surface))
-                            LazyColumn(state = channelListState, modifier = Modifier.fillMaxHeight()) {
-                                items(uiState.channels, key = { it.id }) { channel ->
-                                    ChannelCell(channel)
+                        // Left column — channel names with highlight
+                        Column(
+                            modifier = Modifier
+                                .width(CHANNEL_COL_WIDTH.dp)
+                                .fillMaxHeight()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .height(TIMELINE_HEIGHT.dp)
+                                    .fillMaxWidth()
+                                    .background(MerlotColors.Surface)
+                            )
+                            LazyColumn(
+                                state = channelListState,
+                                modifier = Modifier.fillMaxHeight()
+                            ) {
+                                itemsIndexed(
+                                    uiState.guideChannels,
+                                    key = { index, ch -> "${index}_${ch.id}" }
+                                ) { index, channel ->
+                                    GuideChannelCell(
+                                        channel = channel,
+                                        epgChannel = uiState.epgChannels.getOrNull(index),
+                                        isHighlighted = index == selectedIndex,
+                                        onClick = {
+                                            viewModel.saveChannelForPlayback(channel)
+                                            onChannelSelected(channel)
+                                        }
+                                    )
                                 }
                             }
                         }
+
+                        // Right column — timeline + program rows
                         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                             Column {
-                                TimelineHeader(scrollState, timelineStartMs, timelineEndMs)
+                                GuideTimelineHeader(scrollState, timelineStartMs, timelineEndMs)
                                 Box(modifier = Modifier.weight(1f)) {
                                     LazyColumn(
                                         state = programListState,
-                                        modifier = Modifier.fillMaxSize().horizontalScroll(scrollState)
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .horizontalScroll(scrollState)
                                     ) {
-                                        items(uiState.channels, key = { it.id }) { channel ->
-                                            EpgChannelRow(
+                                        itemsIndexed(
+                                            uiState.epgChannels,
+                                            key = { index, ch -> "${index}_${ch.id}" }
+                                        ) { index, channel ->
+                                            GuideChannelRow(
                                                 channel = channel,
                                                 currentTimeMs = currentTimeMs,
                                                 timelineStartMs = timelineStartMs,
+                                                isHighlighted = index == selectedIndex,
                                                 onProgramSelected = { viewModel.selectProgram(it) }
                                             )
                                         }
                                     }
-                                    NowIndicator(currentTimeMs, timelineStartMs, scrollState)
+                                    GuideNowIndicator(currentTimeMs, timelineStartMs, scrollState)
                                 }
                             }
                         }
                     }
                 }
+
+                // Category picker dialog
+                if (uiState.showCategoryPicker) {
+                    GuideCategoryPicker(
+                        groups = uiState.groups,
+                        selectedGroup = uiState.selectedGroup,
+                        onGroupSelected = { group ->
+                            viewModel.setGroup(group)
+                            viewModel.toggleCategoryPicker()
+                        },
+                        onDismiss = { viewModel.toggleCategoryPicker() }
+                    )
+                }
+
+                // Program detail dialog
                 uiState.selectedProgram?.let { program ->
-                    ProgramDetailDialog(program) { viewModel.selectProgram(null) }
+                    GuideProgramDetailDialog(program) { viewModel.selectProgram(null) }
                 }
             }
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Header
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun GuideHeader(uiState: TvGuideUiState) {
+private fun GuideHeader(
+    uiState: TvGuideUiState,
+    onCategoryClick: () -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("TV Guide", color = MerlotColors.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("TV Guide", color = MerlotColors.Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.width(12.dp))
-        Text("${uiState.channels.size} channels", color = MerlotColors.TextMuted, fontSize = 12.sp)
+        Text(
+            "${uiState.guideChannels.size} channels",
+            color = MerlotColors.TextMuted,
+            fontSize = 12.sp
+        )
+
+        // Category selector button
+        Spacer(modifier = Modifier.width(16.dp))
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(MerlotColors.Surface2)
+                .border(1.dp, MerlotColors.Border, RoundedCornerShape(6.dp))
+                .clickable { onCategoryClick() }
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = "\u25BE ${uiState.selectedGroup ?: "All Channels"}",
+                color = MerlotColors.Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
         if (uiState.isSyncing) {
             Spacer(modifier = Modifier.width(12.dp))
-            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = MerlotColors.Accent, strokeWidth = 2.dp)
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                color = MerlotColors.Accent,
+                strokeWidth = 2.dp
+            )
             Spacer(modifier = Modifier.width(6.dp))
             Text("Updating...", color = MerlotColors.TextMuted, fontSize = 11.sp)
         }
+
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            "Press OK to watch",
+            color = MerlotColors.TextMuted,
+            fontSize = 10.sp
+        )
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Timeline Header
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun TimelineHeader(scrollState: ScrollState, startMs: Long, endMs: Long) {
+private fun GuideTimelineHeader(scrollState: ScrollState, startMs: Long, endMs: Long) {
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     Row(
         modifier = Modifier
@@ -245,8 +410,12 @@ private fun TimelineHeader(scrollState: ScrollState, startMs: Long, endMs: Long)
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Now Indicator (red vertical line)
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun NowIndicator(currentTimeMs: Long, timelineStartMs: Long, scrollState: ScrollState) {
+private fun GuideNowIndicator(currentTimeMs: Long, timelineStartMs: Long, scrollState: ScrollState) {
     val density = LocalDensity.current
     val nowOffsetPx = with(density) {
         ((currentTimeMs - timelineStartMs) / 60_000f * PIXELS_PER_MINUTE).dp.roundToPx()
@@ -264,45 +433,77 @@ private fun NowIndicator(currentTimeMs: Long, timelineStartMs: Long, scrollState
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Channel Cell (left column — with D-pad highlight)
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun ChannelCell(channel: EpgChannel) {
+private fun GuideChannelCell(
+    channel: Channel,
+    epgChannel: EpgChannel?,
+    isHighlighted: Boolean,
+    onClick: () -> Unit
+) {
+    val logoUrl = channel.logoUrl.ifEmpty { epgChannel?.icon ?: "" }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(ROW_HEIGHT.dp)
-            .border(0.5.dp, MerlotColors.Border)
-            .background(MerlotColors.Surface)
+            .border(
+                width = if (isHighlighted) 2.dp else 0.5.dp,
+                color = if (isHighlighted) MerlotColors.Accent else MerlotColors.Border
+            )
+            .background(
+                if (isHighlighted) MerlotColors.Accent.copy(alpha = 0.25f)
+                else MerlotColors.Surface
+            )
+            .clickable { onClick() }
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (channel.icon.isNotEmpty()) {
+        if (logoUrl.isNotEmpty()) {
             AsyncImage(
-                model = channel.icon,
+                model = logoUrl,
                 contentDescription = null,
-                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(4.dp))
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(4.dp))
             )
             Spacer(modifier = Modifier.width(8.dp))
         }
         Text(
             text = channel.name,
-            color = MerlotColors.TextPrimary,
+            color = if (isHighlighted) MerlotColors.White else MerlotColors.TextPrimary,
             fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Channel Program Row (right column — with D-pad highlight border)
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun EpgChannelRow(
+private fun GuideChannelRow(
     channel: EpgChannel,
     currentTimeMs: Long,
     timelineStartMs: Long,
+    isHighlighted: Boolean = false,
     onProgramSelected: (EpgEntry) -> Unit
 ) {
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-    Row(modifier = Modifier.height(ROW_HEIGHT.dp)) {
+    Row(
+        modifier = Modifier
+            .height(ROW_HEIGHT.dp)
+            .then(
+                if (isHighlighted) Modifier.border(2.dp, MerlotColors.Accent)
+                else Modifier
+            )
+    ) {
         val programs = channel.programs
             .filter { it.endTime > timelineStartMs }
             .sortedBy { it.startTime }
@@ -325,17 +526,13 @@ private fun EpgChannelRow(
                 val widthDp = (durationMin * PIXELS_PER_MINUTE).coerceIn(80f, 600f).toInt()
                 val isAiring = program.startTime <= currentTimeMs && program.endTime >= currentTimeMs
                 val isPast = program.endTime < currentTimeMs
-                var isFocused by remember { mutableStateOf(false) }
 
                 Box(
                     modifier = Modifier
                         .width(widthDp.dp)
                         .fillMaxHeight()
                         .alpha(if (isPast) 0.4f else 1f)
-                        .border(
-                            width = if (isFocused) 2.dp else 0.5.dp,
-                            color = if (isFocused) MerlotColors.Accent else MerlotColors.Border
-                        )
+                        .border(0.5.dp, MerlotColors.Border)
                         .background(
                             when {
                                 isAiring -> MerlotColors.AccentAlpha10
@@ -343,15 +540,7 @@ private fun EpgChannelRow(
                             }
                         )
                         .padding(horizontal = 6.dp, vertical = 4.dp)
-                        .focusable()
-                        .onFocusChanged { isFocused = it.isFocused }
                         .clickable { onProgramSelected(program) }
-                        .onKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
-                                onProgramSelected(program)
-                                true
-                            } else false
-                        }
                 ) {
                     Column {
                         Text(
@@ -374,8 +563,144 @@ private fun EpgChannelRow(
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Category Picker Dialog (D-pad navigable)
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun ProgramDetailDialog(program: EpgEntry, onDismiss: () -> Unit) {
+private fun GuideCategoryPicker(
+    groups: List<String>,
+    selectedGroup: String?,
+    onGroupSelected: (String?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val allItems = remember(groups) {
+        listOf<String?>(null, "\u2605 Favorites") + groups.map { it }
+    }
+    var highlightedIndex by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val pickerFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try { pickerFocusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            modifier = Modifier
+                .width(300.dp)
+                .fillMaxHeight(0.7f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MerlotColors.Surface)
+                .border(1.dp, MerlotColors.Border, RoundedCornerShape(12.dp))
+                .focusRequester(pickerFocusRequester)
+                .focusable()
+                .onKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) {
+                        when (event.key) {
+                            Key.DirectionDown -> {
+                                if (highlightedIndex < allItems.size - 1) {
+                                    highlightedIndex++
+                                    scope.launch {
+                                        listState.animateScrollToItem(
+                                            (highlightedIndex - 3).coerceAtLeast(0)
+                                        )
+                                    }
+                                }
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                if (highlightedIndex > 0) {
+                                    highlightedIndex--
+                                    scope.launch {
+                                        listState.animateScrollToItem(
+                                            (highlightedIndex - 3).coerceAtLeast(0)
+                                        )
+                                    }
+                                }
+                                true
+                            }
+                            Key.DirectionCenter, Key.Enter -> {
+                                val item = allItems.getOrNull(highlightedIndex)
+                                onGroupSelected(item)
+                                true
+                            }
+                            Key.Back, Key.DirectionLeft -> {
+                                onDismiss()
+                                true
+                            }
+                            else -> false
+                        }
+                    } else false
+                }
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Text(
+                    "Select Category",
+                    color = MerlotColors.Accent,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(16.dp)
+                )
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(MerlotColors.Border)
+                )
+
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    itemsIndexed(allItems) { index, item ->
+                        val label = item ?: "All Channels"
+                        val isSelected = item == selectedGroup
+                        val isHighlighted = index == highlightedIndex
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onGroupSelected(item) }
+                                .border(
+                                    width = if (isHighlighted) 2.dp else 0.dp,
+                                    color = if (isHighlighted) MerlotColors.Accent else Color.Transparent
+                                )
+                                .background(
+                                    when {
+                                        isHighlighted -> MerlotColors.Accent.copy(alpha = 0.25f)
+                                        isSelected -> MerlotColors.Surface2
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Text(
+                                label,
+                                color = when {
+                                    isHighlighted -> MerlotColors.White
+                                    isSelected -> MerlotColors.Accent
+                                    else -> MerlotColors.TextPrimary
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected || isHighlighted) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Program Detail Dialog
+// ═══════════════════════════════════════════════════════════════════
+
+@Composable
+private fun GuideProgramDetailDialog(program: EpgEntry, onDismiss: () -> Unit) {
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     Dialog(onDismissRequest = onDismiss) {
         Box(
@@ -434,8 +759,12 @@ private fun ProgramDetailDialog(program: EpgEntry, onDismiss: () -> Unit) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Loading / Error / Empty States
+// ═══════════════════════════════════════════════════════════════════
+
 @Composable
-private fun LoadingState(message: String, modifier: Modifier) {
+private fun GuideLoadingState(message: String, modifier: Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         CircularProgressIndicator(color = MerlotColors.Accent)
         Spacer(modifier = Modifier.height(12.dp))
@@ -450,7 +779,7 @@ private fun LoadingState(message: String, modifier: Modifier) {
 }
 
 @Composable
-private fun ErrorState(error: String?, viewModel: TvGuideViewModel, modifier: Modifier) {
+private fun GuideErrorState(error: String?, viewModel: TvGuideViewModel, modifier: Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(error ?: "Unknown error", color = MerlotColors.Danger, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(12.dp))
@@ -464,9 +793,15 @@ private fun ErrorState(error: String?, viewModel: TvGuideViewModel, modifier: Mo
 }
 
 @Composable
-private fun EmptyState(viewModel: TvGuideViewModel, modifier: Modifier) {
+private fun GuideEmptyState(viewModel: TvGuideViewModel, modifier: Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("No EPG data available", color = MerlotColors.TextMuted, fontSize = 14.sp)
+        Text("No channels available", color = MerlotColors.TextMuted, fontSize = 14.sp)
+        Text(
+            "Add a playlist in Settings to see channels here",
+            color = MerlotColors.TextMuted,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = { viewModel.retry() },

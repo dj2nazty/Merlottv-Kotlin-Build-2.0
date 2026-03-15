@@ -95,7 +95,15 @@ fun MerlotNavHost(
 
         composable(Screen.TvGuide.route) {
             onLiveTvFullscreenChanged(false)
-            TvGuideScreen()
+            TvGuideScreen(
+                onChannelSelected = {
+                    // Navigate to Live TV — channel ID already saved to SettingsDataStore
+                    // by TvGuideViewModel.saveChannelForPlayback() before this callback fires
+                    navController.navigate(Screen.LiveTv.route) {
+                        popUpTo(Screen.TvGuide.route) { inclusive = true }
+                    }
+                }
+            )
         }
 
         composable(Screen.Vod.route) {
