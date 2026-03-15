@@ -170,6 +170,25 @@
         .code-input-group input:focus {
             border-color: #00E5FF;
         }
+        .toggle-link {
+            text-align: center;
+            margin-top: 16px;
+            font-size: 13px;
+            color: #6B6B80;
+        }
+        .toggle-link a {
+            color: #00E5FF;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .toggle-link a:hover {
+            text-decoration: underline;
+        }
+        .password-hint {
+            font-size: 11px;
+            color: #6B6B80;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
@@ -198,14 +217,14 @@
             <button class="btn btn-primary" id="btn-verify-code">Continue</button>
         </div>
 
-        <!-- Step 2: Sign in -->
-        <div class="card hidden" id="step-signin">
-            <h2>Sign In</h2>
+        <!-- Step 2: Sign in or Sign up -->
+        <div class="card hidden" id="step-auth">
+            <h2 id="auth-title">Sign In</h2>
             <div class="code-display" id="code-display-box">
                 <div class="label">Linking code</div>
                 <div class="code" id="display-code"></div>
             </div>
-            <div class="error" id="signin-error"></div>
+            <div class="error" id="auth-error"></div>
             <div class="form-group">
                 <label>Email</label>
                 <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
@@ -213,10 +232,18 @@
             <div class="form-group">
                 <label>Password</label>
                 <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
+                <div class="password-hint hidden" id="password-hint">Must be at least 6 characters</div>
             </div>
-            <button class="btn btn-primary" id="btn-signin">
+            <div class="form-group hidden" id="confirm-group">
+                <label>Confirm Password</label>
+                <input type="password" id="confirm-password" placeholder="Confirm password" autocomplete="new-password">
+            </div>
+            <button class="btn btn-primary" id="btn-auth">
                 Sign In & Link Device
             </button>
+            <div class="toggle-link" id="toggle-auth">
+                Don't have an account? <a id="toggle-link">Sign Up</a>
+            </div>
             <button class="btn btn-secondary" id="btn-back-to-code">Back</button>
         </div>
 
@@ -231,20 +258,21 @@
     </div>
 
     <script>
-        // Firebase project config — only the API key and project ID are needed for REST APIs
+        // Firebase project config
         const API_KEY = 'AIzaSyC9eMpUTlUyjWP5NzHeifaKrVS-PFaoSJc';
         const PROJECT_ID = 'merlot-tv';
         const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/' + PROJECT_ID + '/databases/(default)/documents';
         const AUTH_BASE = 'https://identitytoolkit.googleapis.com/v1';
 
         let currentCode = '';
+        let isSignUp = false;
 
         // Check URL for code parameter
         const params = new URLSearchParams(window.location.search);
         const urlCode = params.get('code');
         if (urlCode && urlCode.length === 6) {
             currentCode = urlCode.toUpperCase();
-            showSignIn();
+            showAuth();
         }
 
         // ─── Code input handling ───
@@ -313,51 +341,105 @@
                     showError('code-error', 'This code has already been used or expired.');
                     return;
                 }
-                showSignIn();
+                showAuth();
             } catch (err) {
                 showError('code-error', 'Could not verify code. Please try again.');
             }
         }
 
-        function showSignIn() {
+        function showAuth() {
             document.getElementById('step-code').classList.add('hidden');
-            document.getElementById('step-signin').classList.remove('hidden');
+            document.getElementById('step-auth').classList.remove('hidden');
             const display = currentCode.substring(0, 3) + '-' + currentCode.substring(3);
             document.getElementById('display-code').textContent = display;
             document.getElementById('email').focus();
+            updateAuthMode();
+        }
+
+        // ─── Toggle between Sign In and Sign Up ───
+        document.getElementById('toggle-link').addEventListener('click', () => {
+            isSignUp = !isSignUp;
+            updateAuthMode();
+            hideError('auth-error');
+        });
+
+        function updateAuthMode() {
+            const title = document.getElementById('auth-title');
+            const btn = document.getElementById('btn-auth');
+            const confirmGroup = document.getElementById('confirm-group');
+            const passwordHint = document.getElementById('password-hint');
+            const toggleText = document.getElementById('toggle-auth');
+            const toggleLink = document.getElementById('toggle-link');
+
+            if (isSignUp) {
+                title.textContent = 'Create Account';
+                btn.textContent = 'Sign Up & Link Device';
+                confirmGroup.classList.remove('hidden');
+                passwordHint.classList.remove('hidden');
+                toggleText.innerHTML = 'Already have an account? <a id="toggle-link">Sign In</a>';
+            } else {
+                title.textContent = 'Sign In';
+                btn.textContent = 'Sign In & Link Device';
+                confirmGroup.classList.add('hidden');
+                passwordHint.classList.add('hidden');
+                toggleText.innerHTML = 'Don\'t have an account? <a id="toggle-link">Sign Up</a>';
+            }
+
+            // Re-attach toggle listener since innerHTML replaced the element
+            document.getElementById('toggle-link').addEventListener('click', () => {
+                isSignUp = !isSignUp;
+                updateAuthMode();
+                hideError('auth-error');
+            });
         }
 
         document.getElementById('btn-back-to-code').addEventListener('click', () => {
-            document.getElementById('step-signin').classList.add('hidden');
+            document.getElementById('step-auth').classList.add('hidden');
             document.getElementById('step-code').classList.remove('hidden');
             currentCode = '';
             codeInputs.forEach(inp => inp.value = '');
             codeInputs[0].focus();
         });
 
-        // ─── Sign in & link ───
-        document.getElementById('btn-signin').addEventListener('click', doSignIn);
+        // ─── Auth action ───
+        document.getElementById('btn-auth').addEventListener('click', doAuth);
         document.getElementById('password').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') doSignIn();
+            if (e.key === 'Enter' && !isSignUp) doAuth();
         });
 
-        async function doSignIn() {
+        async function doAuth() {
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
-            const btn = document.getElementById('btn-signin');
+            const btn = document.getElementById('btn-auth');
 
             if (!email || !password) {
-                showError('signin-error', 'Email and password are required');
+                showError('auth-error', 'Email and password are required');
                 return;
             }
 
+            if (isSignUp) {
+                if (password.length < 6) {
+                    showError('auth-error', 'Password must be at least 6 characters');
+                    return;
+                }
+                const confirmPassword = document.getElementById('confirm-password').value;
+                if (password !== confirmPassword) {
+                    showError('auth-error', 'Passwords do not match');
+                    return;
+                }
+            }
+
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span>Signing in...';
-            hideError('signin-error');
+            btn.innerHTML = '<span class="spinner"></span>' + (isSignUp ? 'Creating account...' : 'Signing in...');
+            hideError('auth-error');
 
             try {
-                // Sign in via Firebase Auth REST API
-                const authResp = await fetch(AUTH_BASE + '/accounts:signInWithPassword?key=' + API_KEY, {
+                // Choose endpoint based on sign in vs sign up
+                const endpoint = isSignUp
+                    ? AUTH_BASE + '/accounts:signUp?key=' + API_KEY
+                    : AUTH_BASE + '/accounts:signInWithPassword?key=' + API_KEY;
+
+                const authResp = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -371,25 +453,31 @@
 
                 if (!authResp.ok) {
                     const errorCode = authData.error && authData.error.message;
-                    let msg = 'Sign in failed';
+                    let msg = isSignUp ? 'Account creation failed' : 'Sign in failed';
+
                     if (errorCode === 'INVALID_LOGIN_CREDENTIALS' || errorCode === 'INVALID_PASSWORD' || errorCode === 'EMAIL_NOT_FOUND') {
                         msg = 'Invalid email or password';
                     } else if (errorCode === 'INVALID_EMAIL') {
                         msg = 'Please enter a valid email address';
+                    } else if (errorCode === 'EMAIL_EXISTS') {
+                        msg = 'An account with this email already exists. Try signing in instead.';
+                    } else if (errorCode === 'WEAK_PASSWORD' || (errorCode && errorCode.startsWith('WEAK_PASSWORD'))) {
+                        msg = 'Password is too weak — use at least 6 characters';
                     } else if (errorCode === 'TOO_MANY_ATTEMPTS_TRY_LATER') {
                         msg = 'Too many attempts. Try again later.';
                     } else if (errorCode === 'USER_DISABLED') {
                         msg = 'This account has been disabled';
                     }
-                    showError('signin-error', msg);
+
+                    showError('auth-error', msg);
                     btn.disabled = false;
-                    btn.textContent = 'Sign In & Link Device';
+                    btn.textContent = isSignUp ? 'Sign Up & Link Device' : 'Sign In & Link Device';
                     return;
                 }
 
                 const idToken = authData.idToken;
 
-                // Update Firestore document via REST API (authenticated with ID token)
+                // Update Firestore document to link the device
                 const updateResp = await fetch(
                     FIRESTORE_BASE + '/device_codes/' + currentCode
                         + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email',
@@ -426,21 +514,21 @@
                     );
 
                     if (!fallbackResp.ok) {
-                        showError('signin-error', 'Signed in but failed to link device. Please try again.');
+                        showError('auth-error', (isSignUp ? 'Account created' : 'Signed in') + ' but failed to link device. Please try again.');
                         btn.disabled = false;
-                        btn.textContent = 'Sign In & Link Device';
+                        btn.textContent = isSignUp ? 'Sign Up & Link Device' : 'Sign In & Link Device';
                         return;
                     }
                 }
 
                 // Show success
-                document.getElementById('step-signin').classList.add('hidden');
+                document.getElementById('step-auth').classList.add('hidden');
                 document.getElementById('step-success').classList.remove('hidden');
 
             } catch (err) {
-                showError('signin-error', 'Network error. Check your connection and try again.');
+                showError('auth-error', 'Network error. Check your connection and try again.');
                 btn.disabled = false;
-                btn.textContent = 'Sign In & Link Device';
+                btn.textContent = isSignUp ? 'Sign Up & Link Device' : 'Sign In & Link Device';
             }
         }
 
