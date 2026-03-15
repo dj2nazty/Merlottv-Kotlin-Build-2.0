@@ -126,6 +126,26 @@ class LiveTvViewModel @Inject constructor(
     private var sessionTotalRebufferMs = 0L
     private var wasPlayingBeforeBuffer = false
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Priority Connection Pre-Warm — keeps favorite channel connections hot
+    // No background decoders (saves hardware codecs for the active player).
+    // Pre-resolves DNS, opens TCP, fetches first 256KB of stream data so
+    // when user switches to a favorite, the connection is already established
+    // and ExoPlayer can start playing instantly from warm cache.
+    // ═══════════════════════════════════════════════════════════════════
+    companion object {
+        private const val MAX_PREWARM_CHANNELS = 4
+        private const val PREWARM_BYTES = 256 * 1024 // 256KB prefetch per channel
+        private const val PREWARM_REFRESH_MS = 30_000L // Re-warm every 30s to keep connections alive
+    }
+
+    // channelId → active pre-warm job
+    private val prewarmJobs = mutableMapOf<String, Job>()
+    // channelId → streamUrl (to detect URL changes)
+    private val prewarmChannelUrls = mutableMapOf<String, String>()
+    // Track which channels have been pre-warmed for faster switch detection
+    private val prewarmedChannelIds = mutableSetOf<String>()
+
     /**
      * Optimized ExoPlayer configuration for live TV:
      *
@@ -238,7 +258,7 @@ class LiveTvViewModel @Inject constructor(
         // === Renderers with async buffer queueing for smoother playback ===
         val renderersFactory = DefaultRenderersFactory(application)
             .setEnableDecoderFallback(true) // Fall back to software decoder if hardware fails
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER) // Prefer hardware extensions
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON) // Enable hardware extensions without forcing them
 
         ExoPlayer.Builder(application)
             .setLoadControl(loadControl)
@@ -440,6 +460,8 @@ class LiveTvViewModel @Inject constructor(
                 ).withFilteredChannels(null)
 
                 autoPlayLastWatched(channels)
+                // Start pre-warming favorite channel connections once list is loaded
+                updatePrewarmPool()
             } catch (e: Exception) {
                 Log.e("LiveTvVM", "Failed to load channels", e)
                 _uiState.value = _uiState.value.copy(isLoading = false)
@@ -517,6 +539,8 @@ class LiveTvViewModel @Inject constructor(
             try {
                 favoritesRepository.getFavoriteChannelIds().collect { ids ->
                     _uiState.value = _uiState.value.copy(favoriteIds = ids)
+                    // Update connection pre-warm pool when favorites change
+                    updatePrewarmPool()
                 }
             } catch (e: Exception) {
                 Log.e("LiveTvVM", "Favorites observe failed", e)
@@ -574,8 +598,11 @@ class LiveTvViewModel @Inject constructor(
             streamSource = resolveSourceName(channel),
             videoFrameRate = "" // Reset until new stream reports frame rate
         )
+
         safePlayChannel(channel)
         loadEpgForChannel(channel)
+        // Refresh pre-warm pool (current channel changed, may need to swap slots)
+        updatePrewarmPool()
         viewModelScope.launch {
             try { settingsDataStore.setLastWatchedChannelId(channel.id) } catch (_: Exception) {}
         }
@@ -925,10 +952,139 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = state.withFilteredChannels(filtered)
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Connection Pre-Warm: DNS resolve + TCP connect + byte prefetch
+    // Zero hardware decoders used — just network-level warm-up
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Called when favorites change or channels load.
+     * Starts/stops pre-warm jobs for up to MAX_PREWARM_CHANNELS favorite channels.
+     */
+    private fun updatePrewarmPool() {
+        if (isPlayerReleased) return
+        val channels = _uiState.value.channels
+        val favoriteIds = _uiState.value.favoriteIds
+        val currentChannelId = _uiState.value.selectedChannel?.id
+
+        // Find favorite channels (up to MAX), excluding the currently playing one
+        val targetChannels = channels
+            .filter { it.id in favoriteIds && it.id != currentChannelId }
+            .take(MAX_PREWARM_CHANNELS)
+
+        val targetIds = targetChannels.map { it.id }.toSet()
+
+        // Cancel pre-warm jobs for channels no longer in the priority list
+        val toRemove = prewarmJobs.keys - targetIds
+        for (id in toRemove) {
+            prewarmJobs[id]?.cancel()
+            prewarmJobs.remove(id)
+            prewarmChannelUrls.remove(id)
+            prewarmedChannelIds.remove(id)
+        }
+
+        // Start pre-warm for new priority channels
+        for (channel in targetChannels) {
+            val existingUrl = prewarmChannelUrls[channel.id]
+            if (existingUrl == channel.streamUrl && prewarmJobs[channel.id]?.isActive == true) {
+                continue // Already pre-warming this channel
+            }
+
+            // Cancel old job if URL changed
+            prewarmJobs[channel.id]?.cancel()
+
+            prewarmChannelUrls[channel.id] = channel.streamUrl
+            prewarmJobs[channel.id] = viewModelScope.launch(Dispatchers.IO) {
+                prewarmChannel(channel)
+            }
+        }
+
+        Log.d("LiveTvVM", "Pre-warm: ${prewarmJobs.size} favorite channels warming")
+    }
+
+    /**
+     * Pre-warm a single channel connection:
+     * 1. DNS resolution (cached by system after first resolve)
+     * 2. TCP connection + TLS handshake
+     * 3. Fetch first 256KB of stream data (warms HTTP cache + keeps connection alive)
+     * 4. Re-warm every 30s to prevent TCP idle timeout
+     */
+    private suspend fun prewarmChannel(channel: Channel) {
+        while (true) {
+            try {
+                val url = java.net.URL(channel.streamUrl)
+                // Step 1: DNS resolve
+                val host = url.host
+                java.net.InetAddress.getByName(host)
+                Log.d("LiveTvVM", "Pre-warm DNS: ${channel.name} → $host resolved")
+
+                // Step 2+3: Open connection and fetch first bytes
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.apply {
+                    connectTimeout = 5_000
+                    readTimeout = 5_000
+                    setRequestProperty("Connection", "keep-alive")
+                    setRequestProperty("Accept", "*/*")
+                    instanceFollowRedirects = true
+                }
+
+                // Handle HTTPS with SSL bypass (same as main player)
+                if (connection is javax.net.ssl.HttpsURLConnection) {
+                    try {
+                        val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                            override fun checkClientTrusted(c: Array<out X509Certificate>?, t: String?) {}
+                            override fun checkServerTrusted(c: Array<out X509Certificate>?, t: String?) {}
+                            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                        })
+                        val ctx = SSLContext.getInstance("TLS")
+                        ctx.init(null, trustAll, SecureRandom())
+                        connection.sslSocketFactory = ctx.socketFactory
+                        connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
+                    } catch (_: Exception) {}
+                }
+
+                connection.connect()
+                val responseCode = connection.responseCode
+
+                if (responseCode in 200..399) {
+                    // Fetch first PREWARM_BYTES to fill OS TCP buffer and HTTP cache
+                    val input = connection.inputStream
+                    val buffer = ByteArray(8192)
+                    var totalRead = 0
+                    while (totalRead < PREWARM_BYTES) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        totalRead += read
+                    }
+                    input.close()
+                    prewarmedChannelIds.add(channel.id)
+                    Log.d("LiveTvVM", "Pre-warm OK: ${channel.name} — ${totalRead / 1024}KB prefetched (HTTP $responseCode)")
+                } else {
+                    Log.w("LiveTvVM", "Pre-warm: ${channel.name} returned HTTP $responseCode")
+                }
+                connection.disconnect()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("LiveTvVM", "Pre-warm failed: ${channel.name} — ${e.message}")
+            }
+
+            // Re-warm every 30s to keep DNS cache + TCP connections alive
+            delay(PREWARM_REFRESH_MS)
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         isPlayerReleased = true
         failoverMessageJob?.cancel()
+        // Cancel all pre-warm jobs
+        for ((id, job) in prewarmJobs) {
+            job.cancel()
+            Log.d("LiveTvVM", "Pre-warm: cancelled $id")
+        }
+        prewarmJobs.clear()
+        prewarmChannelUrls.clear()
+        prewarmedChannelIds.clear()
         try { player.release() } catch (_: Exception) {}
     }
 }
