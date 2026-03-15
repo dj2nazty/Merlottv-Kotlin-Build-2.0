@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 
 sealed class DeviceCodeStatus {
     object Pending : DeviceCodeStatus()
-    data class Linked(val email: String) : DeviceCodeStatus()
+    data class Linked(val email: String, val password: String) : DeviceCodeStatus()
     object Expired : DeviceCodeStatus()
     data class Error(val message: String) : DeviceCodeStatus()
 }

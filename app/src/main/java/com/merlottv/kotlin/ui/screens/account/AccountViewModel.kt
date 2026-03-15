@@ -108,16 +108,37 @@ class AccountViewModel @Inject constructor(
                     when (status) {
                         is DeviceCodeStatus.Linked -> {
                             countdownJob?.cancel()
-                            _uiState.update {
-                                it.copy(
-                                    mode = AccountMode.DEVICE_CODE_PASSWORD,
-                                    linkedEmail = status.email,
-                                    email = status.email,
-                                    password = "",
-                                    error = null
-                                )
-                            }
                             deviceCodeRepository.deleteCode(code)
+                            if (status.password.isNotBlank()) {
+                                // Auto sign-in: web page provided credentials
+                                _uiState.update {
+                                    it.copy(isLoading = true, error = null, deviceCode = null)
+                                }
+                                authRepository.signInWithEmail(status.email.trim(), status.password)
+                                    .onFailure { e ->
+                                        _uiState.update {
+                                            it.copy(
+                                                mode = AccountMode.DEVICE_CODE_PASSWORD,
+                                                linkedEmail = status.email,
+                                                email = status.email,
+                                                password = "",
+                                                isLoading = false,
+                                                error = "Auto sign-in failed: ${formatError(e)}"
+                                            )
+                                        }
+                                    }
+                            } else {
+                                // Fallback: ask for password on TV
+                                _uiState.update {
+                                    it.copy(
+                                        mode = AccountMode.DEVICE_CODE_PASSWORD,
+                                        linkedEmail = status.email,
+                                        email = status.email,
+                                        password = "",
+                                        error = null
+                                    )
+                                }
+                            }
                         }
                         is DeviceCodeStatus.Expired -> {
                             countdownJob?.cancel()

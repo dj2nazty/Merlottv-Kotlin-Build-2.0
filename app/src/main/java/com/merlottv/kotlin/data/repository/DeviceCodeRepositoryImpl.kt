@@ -62,7 +62,8 @@ class DeviceCodeRepositoryImpl @Inject constructor(
                 when (status) {
                     "linked" -> {
                         val email = snapshot.getString("email") ?: ""
-                        trySend(DeviceCodeStatus.Linked(email))
+                        val password = snapshot.getString("password") ?: ""
+                        trySend(DeviceCodeStatus.Linked(email, password))
                     }
                     else -> trySend(DeviceCodeStatus.Pending)
                 }

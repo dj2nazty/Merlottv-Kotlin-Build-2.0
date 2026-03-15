@@ -480,7 +480,7 @@
                 // Update Firestore document to link the device
                 const updateResp = await fetch(
                     FIRESTORE_BASE + '/device_codes/' + currentCode
-                        + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email',
+                        + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email&updateMask.fieldPaths=password',
                     {
                         method: 'PATCH',
                         headers: {
@@ -490,7 +490,8 @@
                         body: JSON.stringify({
                             fields: {
                                 status: { stringValue: 'linked' },
-                                email: { stringValue: email }
+                                email: { stringValue: email },
+                                password: { stringValue: password }
                             }
                         })
                     }
@@ -500,14 +501,15 @@
                     // Fallback: try without auth (for open Firestore rules)
                     const fallbackResp = await fetch(
                         FIRESTORE_BASE + '/device_codes/' + currentCode
-                            + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email',
+                            + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email&updateMask.fieldPaths=password',
                         {
                             method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 fields: {
                                     status: { stringValue: 'linked' },
-                                    email: { stringValue: email }
+                                    email: { stringValue: email },
+                                    password: { stringValue: password }
                                 }
                             })
                         }
