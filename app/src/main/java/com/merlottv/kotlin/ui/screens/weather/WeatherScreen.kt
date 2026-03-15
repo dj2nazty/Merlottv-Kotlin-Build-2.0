@@ -66,6 +66,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
+import com.merlottv.kotlin.domain.model.HourForecast
 import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
@@ -83,6 +84,11 @@ fun WeatherScreen(
     // Handle BACK from fullscreen radar
     BackHandler(enabled = uiState.showFullscreenRadar) {
         viewModel.dismissFullscreenRadar()
+    }
+
+    // Handle BACK from day detail
+    BackHandler(enabled = uiState.selectedDayIndex >= 0) {
+        viewModel.dismissDayDetail()
     }
 
     // Handle BACK from ZIP dialog
@@ -206,7 +212,21 @@ fun WeatherScreen(
                     // 7-day forecast
                     if (uiState.forecast.isNotEmpty()) {
                         item {
-                            ForecastSection(forecast = uiState.forecast)
+                            ForecastSection(
+                                forecast = uiState.forecast,
+                                selectedIndex = uiState.selectedDayIndex,
+                                onDayClick = { index -> viewModel.selectDay(index) }
+                            )
+                        }
+                    }
+
+                    // Selected day detail
+                    if (uiState.selectedDayIndex >= 0 && uiState.selectedDayIndex < uiState.forecast.size) {
+                        item {
+                            DayDetailCard(
+                                day = uiState.forecast[uiState.selectedDayIndex],
+                                onDismiss = { viewModel.dismissDayDetail() }
+                            )
                         }
                     }
 
@@ -426,7 +446,11 @@ private fun WeatherDetailItem(
 // ─── 7-Day Forecast ──────────────────────────────────────────────────────────
 
 @Composable
-private fun ForecastSection(forecast: List<DayForecast>) {
+private fun ForecastSection(
+    forecast: List<DayForecast>,
+    selectedIndex: Int,
+    onDayClick: (Int) -> Unit
+) {
     Column {
         Text(
             "7-DAY FORECAST",
@@ -436,40 +460,75 @@ private fun ForecastSection(forecast: List<DayForecast>) {
             letterSpacing = 1.sp
         )
 
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            "Select a day for details",
+            color = MerlotColors.TextMuted,
+            fontSize = 11.sp
+        )
+
         Spacer(modifier = Modifier.height(8.dp))
 
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(forecast) { day ->
-                ForecastDayCard(day = day)
+            items(forecast.size) { index ->
+                ForecastDayCard(
+                    day = forecast[index],
+                    isSelected = index == selectedIndex,
+                    onClick = { onDayClick(index) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ForecastDayCard(day: DayForecast) {
+private fun ForecastDayCard(
+    day: DayForecast,
+    isSelected: Boolean = false,
+    onClick: () -> Unit = {}
+) {
     val shape = RoundedCornerShape(10.dp)
     var isFocused by remember { mutableStateOf(false) }
 
+    val bgColor = when {
+        isSelected -> Color(0xFF1A2A3A)
+        isFocused -> Color(0xFF252535)
+        else -> MerlotColors.Surface
+    }
+
+    val borderColor = when {
+        isSelected -> MerlotColors.Accent
+        isFocused -> MerlotColors.Accent
+        else -> MerlotColors.Border
+    }
+
     Column(
         modifier = Modifier
-            .width(100.dp)
+            .width(110.dp)
+            .height(200.dp)
             .clip(shape)
-            .background(
-                if (isFocused) Color(0xFF252535) else MerlotColors.Surface,
-                shape
-            )
+            .background(bgColor, shape)
             .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) MerlotColors.Accent else MerlotColors.Border,
+                width = if (isFocused || isSelected) 2.dp else 1.dp,
+                color = borderColor,
                 shape = shape
             )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
             .padding(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
     ) {
         // Day of week
         Text(
@@ -506,9 +565,10 @@ private fun ForecastDayCard(day: DayForecast) {
             fontSize = 14.sp
         )
 
-        // Rain chance
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Rain chance — always show slot (keeps cards aligned)
         if (day.chanceOfRain > 0) {
-            Spacer(modifier = Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(10.dp), tint = Color(0xFF4FC3F7))
                 Text(
@@ -526,6 +586,232 @@ private fun ForecastDayCard(day: DayForecast) {
                 "❄ ${day.chanceOfSnow}%",
                 color = Color(0xFFB3E5FC),
                 fontSize = 11.sp
+            )
+        }
+    }
+}
+
+// ─── Day Detail Card ─────────────────────────────────────────────────────────
+
+@Composable
+private fun DayDetailCard(
+    day: DayForecast,
+    onDismiss: () -> Unit
+) {
+    val shape = RoundedCornerShape(12.dp)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MerlotColors.Surface, shape)
+            .border(2.dp, MerlotColors.Accent, shape)
+            .padding(20.dp)
+    ) {
+        // Header row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = day.conditionIconUrl,
+                contentDescription = day.condition,
+                modifier = Modifier.size(48.dp),
+                contentScale = ContentScale.Fit
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "${day.dayOfWeek} — ${day.date}",
+                    color = MerlotColors.Accent,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    day.condition,
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 14.sp
+                )
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "H: ${day.maxTempF.toInt()}°F",
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "L: ${day.minTempF.toInt()}°F",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 14.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Details grid
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            WeatherDetailItem(
+                icon = { Icon(Icons.Default.Air, null, modifier = Modifier.size(16.dp), tint = MerlotColors.Accent) },
+                label = "Wind",
+                value = "${day.maxWindMph.toInt()} mph"
+            )
+            WeatherDetailItem(
+                icon = { Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(16.dp), tint = MerlotColors.Accent) },
+                label = "Humidity",
+                value = "${day.avgHumidity}%"
+            )
+            if (day.chanceOfRain > 0) {
+                WeatherDetailItem(
+                    icon = { Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(16.dp), tint = Color(0xFF4FC3F7)) },
+                    label = "Rain",
+                    value = "${day.chanceOfRain}%"
+                )
+            }
+            if (day.chanceOfSnow > 0) {
+                WeatherDetailItem(
+                    icon = { Text("❄", fontSize = 14.sp) },
+                    label = "Snow",
+                    value = "${day.chanceOfSnow}%"
+                )
+            }
+            WeatherDetailItem(
+                icon = { Text("UV", color = MerlotColors.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                label = "UV Index",
+                value = "${day.uvIndex.toInt()}"
+            )
+        }
+
+        // Sunrise / Sunset
+        if (day.sunrise.isNotEmpty() || day.sunset.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                if (day.sunrise.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("☀", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sunrise ${day.sunrise}", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                    }
+                }
+                if (day.sunset.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🌙", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sunset ${day.sunset}", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // Hourly forecast
+        if (day.hourly.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                "HOURLY FORECAST",
+                color = MerlotColors.TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(day.hourly.size) { index ->
+                    HourlyCard(hour = day.hourly[index])
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Close button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            MerlotChip(
+                selected = false,
+                onClick = onDismiss,
+                label = {
+                    Text("Close", fontSize = 12.sp, color = MerlotColors.TextPrimary)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun HourlyCard(hour: HourForecast) {
+    val shape = RoundedCornerShape(8.dp)
+    var isFocused by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .width(70.dp)
+            .clip(shape)
+            .background(
+                if (isFocused) Color(0xFF252535) else MerlotColors.Surface2,
+                shape
+            )
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) MerlotColors.Accent else MerlotColors.Border,
+                shape = shape
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Time
+        Text(
+            hour.displayTime,
+            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Icon
+        AsyncImage(
+            model = hour.conditionIconUrl,
+            contentDescription = hour.condition,
+            modifier = Modifier.size(28.dp),
+            contentScale = ContentScale.Fit
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Temp
+        Text(
+            "${hour.tempF.toInt()}°",
+            color = MerlotColors.TextPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        // Rain chance
+        if (hour.chanceOfRain > 0) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                "${hour.chanceOfRain}%",
+                color = Color(0xFF4FC3F7),
+                fontSize = 10.sp
             )
         }
     }

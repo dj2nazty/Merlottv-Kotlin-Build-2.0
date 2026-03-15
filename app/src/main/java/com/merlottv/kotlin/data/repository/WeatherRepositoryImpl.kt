@@ -4,6 +4,7 @@ import android.util.Log
 import com.merlottv.kotlin.BuildConfig
 import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
+import com.merlottv.kotlin.domain.model.HourForecast
 import com.merlottv.kotlin.domain.model.RadarFrame
 import com.merlottv.kotlin.domain.repository.WeatherRepository
 import com.squareup.moshi.Moshi
@@ -114,6 +115,7 @@ class WeatherRepositoryImpl @Inject constructor(
                     val dateStr = dayMap["date"]?.toString() ?: return@mapNotNull null
                     val day = dayMap["day"] as? Map<String, Any?> ?: return@mapNotNull null
                     val dayCond = day["condition"] as? Map<String, Any?>
+                    val astro = dayMap["astro"] as? Map<String, Any?>
 
                     // Parse day of week from date string
                     val dayOfWeek = try {
@@ -123,6 +125,39 @@ class WeatherRepositoryImpl @Inject constructor(
                         val dayNames = arrayOf("", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
                         dayNames[cal.get(Calendar.DAY_OF_WEEK)]
                     } catch (_: Exception) { "?" }
+
+                    // Parse hourly forecast
+                    val hours = (dayMap["hour"] as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
+                    val hourlyForecasts = hours.mapNotNull { h ->
+                        val timeStr = h["time"]?.toString() ?: return@mapNotNull null
+                        val hCond = h["condition"] as? Map<String, Any?>
+
+                        // Format display time: "2026-03-15 14:00" → "2 PM"
+                        val displayTime = try {
+                            val timePart = timeStr.split(" ").getOrNull(1) ?: ""
+                            val hour = timePart.split(":")[0].toInt()
+                            val amPm = if (hour >= 12) "PM" else "AM"
+                            val h12 = if (hour == 0) 12 else if (hour > 12) hour - 12 else hour
+                            "$h12 $amPm"
+                        } catch (_: Exception) { timeStr }
+
+                        HourForecast(
+                            time = timeStr,
+                            displayTime = displayTime,
+                            tempF = (h["temp_f"] as? Number)?.toDouble() ?: 0.0,
+                            feelsLikeF = (h["feelslike_f"] as? Number)?.toDouble() ?: 0.0,
+                            condition = hCond?.get("text")?.toString() ?: "Unknown",
+                            conditionIconUrl = "https:" + (hCond?.get("icon")?.toString() ?: ""),
+                            windMph = (h["wind_mph"] as? Number)?.toDouble() ?: 0.0,
+                            windDir = h["wind_dir"]?.toString() ?: "",
+                            humidity = (h["humidity"] as? Number)?.toInt() ?: 0,
+                            chanceOfRain = (h["chance_of_rain"] as? Number)?.toInt()
+                                ?: (h["chance_of_rain"]?.toString()?.toIntOrNull() ?: 0),
+                            chanceOfSnow = (h["chance_of_snow"] as? Number)?.toInt()
+                                ?: (h["chance_of_snow"]?.toString()?.toIntOrNull() ?: 0),
+                            isDay = (h["is_day"] as? Number)?.toInt() == 1
+                        )
+                    }
 
                     DayForecast(
                         date = dateStr,
@@ -136,7 +171,12 @@ class WeatherRepositoryImpl @Inject constructor(
                         chanceOfSnow = (day["daily_chance_of_snow"] as? Number)?.toInt()
                             ?: (day["daily_chance_of_snow"]?.toString()?.toIntOrNull() ?: 0),
                         avgHumidity = (day["avghumidity"] as? Number)?.toInt() ?: 0,
-                        maxWindMph = (day["maxwind_mph"] as? Number)?.toDouble() ?: 0.0
+                        maxWindMph = (day["maxwind_mph"] as? Number)?.toDouble() ?: 0.0,
+                        sunrise = astro?.get("sunrise")?.toString() ?: "",
+                        sunset = astro?.get("sunset")?.toString() ?: "",
+                        uvIndex = (day["uv"] as? Number)?.toDouble() ?: 0.0,
+                        avgVisibilityMiles = (day["avgvis_miles"] as? Number)?.toDouble() ?: 0.0,
+                        hourly = hourlyForecasts
                     )
                 }
 

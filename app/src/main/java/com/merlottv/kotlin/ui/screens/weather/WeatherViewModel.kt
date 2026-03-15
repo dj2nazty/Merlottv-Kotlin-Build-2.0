@@ -27,7 +27,8 @@ data class WeatherUiState(
     val radarAnimIndex: Int = 0,
     val zipCode: String = "43616",
     val showZipDialog: Boolean = false,
-    val showFullscreenRadar: Boolean = false
+    val showFullscreenRadar: Boolean = false,
+    val selectedDayIndex: Int = -1  // -1 = no day selected (show current conditions)
 )
 
 @HiltViewModel
@@ -81,6 +82,16 @@ class WeatherViewModel @Inject constructor(
 
     fun dismissFullscreenRadar() {
         _uiState.value = _uiState.value.copy(showFullscreenRadar = false)
+    }
+
+    fun selectDay(index: Int) {
+        // Toggle: if same day is clicked again, deselect (go back to current conditions)
+        val newIndex = if (_uiState.value.selectedDayIndex == index) -1 else index
+        _uiState.value = _uiState.value.copy(selectedDayIndex = newIndex)
+    }
+
+    fun dismissDayDetail() {
+        _uiState.value = _uiState.value.copy(selectedDayIndex = -1)
     }
 
     private fun loadAll() {
