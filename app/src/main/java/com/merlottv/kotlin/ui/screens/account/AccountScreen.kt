@@ -62,7 +62,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
-private const val LINK_BASE_URL = "https://dj2nazty.github.io/merlottv-link"
+private const val LINK_BASE_URL = "https://dj2nazty.github.io/Merlottv-Kotlin-Build-2.0"
 
 @Composable
 fun AccountScreen(
