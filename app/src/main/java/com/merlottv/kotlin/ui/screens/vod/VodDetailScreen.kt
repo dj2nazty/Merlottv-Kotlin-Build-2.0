@@ -522,17 +522,19 @@ fun VodDetailScreen(
                                     onClick = { viewModel.selectSeason(season) },
                                     label = { Text("Season $season", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = if (isFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
                                         selectedContainerColor = MerlotColors.Accent,
                                         selectedLabelColor = MerlotColors.Black,
-                                        containerColor = if (isFocused) FocusedButtonGrey else MerlotColors.Surface2,
-                                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                                        selectedLeadingIconColor = MerlotColors.Black,
+                                        selectedTrailingIconColor = MerlotColors.Black
                                     ),
-                                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = false,
-                                        borderColor = FocusedButtonGreyLight,
-                                        borderWidth = 2.dp
-                                    ) else FilterChipDefaults.filterChipBorder(
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        borderColor = if (isFocused) FocusedButtonGreyLight else MerlotColors.Border,
+                                        selectedBorderColor = MerlotColors.Accent,
+                                        borderWidth = if (isFocused) 2.dp else 1.dp,
+                                        selectedBorderWidth = 1.dp,
                                         enabled = true,
                                         selected = isSelected
                                     ),

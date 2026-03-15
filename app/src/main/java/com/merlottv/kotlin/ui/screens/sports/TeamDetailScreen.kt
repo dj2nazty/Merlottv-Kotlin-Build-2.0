@@ -196,16 +196,19 @@ private fun TeamChip(label: String, selected: Boolean, onClick: () -> Unit) {
         onClick = onClick,
         label = { Text(label, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) },
         colors = FilterChipDefaults.filterChipColors(
-            containerColor = MerlotColors.Surface2,
-            labelColor = MerlotColors.TextPrimary,
+            containerColor = if (isFocused) Color(0xFF555555) else MerlotColors.Surface2,
+            labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+            iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
             selectedContainerColor = MerlotColors.Accent,
-            selectedLabelColor = MerlotColors.Black
+            selectedLabelColor = MerlotColors.Black,
+            selectedLeadingIconColor = MerlotColors.Black,
+            selectedTrailingIconColor = MerlotColors.Black
         ),
         border = FilterChipDefaults.filterChipBorder(
             borderColor = if (isFocused) MerlotColors.Accent else MerlotColors.Border,
             selectedBorderColor = MerlotColors.Accent,
             borderWidth = if (isFocused) 2.dp else 1.dp,
-            selectedBorderWidth = 2.dp,
+            selectedBorderWidth = 1.dp,
             enabled = true,
             selected = selected
         ),

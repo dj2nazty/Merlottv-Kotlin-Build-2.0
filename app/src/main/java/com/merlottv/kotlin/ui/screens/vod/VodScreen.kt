@@ -30,14 +30,18 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -62,6 +66,15 @@ fun VodScreen(
     viewModel: VodViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val firstCardFocusRequester = remember { FocusRequester() }
+
+    // Request focus on first content card when content loads
+    LaunchedEffect(uiState.filteredSections.isNotEmpty()) {
+        if (uiState.filteredSections.isNotEmpty()) {
+            delay(300)
+            try { firstCardFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -104,17 +117,19 @@ fun VodScreen(
                         }
                     },
                     colors = FilterChipDefaults.filterChipColors(
+                        containerColor = if (isFocused) Color(0xFF555555) else MerlotColors.Surface2,
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
                         selectedContainerColor = MerlotColors.Accent,
                         selectedLabelColor = MerlotColors.Black,
-                        containerColor = if (isFocused) Color(0xFF555555) else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                        selectedLeadingIconColor = MerlotColors.Black,
+                        selectedTrailingIconColor = MerlotColors.Black
                     ),
-                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = false,
-                        borderColor = Color(0xFF888888),
-                        borderWidth = 2.dp
-                    ) else FilterChipDefaults.filterChipBorder(
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
+                        selectedBorderColor = MerlotColors.Accent,
+                        borderWidth = if (isFocused) 2.dp else 1.dp,
+                        selectedBorderWidth = 1.dp,
                         enabled = true,
                         selected = isSelected
                     ),
@@ -169,11 +184,13 @@ fun VodScreen(
                         uiState.filteredSections,
                         key = { "${it.addonName}_${it.catalogId}_${it.type}" }
                     ) { section ->
+                        val isFirst = section == uiState.filteredSections.first()
                         CatalogSectionRow(
                             section = section,
                             onItemClick = { item ->
                                 onNavigateToDetail(item.type, item.id)
-                            }
+                            },
+                            firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null
                         )
                     }
                 }
@@ -185,7 +202,8 @@ fun VodScreen(
 @Composable
 private fun CatalogSectionRow(
     section: CatalogSection,
-    onItemClick: (MetaPreview) -> Unit
+    onItemClick: (MetaPreview) -> Unit,
+    firstCardFocusRequester: FocusRequester? = null
 ) {
     Column(
         modifier = Modifier
@@ -254,19 +272,32 @@ private fun CatalogSectionRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(section.items, key = { it.id }) { item ->
-                VodCard(item = item, onClick = { onItemClick(item) })
+                val isFirst = firstCardFocusRequester != null && item == section.items.first()
+                VodCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    focusRequester = if (isFirst) firstCardFocusRequester else null
+                )
             }
         }
     }
 }
 
 @Composable
-private fun VodCard(item: MetaPreview, onClick: () -> Unit) {
+private fun VodCard(
+    item: MetaPreview,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
+) {
     var isFocused by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .width(130.dp)
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier
+            )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->

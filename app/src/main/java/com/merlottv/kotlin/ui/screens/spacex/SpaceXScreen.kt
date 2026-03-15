@@ -181,16 +181,19 @@ fun SpaceXScreen(
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MerlotColors.Accent.copy(alpha = 0.2f),
-                            selectedLabelColor = MerlotColors.Accent,
-                            containerColor = Color(0xFF2A2A2A),
-                            labelColor = MerlotColors.TextMuted
+                            containerColor = if (chipFocused) Color(0xFF555555) else Color(0xFF2A2A2A),
+                            labelColor = if (chipFocused) MerlotColors.White else MerlotColors.TextMuted,
+                            iconColor = if (chipFocused) MerlotColors.White else MerlotColors.TextMuted,
+                            selectedContainerColor = MerlotColors.Accent,
+                            selectedLabelColor = MerlotColors.Black,
+                            selectedLeadingIconColor = MerlotColors.Black,
+                            selectedTrailingIconColor = MerlotColors.Black
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             borderColor = if (chipFocused) MerlotColors.Accent else Color.Transparent,
-                            selectedBorderColor = if (chipFocused) MerlotColors.Accent else MerlotColors.Accent.copy(alpha = 0.5f),
+                            selectedBorderColor = MerlotColors.Accent,
                             borderWidth = if (chipFocused) 2.dp else 1.dp,
-                            selectedBorderWidth = if (chipFocused) 2.dp else 1.dp,
+                            selectedBorderWidth = 1.dp,
                             enabled = true,
                             selected = uiState.selectedTab == tab
                         ),

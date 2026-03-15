@@ -40,6 +40,8 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.key.Key
@@ -64,6 +66,16 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val heroFocusRequester = remember { FocusRequester() }
+    val firstRowFocusRequester = remember { FocusRequester() }
+
+    // Request focus on hero carousel (or first row) when screen loads
+    LaunchedEffect(uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
+        if (uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
+            delay(300)
+            try { heroFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -112,7 +124,9 @@ fun HomeScreen(
                         item(key = "hero_carousel") {
                             HeroCarousel(
                                 items = uiState.featuredItems,
-                                onItemClick = { meta -> onNavigateToDetail(meta.type, meta.id) }
+                                onItemClick = { meta -> onNavigateToDetail(meta.type, meta.id) },
+                                focusRequester = heroFocusRequester,
+                                onDownPressed = firstRowFocusRequester
                             )
                         }
                     }
@@ -120,21 +134,34 @@ fun HomeScreen(
                     // Continue Watching row (if any)
                     if (uiState.continueWatching.isNotEmpty()) {
                         item(key = "continue_watching") {
+                            // First row below hero gets firstRowFocusRequester
+                            // If no hero, this row IS the initial focus target
                             ContinueWatchingRow(
                                 items = uiState.continueWatching,
                                 onItemClick = { item ->
                                     onNavigateToDetail(item.type, item.id)
-                                }
+                                },
+                                focusRequester = if (uiState.featuredItems.isEmpty()) heroFocusRequester else null,
+                                firstCardFocusRequester = if (uiState.featuredItems.isNotEmpty()) firstRowFocusRequester else null
                             )
                         }
                     }
 
                     // Catalog rows
                     items(uiState.catalogRows, key = { it.title }) { row ->
+                        val isFirstCatalogRow = row == uiState.catalogRows.first()
+                        // If no hero and no continue watching, first catalog row gets hero focus
+                        // If hero exists but no continue watching, first catalog row gets firstRowFocusRequester
+                        val rowFocusReq = when {
+                            isFirstCatalogRow && uiState.featuredItems.isEmpty() && uiState.continueWatching.isEmpty() -> heroFocusRequester
+                            isFirstCatalogRow && uiState.featuredItems.isNotEmpty() && uiState.continueWatching.isEmpty() -> firstRowFocusRequester
+                            else -> null
+                        }
                         CatalogRowSection(
                             title = row.title,
                             items = row.items,
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) },
+                            firstCardFocusRequester = rowFocusReq
                         )
                     }
                 }
@@ -146,7 +173,9 @@ fun HomeScreen(
 @Composable
 private fun ContinueWatchingRow(
     items: List<WatchProgressItem>,
-    onItemClick: (WatchProgressItem) -> Unit
+    onItemClick: (WatchProgressItem) -> Unit,
+    focusRequester: FocusRequester? = null,
+    firstCardFocusRequester: FocusRequester? = null
 ) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Row(
@@ -172,19 +201,33 @@ private fun ContinueWatchingRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(items, key = { it.id }) { item ->
-                ContinueWatchingCard(item = item, onClick = { onItemClick(item) })
+                val isFirst = item == items.first()
+                ContinueWatchingCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    // Use firstCardFocusRequester (from hero DOWN) if available, otherwise focusRequester (initial focus)
+                    focusRequester = if (isFirst) (firstCardFocusRequester ?: focusRequester) else null
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ContinueWatchingCard(item: WatchProgressItem, onClick: () -> Unit) {
+private fun ContinueWatchingCard(
+    item: WatchProgressItem,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
+) {
     var isFocused by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .width(160.dp)
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier
+            )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
@@ -285,7 +328,9 @@ private fun ContinueWatchingCard(item: WatchProgressItem, onClick: () -> Unit) {
 @Composable
 private fun HeroCarousel(
     items: List<MetaPreview>,
-    onItemClick: (MetaPreview) -> Unit
+    onItemClick: (MetaPreview) -> Unit,
+    focusRequester: FocusRequester? = null,
+    onDownPressed: FocusRequester? = null
 ) {
     if (items.isEmpty()) return
     var currentIndex by remember { mutableIntStateOf(0) }
@@ -307,6 +352,10 @@ private fun HeroCarousel(
             .height(320.dp)
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier
+            )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
@@ -322,6 +371,13 @@ private fun HeroCarousel(
                         Key.DirectionRight -> {
                             currentIndex = (currentIndex + 1) % items.size
                             true
+                        }
+                        Key.DirectionDown -> {
+                            // Force focus to first card of the row below instead of geometric center
+                            if (onDownPressed != null) {
+                                try { onDownPressed.requestFocus(); true }
+                                catch (_: Exception) { false }
+                            } else false
                         }
                         else -> false
                     }
@@ -440,7 +496,8 @@ private fun HeroCarousel(
 private fun CatalogRowSection(
     title: String,
     items: List<MetaPreview>,
-    onItemClick: (MetaPreview) -> Unit
+    onItemClick: (MetaPreview) -> Unit,
+    firstCardFocusRequester: FocusRequester? = null
 ) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Text(
@@ -455,19 +512,32 @@ private fun CatalogRowSection(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(items, key = { it.id }) { item ->
-                PosterCard(meta = item, onClick = { onItemClick(item) })
+                val isFirst = firstCardFocusRequester != null && item == items.first()
+                PosterCard(
+                    meta = item,
+                    onClick = { onItemClick(item) },
+                    focusRequester = if (isFirst) firstCardFocusRequester else null
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PosterCard(meta: MetaPreview, onClick: () -> Unit) {
+private fun PosterCard(
+    meta: MetaPreview,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null
+) {
     var isFocused by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .width(130.dp)
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier
+            )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->

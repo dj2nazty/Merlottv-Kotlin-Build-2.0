@@ -285,17 +285,24 @@ private fun CreateProfileDialog(
                     onClick = { avatarTab = tab },
                     label = { Text(tab, fontSize = 12.sp) },
                     colors = FilterChipDefaults.filterChipColors(
+                        containerColor = if (chipFocused) Color(0xFF555555) else MerlotColors.Surface2,
+                        labelColor = if (chipFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                        iconColor = if (chipFocused) MerlotColors.White else MerlotColors.TextPrimary,
                         selectedContainerColor = MerlotColors.Accent,
                         selectedLabelColor = MerlotColors.Black,
-                        containerColor = MerlotColors.Surface2,
-                        labelColor = MerlotColors.TextPrimary
+                        selectedLeadingIconColor = MerlotColors.Black,
+                        selectedTrailingIconColor = MerlotColors.Black
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (chipFocused) MerlotColors.Accent else MerlotColors.Border,
+                        selectedBorderColor = MerlotColors.Accent,
+                        borderWidth = if (chipFocused) 2.dp else 1.dp,
+                        selectedBorderWidth = 1.dp,
+                        enabled = true,
+                        selected = avatarTab == tab
                     ),
                     modifier = Modifier
                         .onFocusChanged { chipFocused = it.isFocused }
-                        .then(
-                            if (chipFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
-                            else Modifier
-                        )
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                                 avatarTab = tab; true

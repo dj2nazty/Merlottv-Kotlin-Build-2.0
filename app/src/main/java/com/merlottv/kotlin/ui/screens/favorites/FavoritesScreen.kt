@@ -114,17 +114,19 @@ fun FavoritesScreen(
                         }
                     },
                     colors = FilterChipDefaults.filterChipColors(
+                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
                         selectedContainerColor = MerlotColors.Accent,
                         selectedLabelColor = MerlotColors.Black,
-                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                        selectedLeadingIconColor = MerlotColors.Black,
+                        selectedTrailingIconColor = MerlotColors.Black
                     ),
-                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = false,
-                        borderColor = Color(0xFF888888),
-                        borderWidth = 2.dp
-                    ) else FilterChipDefaults.filterChipBorder(
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
+                        selectedBorderColor = MerlotColors.Accent,
+                        borderWidth = if (isFocused) 2.dp else 1.dp,
+                        selectedBorderWidth = 1.dp,
                         enabled = true,
                         selected = isSelected
                     ),
@@ -177,17 +179,19 @@ fun FavoritesScreen(
                         }
                     },
                     colors = FilterChipDefaults.filterChipColors(
+                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
                         selectedContainerColor = MerlotColors.Accent,
                         selectedLabelColor = MerlotColors.Black,
-                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                        selectedLeadingIconColor = MerlotColors.Black,
+                        selectedTrailingIconColor = MerlotColors.Black
                     ),
-                    border = if (isFocused && !isSelected) FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = false,
-                        borderColor = Color(0xFF888888),
-                        borderWidth = 2.dp
-                    ) else FilterChipDefaults.filterChipBorder(
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
+                        selectedBorderColor = MerlotColors.Accent,
+                        borderWidth = if (isFocused) 2.dp else 1.dp,
+                        selectedBorderWidth = 1.dp,
                         enabled = true,
                         selected = isSelected
                     ),
@@ -216,14 +220,14 @@ fun FavoritesScreen(
                     },
                     colors = FilterChipDefaults.filterChipColors(
                         containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
+                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
+                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
                     ),
-                    border = if (isFocused) FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = false,
-                        borderColor = Color(0xFF888888),
-                        borderWidth = 2.dp
-                    ) else FilterChipDefaults.filterChipBorder(
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
+                        selectedBorderColor = MerlotColors.Accent,
+                        borderWidth = if (isFocused) 2.dp else 1.dp,
+                        selectedBorderWidth = 1.dp,
                         enabled = true,
                         selected = false
                     ),
