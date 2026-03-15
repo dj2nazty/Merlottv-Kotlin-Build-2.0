@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1056416360946",
+    "project_id": "merlot-tv",
+    "storage_bucket": "merlot-tv.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1056416360946:android:b2ae3f20655629f569636b",
+        "android_client_info": {
+          "package_name": "com.merlottv.kotlin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC9eMpUTlUyjWP5NzHeifaKrVS-PFaoSJc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

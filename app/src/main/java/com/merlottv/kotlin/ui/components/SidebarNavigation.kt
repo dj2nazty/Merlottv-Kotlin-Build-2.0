@@ -18,10 +18,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
@@ -170,14 +170,12 @@ fun SidebarNavigation(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Navigation items — scrollable so all items fit on screen
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
+            // Navigation items — LazyColumn auto-scrolls to focused item with D-pad
+            LazyColumn(
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Screen.sidebarItems.forEachIndexed { index, screen ->
+                itemsIndexed(Screen.sidebarItems) { index, screen ->
                     SidebarItem(
                         screen = screen,
                         isSelected = currentRoute == screen.route,
