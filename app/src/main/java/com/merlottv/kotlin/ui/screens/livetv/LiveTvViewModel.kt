@@ -31,6 +31,7 @@ import javax.net.ssl.X509TrustManager
 import com.merlottv.kotlin.data.repository.BackupChannelRepository
 import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.DefaultData
+import com.merlottv.kotlin.domain.model.EpgChannel
 import com.merlottv.kotlin.domain.model.EpgEntry
 import com.merlottv.kotlin.domain.repository.ChannelRepository
 import com.merlottv.kotlin.domain.repository.EpgRepository
@@ -101,7 +102,20 @@ data class LiveTvUiState(
     val bufferConfigLabel: String = "Apollo",
     val bufferSizeSec: Int = 600,
     val bufferMemoryCapMb: Int = 0,
-    val liveOffsetMs: Long = 5_000
+    val liveOffsetMs: Long = 5_000,
+    // EPG Guide overlay (TiviMate-style — press RIGHT in fullscreen)
+    val showEpgGuide: Boolean = false,
+    val epgChannels: List<EpgChannel> = emptyList(),
+    val epgLoading: Boolean = false,
+    val epgSelectedProgram: EpgEntry? = null,
+    // EPG Guide uses the user's actual channel list with category filter
+    val epgGuideChannels: List<Channel> = emptyList(),
+    val epgGuideGroups: List<String> = emptyList(),
+    val epgGuideSelectedGroup: String? = null,
+    val epgSelectedIndex: Int = 0,
+    val epgScrollRequest: Int = 0,  // incremented/decremented to trigger scroll
+    val showEpgCategoryPicker: Boolean = false,
+    val epgTimelineAtStart: Boolean = true  // true when timeline scroll is at or near position 0
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -1206,8 +1220,167 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             isFullscreen = false,
             showOverlay = false,
-            showCategories = true
+            showCategories = true,
+            showEpgGuide = false
         )
+    }
+
+    // ── EPG Guide overlay (TiviMate-style) ──────────────────────────
+
+    fun showEpgGuide() {
+        _uiState.value = _uiState.value.copy(
+            showEpgGuide = true,
+            showQuickMenu = false,
+            epgSelectedIndex = getCurrentChannelEpgIndex()
+        )
+        loadEpgGuideData()
+    }
+
+    /** Move EPG highlight up/down */
+    fun epgNavigate(delta: Int) {
+        val maxIndex = _uiState.value.epgGuideChannels.size - 1
+        if (maxIndex < 0) return
+        val newIndex = (_uiState.value.epgSelectedIndex + delta).coerceIn(0, maxIndex)
+        _uiState.value = _uiState.value.copy(epgSelectedIndex = newIndex)
+    }
+
+    /** Select the currently highlighted EPG channel */
+    fun epgSelectCurrent() {
+        val channel = _uiState.value.epgGuideChannels.getOrNull(_uiState.value.epgSelectedIndex) ?: return
+        switchToChannelFromGuide(channel)
+    }
+
+    /** Scroll EPG timeline left/right */
+    fun epgScrollTimeline(direction: Int) {
+        // Increment scroll request counter to trigger LaunchedEffect
+        _uiState.value = _uiState.value.copy(
+            epgScrollRequest = _uiState.value.epgScrollRequest + direction
+        )
+    }
+
+    fun hideEpgGuide() {
+        _uiState.value = _uiState.value.copy(
+            showEpgGuide = false,
+            epgSelectedProgram = null,
+            epgGuideSelectedGroup = null,
+            showEpgCategoryPicker = false
+        )
+    }
+
+    fun toggleEpgCategoryPicker() {
+        _uiState.value = _uiState.value.copy(
+            showEpgCategoryPicker = !_uiState.value.showEpgCategoryPicker
+        )
+    }
+
+    fun selectEpgProgram(program: EpgEntry?) {
+        _uiState.value = _uiState.value.copy(epgSelectedProgram = program)
+    }
+
+    /** Switch to a channel from the EPG guide — uses direct Channel object */
+    fun switchToChannelFromGuide(channel: Channel) {
+        hideEpgGuide()
+        onChannelSelected(channel)
+    }
+
+    /** Filter EPG guide by category group */
+    fun setEpgGuideGroup(group: String?) {
+        _uiState.value = _uiState.value.copy(epgGuideSelectedGroup = group)
+        applyEpgGuideFilter()
+    }
+
+    /** Get the index of the currently playing channel in the EPG guide list */
+    fun getCurrentChannelEpgIndex(): Int {
+        val currentName = _uiState.value.selectedChannel?.name ?: return 0
+        return _uiState.value.epgGuideChannels.indexOfFirst {
+            it.name.equals(currentName, ignoreCase = true)
+        }.coerceAtLeast(0)
+    }
+
+    private fun applyEpgGuideFilter() {
+        val allChannels = _uiState.value.channels
+        val group = _uiState.value.epgGuideSelectedGroup
+        val filtered = if (group == null) {
+            allChannels
+        } else if (group == "★ Favorites") {
+            allChannels.filter { _uiState.value.favoriteIds.contains(it.id) }
+        } else {
+            allChannels.filter { it.group.equals(group, ignoreCase = true) }
+        }
+        _uiState.value = _uiState.value.copy(epgGuideChannels = filtered)
+    }
+
+    /** Called by EPG overlay to report current timeline scroll position */
+    fun updateEpgTimelineAtStart(atStart: Boolean) {
+        if (_uiState.value.epgTimelineAtStart != atStart) {
+            _uiState.value = _uiState.value.copy(epgTimelineAtStart = atStart)
+        }
+    }
+
+    private fun loadEpgGuideData() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(epgLoading = true)
+
+            // Build channel list from the user's actual Live TV channels
+            val allChannels = _uiState.value.channels
+            val groups = allChannels.map { it.group }.distinct().sorted()
+
+            // Apply current group filter (or show all)
+            val group = _uiState.value.epgGuideSelectedGroup
+            val filteredChannels = if (group == null) {
+                allChannels
+            } else if (group == "★ Favorites") {
+                allChannels.filter { _uiState.value.favoriteIds.contains(it.id) }
+            } else {
+                allChannels.filter { it.group.equals(group, ignoreCase = true) }
+            }
+
+            // Load EPG data from Room DB
+            try {
+                val epgData = try {
+                    epgRepository.getAllEpgChannels().first()
+                } catch (_: Exception) { emptyList() }
+
+                // Build a lookup map from EPG channel name/id to programs
+                val epgByName = mutableMapOf<String, EpgChannel>()
+                epgData.forEach { epgCh ->
+                    epgByName[epgCh.name.lowercase()] = epgCh
+                    epgByName[epgCh.id.lowercase()] = epgCh
+                }
+
+                // Match each Live TV channel to its EPG data
+                val matchedEpgChannels = filteredChannels.map { channel ->
+                    val epgId = channel.epgId.ifEmpty { channel.id }
+                    val epgMatch = epgByName[epgId.lowercase()]
+                        ?: epgByName[channel.name.lowercase()]
+                    EpgChannel(
+                        id = channel.id,
+                        name = channel.name,
+                        icon = epgMatch?.icon ?: channel.logoUrl,
+                        programs = epgMatch?.programs ?: emptyList()
+                    )
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    epgChannels = matchedEpgChannels,
+                    epgGuideChannels = filteredChannels,
+                    epgGuideGroups = groups,
+                    epgLoading = false
+                )
+
+                // Background refresh if stale
+                if (epgRepository.isEpgStale()) {
+                    loadEpgInternal()
+                }
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "EPG guide load failed", e)
+                _uiState.value = _uiState.value.copy(
+                    epgGuideChannels = filteredChannels,
+                    epgGuideGroups = groups,
+                    epgLoading = false
+                )
+            }
+        }
     }
 
     fun stopPlayback() {
