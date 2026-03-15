@@ -230,24 +230,12 @@
         </div>
     </div>
 
-    <!-- Firebase JS SDK (compat mode for simplicity) -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-
     <script>
-        // Firebase config — matches the Android app's google-services.json
-        firebase.initializeApp({
-            apiKey: "AIzaSyC9eMpUTlUyjWP5NzHeifaKrVS-PFaoSJc",
-            authDomain: "merlot-tv.firebaseapp.com",
-            projectId: "merlot-tv",
-            storageBucket: "merlot-tv.firebasestorage.app",
-            messagingSenderId: "1056416360946",
-            appId: "1:1056416360946:android:b2ae3f20655629f569636b"
-        });
-
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+        // Firebase project config — only the API key and project ID are needed for REST APIs
+        const API_KEY = 'AIzaSyC9eMpUTlUyjWP5NzHeifaKrVS-PFaoSJc';
+        const PROJECT_ID = 'merlot-tv';
+        const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/' + PROJECT_ID + '/databases/(default)/documents';
+        const AUTH_BASE = 'https://identitytoolkit.googleapis.com/v1';
 
         let currentCode = '';
 
@@ -268,7 +256,6 @@
                 if (val && i < 5) {
                     codeInputs[i + 1].focus();
                 }
-                // Auto-submit when all filled
                 const full = Array.from(codeInputs).map(inp => inp.value).join('');
                 if (full.length === 6) {
                     currentCode = full;
@@ -280,7 +267,6 @@
                     codeInputs[i - 1].focus();
                 }
             });
-            // Handle paste
             input.addEventListener('paste', (e) => {
                 e.preventDefault();
                 const pasted = (e.clipboardData.getData('text') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -309,14 +295,21 @@
             verifyCode();
         });
 
+        // ─── Verify code exists in Firestore via REST ───
         async function verifyCode() {
             try {
-                const doc = await db.collection('device_codes').doc(currentCode).get();
-                if (!doc.exists) {
+                const resp = await fetch(FIRESTORE_BASE + '/device_codes/' + currentCode);
+                if (resp.status === 404) {
                     showError('code-error', 'Invalid code. Check the code on your TV and try again.');
                     return;
                 }
-                if (doc.data().status !== 'pending') {
+                if (!resp.ok) {
+                    showError('code-error', 'Could not verify code. Please try again.');
+                    return;
+                }
+                const doc = await resp.json();
+                const status = doc.fields && doc.fields.status && doc.fields.status.stringValue;
+                if (status !== 'pending') {
                     showError('code-error', 'This code has already been used or expired.');
                     return;
                 }
@@ -363,32 +356,89 @@
             hideError('signin-error');
 
             try {
-                await auth.signInWithEmailAndPassword(email, password);
-
-                // Write the email to the device code document so the TV can read it
-                await db.collection('device_codes').doc(currentCode).update({
-                    status: 'linked',
-                    email: email
+                // Sign in via Firebase Auth REST API
+                const authResp = await fetch(AUTH_BASE + '/accounts:signInWithPassword?key=' + API_KEY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password,
+                        returnSecureToken: true
+                    })
                 });
+
+                const authData = await authResp.json();
+
+                if (!authResp.ok) {
+                    const errorCode = authData.error && authData.error.message;
+                    let msg = 'Sign in failed';
+                    if (errorCode === 'INVALID_LOGIN_CREDENTIALS' || errorCode === 'INVALID_PASSWORD' || errorCode === 'EMAIL_NOT_FOUND') {
+                        msg = 'Invalid email or password';
+                    } else if (errorCode === 'INVALID_EMAIL') {
+                        msg = 'Please enter a valid email address';
+                    } else if (errorCode === 'TOO_MANY_ATTEMPTS_TRY_LATER') {
+                        msg = 'Too many attempts. Try again later.';
+                    } else if (errorCode === 'USER_DISABLED') {
+                        msg = 'This account has been disabled';
+                    }
+                    showError('signin-error', msg);
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In & Link Device';
+                    return;
+                }
+
+                const idToken = authData.idToken;
+
+                // Update Firestore document via REST API (authenticated with ID token)
+                const updateResp = await fetch(
+                    FIRESTORE_BASE + '/device_codes/' + currentCode
+                        + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email',
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + idToken
+                        },
+                        body: JSON.stringify({
+                            fields: {
+                                status: { stringValue: 'linked' },
+                                email: { stringValue: email }
+                            }
+                        })
+                    }
+                );
+
+                if (!updateResp.ok) {
+                    // Fallback: try without auth (for open Firestore rules)
+                    const fallbackResp = await fetch(
+                        FIRESTORE_BASE + '/device_codes/' + currentCode
+                            + '?updateMask.fieldPaths=status&updateMask.fieldPaths=email',
+                        {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                fields: {
+                                    status: { stringValue: 'linked' },
+                                    email: { stringValue: email }
+                                }
+                            })
+                        }
+                    );
+
+                    if (!fallbackResp.ok) {
+                        showError('signin-error', 'Signed in but failed to link device. Please try again.');
+                        btn.disabled = false;
+                        btn.textContent = 'Sign In & Link Device';
+                        return;
+                    }
+                }
 
                 // Show success
                 document.getElementById('step-signin').classList.add('hidden');
                 document.getElementById('step-success').classList.remove('hidden');
 
-                // Sign out from web (TV will sign in separately)
-                await auth.signOut();
             } catch (err) {
-                let msg = 'Sign in failed';
-                if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-                    msg = 'Invalid email or password';
-                } else if (err.code === 'auth/user-not-found') {
-                    msg = 'No account found with this email';
-                } else if (err.code === 'auth/too-many-requests') {
-                    msg = 'Too many attempts. Try again later.';
-                } else if (err.code === 'auth/network-request-failed') {
-                    msg = 'Network error. Check your connection.';
-                }
-                showError('signin-error', msg);
+                showError('signin-error', 'Network error. Check your connection and try again.');
                 btn.disabled = false;
                 btn.textContent = 'Sign In & Link Device';
             }
