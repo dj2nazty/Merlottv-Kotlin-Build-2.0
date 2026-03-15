@@ -1,5 +1,7 @@
 package com.merlottv.kotlin.ui.screens.account
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -9,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,13 +19,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -52,10 +54,15 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.merlottv.kotlin.ui.theme.MerlotColors
+
+private const val LINK_BASE_URL = "https://dj2nazty.github.io/merlottv-link"
 
 @Composable
 fun AccountScreen(
@@ -73,7 +80,7 @@ fun AccountScreen(
             AccountMode.SIGNED_OUT -> SignedOutView(
                 onSignIn = viewModel::showSignIn,
                 onSignUp = viewModel::showSignUp,
-                onDeviceCode = viewModel::showDeviceCode
+                onDeviceCode = viewModel::startDeviceCodeFlow
             )
             AccountMode.SIGN_IN -> SignInView(
                 state = uiState,
@@ -90,7 +97,14 @@ fun AccountScreen(
                 onSubmit = viewModel::signUp,
                 onBack = viewModel::goBack
             )
-            AccountMode.DEVICE_CODE -> DeviceCodePlaceholder(
+            AccountMode.DEVICE_CODE -> DeviceCodeView(
+                state = uiState,
+                onBack = viewModel::goBack
+            )
+            AccountMode.DEVICE_CODE_PASSWORD -> DeviceCodePasswordView(
+                state = uiState,
+                onPasswordChange = viewModel::updatePassword,
+                onSubmit = viewModel::signInWithLinkedEmail,
                 onBack = viewModel::goBack
             )
             AccountMode.SIGNED_IN -> SignedInView(
@@ -149,8 +163,8 @@ private fun SignedOutView(
         )
         Spacer(modifier = Modifier.height(12.dp))
         AccountActionButton(
-            text = "Use Device Code",
-            icon = Icons.Default.Devices,
+            text = "Scan QR Code",
+            icon = Icons.Default.QrCode2,
             onClick = onDeviceCode,
             isPrimary = false
         )
@@ -196,11 +210,7 @@ private fun SignInView(
 
         if (state.error != null) {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = state.error,
-                fontSize = 13.sp,
-                color = MerlotColors.Danger
-            )
+            Text(text = state.error, fontSize = 13.sp, color = MerlotColors.Danger)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -213,11 +223,7 @@ private fun SignInView(
                 modifier = Modifier.width(140.dp)
             )
             if (state.isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(40.dp),
-                    color = MerlotColors.Accent,
-                    strokeWidth = 3.dp
-                )
+                CircularProgressIndicator(modifier = Modifier.size(40.dp), color = MerlotColors.Accent, strokeWidth = 3.dp)
             } else {
                 AccountActionButton(
                     text = "Sign In",
@@ -279,11 +285,7 @@ private fun SignUpView(
 
         if (state.error != null) {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = state.error,
-                fontSize = 13.sp,
-                color = MerlotColors.Danger
-            )
+            Text(text = state.error, fontSize = 13.sp, color = MerlotColors.Danger)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -296,11 +298,7 @@ private fun SignUpView(
                 modifier = Modifier.width(140.dp)
             )
             if (state.isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(40.dp),
-                    color = MerlotColors.Accent,
-                    strokeWidth = 3.dp
-                )
+                CircularProgressIndicator(modifier = Modifier.size(40.dp), color = MerlotColors.Accent, strokeWidth = 3.dp)
             } else {
                 AccountActionButton(
                     text = "Create",
@@ -314,8 +312,140 @@ private fun SignUpView(
     }
 }
 
+// ───── QR Code Device Login ─────
+
 @Composable
-private fun DeviceCodePlaceholder(
+private fun DeviceCodeView(
+    state: AccountUiState,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        if (state.isLoading || state.deviceCode == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(48.dp),
+                color = MerlotColors.Accent,
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Generating code...",
+                fontSize = 16.sp,
+                color = MerlotColors.TextMuted
+            )
+        } else {
+            // Title
+            Text(
+                text = "Scan to Sign In",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MerlotColors.TextPrimary
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(32.dp)
+            ) {
+                // QR Code
+                val qrUrl = "$LINK_BASE_URL?code=${state.deviceCode}"
+                val qrBitmap = remember(qrUrl) { generateQrBitmap(qrUrl, 280) }
+                if (qrBitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .padding(8.dp)
+                    ) {
+                        Image(
+                            bitmap = qrBitmap.asImageBitmap(),
+                            contentDescription = "QR code for login",
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                // Instructions
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "1. Scan the QR code with your phone",
+                        fontSize = 14.sp,
+                        color = MerlotColors.TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "2. Sign in with your MerlotTV account",
+                        fontSize = 14.sp,
+                        color = MerlotColors.TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "3. Your TV will connect automatically",
+                        fontSize = 14.sp,
+                        color = MerlotColors.TextPrimary
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Code display
+                    Text(
+                        text = "Or enter this code:",
+                        fontSize = 12.sp,
+                        color = MerlotColors.TextMuted
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val displayCode = state.deviceCode.let {
+                        if (it.length == 6) "${it.substring(0, 3)}-${it.substring(3)}" else it
+                    }
+                    Text(
+                        text = displayCode,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MerlotColors.Accent,
+                        letterSpacing = 4.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Countdown
+                    val minutes = state.deviceCodeExpiresIn / 60
+                    val seconds = state.deviceCodeExpiresIn % 60
+                    val timeColor = if (state.deviceCodeExpiresIn < 60) MerlotColors.Danger else MerlotColors.TextMuted
+                    Text(
+                        text = "Expires in ${minutes}:${"%02d".format(seconds)}",
+                        fontSize = 13.sp,
+                        color = timeColor
+                    )
+                }
+            }
+
+            if (state.error != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(text = state.error, fontSize = 13.sp, color = MerlotColors.Danger)
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            AccountActionButton(
+                text = "Cancel",
+                icon = Icons.Default.ArrowBack,
+                onClick = onBack,
+                isPrimary = false
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeviceCodePasswordView(
+    state: AccountUiState,
+    onPasswordChange: (String) -> Unit,
+    onSubmit: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -324,32 +454,68 @@ private fun DeviceCodePlaceholder(
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.Devices,
+            imageVector = Icons.Default.QrCode2,
             contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MerlotColors.Accent
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Device Code Login",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = MerlotColors.TextPrimary
+            modifier = Modifier.size(48.dp),
+            tint = MerlotColors.Success
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Coming soon — sign in on your phone and link this TV automatically",
+            text = "Device Linked!",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = MerlotColors.Success
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Enter password for:",
             fontSize = 14.sp,
-            color = MerlotColors.TextMuted,
-            modifier = Modifier.padding(horizontal = 40.dp)
+            color = MerlotColors.TextMuted
         )
-        Spacer(modifier = Modifier.height(24.dp))
-        AccountActionButton(
-            text = "Back",
-            icon = Icons.Default.ArrowBack,
-            onClick = onBack,
-            isPrimary = false
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = state.linkedEmail ?: state.email,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = MerlotColors.Accent
         )
+        Spacer(modifier = Modifier.height(20.dp))
+
+        AccountTextField(
+            value = state.password,
+            onValueChange = onPasswordChange,
+            label = "Password",
+            icon = Icons.Default.Lock,
+            isPassword = true,
+            onSubmit = onSubmit
+        )
+
+        if (state.error != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(text = state.error, fontSize = 13.sp, color = MerlotColors.Danger)
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AccountActionButton(
+                text = "Back",
+                icon = Icons.Default.ArrowBack,
+                onClick = onBack,
+                isPrimary = false,
+                modifier = Modifier.width(140.dp)
+            )
+            if (state.isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(40.dp), color = MerlotColors.Accent, strokeWidth = 3.dp)
+            } else {
+                AccountActionButton(
+                    text = "Sign In",
+                    icon = Icons.Default.Login,
+                    onClick = onSubmit,
+                    isPrimary = true,
+                    modifier = Modifier.width(140.dp)
+                )
+            }
+        }
     }
 }
 
@@ -363,7 +529,6 @@ private fun SignedInView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Avatar circle
         Box(
             modifier = Modifier
                 .size(80.dp)
@@ -393,8 +558,6 @@ private fun SignedInView(
             color = MerlotColors.Accent
         )
         Spacer(modifier = Modifier.height(8.dp))
-
-        // Sync status badge
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
@@ -408,15 +571,14 @@ private fun SignedInView(
                 fontWeight = FontWeight.Medium
             )
         }
-
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Your favorites, watch history, and settings sync across all your MerlotTV devices",
             fontSize = 13.sp,
             color = MerlotColors.TextMuted,
-            modifier = Modifier.padding(horizontal = 40.dp)
+            modifier = Modifier.padding(horizontal = 40.dp),
+            textAlign = TextAlign.Center
         )
-
         Spacer(modifier = Modifier.height(32.dp))
         AccountActionButton(
             text = "Sign Out",
@@ -425,6 +587,24 @@ private fun SignedInView(
             isPrimary = false,
             buttonColor = MerlotColors.Danger
         )
+    }
+}
+
+// ───── QR Code Generation ─────
+
+private fun generateQrBitmap(content: String, size: Int): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
+        for (x in 0 until size) {
+            for (y in 0 until size) {
+                bitmap.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        bitmap
+    } catch (_: Exception) {
+        null
     }
 }
 

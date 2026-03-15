@@ -1,6 +1,7 @@
 package com.merlottv.kotlin.core.di
 
 import com.merlottv.kotlin.data.repository.AuthRepositoryImpl
+import com.merlottv.kotlin.data.repository.DeviceCodeRepositoryImpl
 import com.merlottv.kotlin.data.repository.AddonRepositoryImpl
 import com.merlottv.kotlin.data.repository.ChannelRepositoryImpl
 import com.merlottv.kotlin.data.repository.EpgRepositoryImpl
@@ -9,6 +10,7 @@ import com.merlottv.kotlin.data.repository.FavoritesRepositoryImpl
 import com.merlottv.kotlin.data.repository.SpaceXRepositoryImpl
 import com.merlottv.kotlin.data.repository.WeatherRepositoryImpl
 import com.merlottv.kotlin.domain.repository.AuthRepository
+import com.merlottv.kotlin.domain.repository.DeviceCodeRepository
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.ChannelRepository
 import com.merlottv.kotlin.domain.repository.EpgRepository
@@ -29,6 +31,10 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindAuthRepository(impl: AuthRepositoryImpl): AuthRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDeviceCodeRepository(impl: DeviceCodeRepositoryImpl): DeviceCodeRepository
 
     @Binds
     @Singleton

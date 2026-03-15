@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MerlotTV - Link Device</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0D0D0D;
+            color: #E8E8F0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 400px;
+            padding: 24px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .logo h1 {
+            color: #00E5FF;
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: 2px;
+        }
+        .logo p {
+            color: #6B6B80;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        .card {
+            background: #161620;
+            border: 1px solid #2A2A3A;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .card h2 {
+            font-size: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #6B6B80;
+            margin-bottom: 6px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #111118;
+            border: 1px solid #2A2A3A;
+            border-radius: 8px;
+            color: #E8E8F0;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            border-color: #00E5FF;
+        }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary {
+            background: #00E5FF;
+            color: #000;
+        }
+        .btn-secondary {
+            background: #1A1A24;
+            color: #E8E8F0;
+            border: 1px solid #2A2A3A;
+            margin-top: 12px;
+        }
+        .error {
+            background: rgba(255, 71, 87, 0.15);
+            color: #FF4757;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .success {
+            text-align: center;
+            padding: 32px 0;
+        }
+        .success .check {
+            width: 64px;
+            height: 64px;
+            background: rgba(0, 214, 143, 0.15);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            font-size: 32px;
+        }
+        .success h2 { color: #00D68F; }
+        .success p { color: #6B6B80; margin-top: 8px; font-size: 14px; }
+        .code-display {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #111118;
+            border-radius: 8px;
+            border: 1px solid #2A2A3A;
+        }
+        .code-display .label { font-size: 12px; color: #6B6B80; }
+        .code-display .code {
+            font-size: 24px;
+            font-weight: 700;
+            color: #00E5FF;
+            letter-spacing: 4px;
+            margin-top: 4px;
+        }
+        .hidden { display: none !important; }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid transparent;
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Code entry screen */
+        .code-input-group {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .code-input-group input {
+            width: 48px;
+            height: 56px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: 700;
+            background: #111118;
+            border: 2px solid #2A2A3A;
+            border-radius: 8px;
+            color: #00E5FF;
+            outline: none;
+            text-transform: uppercase;
+        }
+        .code-input-group input:focus {
+            border-color: #00E5FF;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>MERLOT TV</h1>
+            <p>Link your TV device</p>
+        </div>
+
+        <!-- Step 1: Enter code (if not in URL) -->
+        <div class="card" id="step-code">
+            <h2>Enter Device Code</h2>
+            <p style="color: #6B6B80; font-size: 13px; text-align: center; margin-bottom: 20px;">
+                Enter the code shown on your TV screen
+            </p>
+            <div class="code-input-group" id="code-inputs">
+                <input type="text" maxlength="1" data-index="0" autocomplete="off">
+                <input type="text" maxlength="1" data-index="1" autocomplete="off">
+                <input type="text" maxlength="1" data-index="2" autocomplete="off">
+                <span style="color: #6B6B80; font-size: 24px; line-height: 56px;">-</span>
+                <input type="text" maxlength="1" data-index="3" autocomplete="off">
+                <input type="text" maxlength="1" data-index="4" autocomplete="off">
+                <input type="text" maxlength="1" data-index="5" autocomplete="off">
+            </div>
+            <div class="error" id="code-error"></div>
+            <button class="btn btn-primary" id="btn-verify-code">Continue</button>
+        </div>
+
+        <!-- Step 2: Sign in -->
+        <div class="card hidden" id="step-signin">
+            <h2>Sign In</h2>
+            <div class="code-display" id="code-display-box">
+                <div class="label">Linking code</div>
+                <div class="code" id="display-code"></div>
+            </div>
+            <div class="error" id="signin-error"></div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
+            </div>
+            <button class="btn btn-primary" id="btn-signin">
+                Sign In & Link Device
+            </button>
+            <button class="btn btn-secondary" id="btn-back-to-code">Back</button>
+        </div>
+
+        <!-- Step 3: Success -->
+        <div class="card hidden" id="step-success">
+            <div class="success">
+                <div class="check">&#10003;</div>
+                <h2>Device Linked!</h2>
+                <p>Your TV will sign in automatically.<br>You can close this page.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase JS SDK (compat mode for simplicity) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script>
+        // Firebase config — matches the Android app's google-services.json
+        firebase.initializeApp({
+            apiKey: "AIzaSyC9eMpUTlUyjWP5NzHeifaKrVS-PFaoSJc",
+            authDomain: "merlot-tv.firebaseapp.com",
+            projectId: "merlot-tv",
+            storageBucket: "merlot-tv.firebasestorage.app",
+            messagingSenderId: "1056416360946",
+            appId: "1:1056416360946:android:b2ae3f20655629f569636b"
+        });
+
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        let currentCode = '';
+
+        // Check URL for code parameter
+        const params = new URLSearchParams(window.location.search);
+        const urlCode = params.get('code');
+        if (urlCode && urlCode.length === 6) {
+            currentCode = urlCode.toUpperCase();
+            showSignIn();
+        }
+
+        // ─── Code input handling ───
+        const codeInputs = document.querySelectorAll('#code-inputs input');
+        codeInputs.forEach((input, i) => {
+            input.addEventListener('input', (e) => {
+                const val = e.target.value.toUpperCase();
+                e.target.value = val;
+                if (val && i < 5) {
+                    codeInputs[i + 1].focus();
+                }
+                // Auto-submit when all filled
+                const full = Array.from(codeInputs).map(inp => inp.value).join('');
+                if (full.length === 6) {
+                    currentCode = full;
+                    verifyCode();
+                }
+            });
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Backspace' && !e.target.value && i > 0) {
+                    codeInputs[i - 1].focus();
+                }
+            });
+            // Handle paste
+            input.addEventListener('paste', (e) => {
+                e.preventDefault();
+                const pasted = (e.clipboardData.getData('text') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                for (let j = 0; j < Math.min(pasted.length, 6 - i); j++) {
+                    codeInputs[i + j].value = pasted[j];
+                }
+                const nextEmpty = Array.from(codeInputs).findIndex(inp => !inp.value);
+                if (nextEmpty >= 0) codeInputs[nextEmpty].focus();
+                else codeInputs[5].focus();
+
+                const full = Array.from(codeInputs).map(inp => inp.value).join('');
+                if (full.length === 6) {
+                    currentCode = full;
+                    verifyCode();
+                }
+            });
+        });
+
+        document.getElementById('btn-verify-code').addEventListener('click', () => {
+            const full = Array.from(codeInputs).map(inp => inp.value).join('');
+            if (full.length !== 6) {
+                showError('code-error', 'Please enter all 6 characters');
+                return;
+            }
+            currentCode = full.toUpperCase();
+            verifyCode();
+        });
+
+        async function verifyCode() {
+            try {
+                const doc = await db.collection('device_codes').doc(currentCode).get();
+                if (!doc.exists) {
+                    showError('code-error', 'Invalid code. Check the code on your TV and try again.');
+                    return;
+                }
+                if (doc.data().status !== 'pending') {
+                    showError('code-error', 'This code has already been used or expired.');
+                    return;
+                }
+                showSignIn();
+            } catch (err) {
+                showError('code-error', 'Could not verify code. Please try again.');
+            }
+        }
+
+        function showSignIn() {
+            document.getElementById('step-code').classList.add('hidden');
+            document.getElementById('step-signin').classList.remove('hidden');
+            const display = currentCode.substring(0, 3) + '-' + currentCode.substring(3);
+            document.getElementById('display-code').textContent = display;
+            document.getElementById('email').focus();
+        }
+
+        document.getElementById('btn-back-to-code').addEventListener('click', () => {
+            document.getElementById('step-signin').classList.add('hidden');
+            document.getElementById('step-code').classList.remove('hidden');
+            currentCode = '';
+            codeInputs.forEach(inp => inp.value = '');
+            codeInputs[0].focus();
+        });
+
+        // ─── Sign in & link ───
+        document.getElementById('btn-signin').addEventListener('click', doSignIn);
+        document.getElementById('password').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doSignIn();
+        });
+
+        async function doSignIn() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const btn = document.getElementById('btn-signin');
+
+            if (!email || !password) {
+                showError('signin-error', 'Email and password are required');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Signing in...';
+            hideError('signin-error');
+
+            try {
+                await auth.signInWithEmailAndPassword(email, password);
+
+                // Write the email to the device code document so the TV can read it
+                await db.collection('device_codes').doc(currentCode).update({
+                    status: 'linked',
+                    email: email
+                });
+
+                // Show success
+                document.getElementById('step-signin').classList.add('hidden');
+                document.getElementById('step-success').classList.remove('hidden');
+
+                // Sign out from web (TV will sign in separately)
+                await auth.signOut();
+            } catch (err) {
+                let msg = 'Sign in failed';
+                if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+                    msg = 'Invalid email or password';
+                } else if (err.code === 'auth/user-not-found') {
+                    msg = 'No account found with this email';
+                } else if (err.code === 'auth/too-many-requests') {
+                    msg = 'Too many attempts. Try again later.';
+                } else if (err.code === 'auth/network-request-failed') {
+                    msg = 'Network error. Check your connection.';
+                }
+                showError('signin-error', msg);
+                btn.disabled = false;
+                btn.textContent = 'Sign In & Link Device';
+            }
+        }
+
+        function showError(id, msg) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+        function hideError(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+    </script>
+</body>
+</html>

@@ -3,7 +3,11 @@ package com.merlottv.kotlin.ui.screens.account
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.domain.repository.AuthRepository
+import com.merlottv.kotlin.domain.repository.DeviceCodeRepository
+import com.merlottv.kotlin.domain.repository.DeviceCodeStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +20,7 @@ enum class AccountMode {
     SIGN_IN,
     SIGN_UP,
     DEVICE_CODE,
+    DEVICE_CODE_PASSWORD,
     SIGNED_IN
 }
 
@@ -26,29 +31,39 @@ data class AccountUiState(
     val confirmPassword: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
-    val userEmail: String? = null
+    val userEmail: String? = null,
+    val deviceCode: String? = null,
+    val deviceCodeExpiresIn: Int = 600,
+    val linkedEmail: String? = null
 )
 
 @HiltViewModel
 class AccountViewModel @Inject constructor(
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val deviceCodeRepository: DeviceCodeRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AccountUiState())
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
+
+    private var deviceCodeJob: Job? = null
+    private var countdownJob: Job? = null
 
     init {
         viewModelScope.launch {
             authRepository.currentUser.collect { user ->
                 _uiState.update { state ->
                     if (user != null) {
+                        cancelDeviceCodeFlow()
                         state.copy(
                             mode = AccountMode.SIGNED_IN,
                             userEmail = user.email,
                             isLoading = false,
                             error = null,
                             password = "",
-                            confirmPassword = ""
+                            confirmPassword = "",
+                            deviceCode = null,
+                            linkedEmail = null
                         )
                     } else {
                         state.copy(
@@ -69,12 +84,72 @@ class AccountViewModel @Inject constructor(
         _uiState.update { it.copy(mode = AccountMode.SIGN_UP, error = null, email = "", password = "", confirmPassword = "") }
     }
 
-    fun showDeviceCode() {
-        _uiState.update { it.copy(mode = AccountMode.DEVICE_CODE, error = null) }
+    fun startDeviceCodeFlow() {
+        cancelDeviceCodeFlow()
+        _uiState.update { it.copy(mode = AccountMode.DEVICE_CODE, error = null, isLoading = true, deviceCode = null, deviceCodeExpiresIn = 600) }
+
+        deviceCodeJob = viewModelScope.launch {
+            try {
+                val code = deviceCodeRepository.generateCode()
+                _uiState.update { it.copy(deviceCode = code, isLoading = false) }
+
+                countdownJob = launch {
+                    var remaining = 600
+                    while (remaining > 0) {
+                        _uiState.update { it.copy(deviceCodeExpiresIn = remaining) }
+                        delay(1000)
+                        remaining--
+                    }
+                    _uiState.update { it.copy(mode = AccountMode.SIGNED_OUT, error = "Code expired", deviceCode = null) }
+                    deviceCodeRepository.deleteCode(code)
+                }
+
+                deviceCodeRepository.observeCodeStatus(code).collect { status ->
+                    when (status) {
+                        is DeviceCodeStatus.Linked -> {
+                            countdownJob?.cancel()
+                            _uiState.update {
+                                it.copy(
+                                    mode = AccountMode.DEVICE_CODE_PASSWORD,
+                                    linkedEmail = status.email,
+                                    email = status.email,
+                                    password = "",
+                                    error = null
+                                )
+                            }
+                            deviceCodeRepository.deleteCode(code)
+                        }
+                        is DeviceCodeStatus.Expired -> {
+                            countdownJob?.cancel()
+                            _uiState.update { it.copy(mode = AccountMode.SIGNED_OUT, error = "Code expired", deviceCode = null) }
+                        }
+                        is DeviceCodeStatus.Error -> {
+                            countdownJob?.cancel()
+                            _uiState.update { it.copy(error = status.message) }
+                        }
+                        DeviceCodeStatus.Pending -> { /* waiting */ }
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = "Failed to generate code: ${e.message}") }
+            }
+        }
+    }
+
+    private fun cancelDeviceCodeFlow() {
+        deviceCodeJob?.cancel()
+        countdownJob?.cancel()
+        deviceCodeJob = null
+        countdownJob = null
     }
 
     fun goBack() {
-        _uiState.update { it.copy(mode = AccountMode.SIGNED_OUT, error = null, email = "", password = "", confirmPassword = "") }
+        cancelDeviceCodeFlow()
+        val currentCode = _uiState.value.deviceCode
+        if (currentCode != null) {
+            viewModelScope.launch { deviceCodeRepository.deleteCode(currentCode) }
+        }
+        _uiState.update { it.copy(mode = AccountMode.SIGNED_OUT, error = null, email = "", password = "", confirmPassword = "", deviceCode = null, linkedEmail = null) }
     }
 
     fun updateEmail(value: String) {
@@ -98,6 +173,22 @@ class AccountViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             authRepository.signInWithEmail(state.email.trim(), state.password)
+                .onFailure { e ->
+                    _uiState.update { it.copy(isLoading = false, error = formatError(e)) }
+                }
+        }
+    }
+
+    fun signInWithLinkedEmail() {
+        val state = _uiState.value
+        val email = state.linkedEmail ?: state.email
+        if (email.isBlank() || state.password.isBlank()) {
+            _uiState.update { it.copy(error = "Password is required") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            authRepository.signInWithEmail(email.trim(), state.password)
                 .onFailure { e ->
                     _uiState.update { it.copy(isLoading = false, error = formatError(e)) }
                 }
@@ -148,5 +239,10 @@ class AccountViewModel @Inject constructor(
                 "Too many attempts — try again later"
             else -> msg
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        cancelDeviceCodeFlow()
     }
 }
