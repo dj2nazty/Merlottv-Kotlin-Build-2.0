@@ -25,8 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import com.merlottv.kotlin.ui.components.MerlotChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,50 +99,22 @@ fun VodScreen(
             val tabs = listOf("All", "Movies", "Series")
             tabs.forEach { tab ->
                 val isSelected = uiState.selectedTab == tab
-                var isFocused by remember { mutableStateOf(false) }
 
-                FilterChip(
+                MerlotChip(
                     selected = isSelected,
                     onClick = { viewModel.onTabSelected(tab) },
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
                             when (tab) {
-                                "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp))
-                                "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp))
+                                "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
+                                "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
                                 else -> {}
                             }
                             if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
-                            Text(tab, fontSize = 12.sp)
+                            Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
                         }
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isFocused) Color(0xFF555555) else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        selectedContainerColor = MerlotColors.Accent,
-                        selectedLabelColor = MerlotColors.Black,
-                        selectedLeadingIconColor = MerlotColors.Black,
-                        selectedTrailingIconColor = MerlotColors.Black
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
-                        selectedBorderColor = MerlotColors.Accent,
-                        borderWidth = if (isFocused) 2.dp else 1.dp,
-                        selectedBorderWidth = 1.dp,
-                        enabled = true,
-                        selected = isSelected
-                    ),
-                    modifier = Modifier
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                            ) {
-                                viewModel.onTabSelected(tab)
-                                true
-                            } else false
-                        }
+                    }
                 )
             }
 

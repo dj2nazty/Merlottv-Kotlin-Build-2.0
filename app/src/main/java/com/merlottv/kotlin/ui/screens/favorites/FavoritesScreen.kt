@@ -28,8 +28,7 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import com.merlottv.kotlin.ui.components.MerlotChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -96,154 +95,52 @@ fun FavoritesScreen(
             val builtInTabs = listOf("All", "Movies", "Series", "Channels")
             builtInTabs.forEach { tab ->
                 val isSelected = uiState.selectedTab == tab
-                var isFocused by remember { mutableStateOf(false) }
 
-                FilterChip(
+                MerlotChip(
                     selected = isSelected,
                     onClick = { viewModel.selectTab(tab) },
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
                             when (tab) {
-                                "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.height(14.dp))
-                                "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.height(14.dp))
-                                "Channels" -> Icon(Icons.Default.LiveTv, null, modifier = Modifier.height(14.dp))
+                                "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.height(14.dp), tint = tint)
+                                "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.height(14.dp), tint = tint)
+                                "Channels" -> Icon(Icons.Default.LiveTv, null, modifier = Modifier.height(14.dp), tint = tint)
                                 else -> {}
                             }
                             if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
-                            Text(tab, fontSize = 12.sp)
+                            Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
                         }
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        selectedContainerColor = MerlotColors.Accent,
-                        selectedLabelColor = MerlotColors.Black,
-                        selectedLeadingIconColor = MerlotColors.Black,
-                        selectedTrailingIconColor = MerlotColors.Black
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
-                        selectedBorderColor = MerlotColors.Accent,
-                        borderWidth = if (isFocused) 2.dp else 1.dp,
-                        selectedBorderWidth = 1.dp,
-                        enabled = true,
-                        selected = isSelected
-                    ),
-                    modifier = Modifier
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                            ) {
-                                viewModel.selectTab(tab)
-                                true
-                            } else false
-                        }
+                    }
                 )
             }
 
             // Custom list tabs
             uiState.customLists.keys.forEach { listName ->
                 val isSelected = uiState.selectedTab == listName
-                var isFocused by remember { mutableStateOf(false) }
 
-                FilterChip(
+                MerlotChip(
                     selected = isSelected,
                     onClick = { viewModel.selectTab(listName) },
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.List, null, modifier = Modifier.height(14.dp))
+                            val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
+                            Icon(Icons.Default.List, null, modifier = Modifier.height(14.dp), tint = tint)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(listName, fontSize = 12.sp)
-                            if (isFocused || isSelected) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Delete list",
-                                    modifier = Modifier
-                                        .height(14.dp)
-                                        .onFocusChanged { }
-                                        .focusable()
-                                        .onPreviewKeyEvent { event ->
-                                            if (event.type == KeyEventType.KeyDown &&
-                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                            ) {
-                                                viewModel.deleteList(listName)
-                                                true
-                                            } else false
-                                        }
-                                )
-                            }
+                            Text(listName, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
                         }
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        selectedContainerColor = MerlotColors.Accent,
-                        selectedLabelColor = MerlotColors.Black,
-                        selectedLeadingIconColor = MerlotColors.Black,
-                        selectedTrailingIconColor = MerlotColors.Black
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
-                        selectedBorderColor = MerlotColors.Accent,
-                        borderWidth = if (isFocused) 2.dp else 1.dp,
-                        selectedBorderWidth = 1.dp,
-                        enabled = true,
-                        selected = isSelected
-                    ),
-                    modifier = Modifier
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                            ) {
-                                viewModel.selectTab(listName)
-                                true
-                            } else false
-                        }
+                    }
                 )
             }
 
             // "+" button to create a new list
-            run {
-                var isFocused by remember { mutableStateOf(false) }
-                FilterChip(
-                    selected = false,
-                    onClick = { viewModel.showCreateListDialog() },
-                    label = {
-                        Icon(Icons.Default.Add, contentDescription = "Create list", modifier = Modifier.height(14.dp))
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (isFocused) FocusedGrey else MerlotColors.Surface2,
-                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (isFocused) Color(0xFF888888) else MerlotColors.Border,
-                        selectedBorderColor = MerlotColors.Accent,
-                        borderWidth = if (isFocused) 2.dp else 1.dp,
-                        selectedBorderWidth = 1.dp,
-                        enabled = true,
-                        selected = false
-                    ),
-                    modifier = Modifier
-                        .onFocusChanged { isFocused = it.isFocused }
-                        .focusable()
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                            ) {
-                                viewModel.showCreateListDialog()
-                                true
-                            } else false
-                        }
-                )
-            }
+            MerlotChip(
+                selected = false,
+                onClick = { viewModel.showCreateListDialog() },
+                label = {
+                    Icon(Icons.Default.Add, contentDescription = "Create list", modifier = Modifier.height(14.dp), tint = MerlotColors.TextPrimary)
+                }
+            )
 
             Spacer(modifier = Modifier.weight(1f))
 

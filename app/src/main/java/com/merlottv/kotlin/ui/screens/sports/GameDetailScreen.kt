@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.*
+import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 @Composable
@@ -173,36 +174,13 @@ private fun GameHeader(summary: SportGameSummary) {
 
 @Composable
 private fun GameDetailChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    var isFocused by remember { mutableStateOf(false) }
-    FilterChip(
+    MerlotChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) },
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = if (isFocused) Color(0xFF555555) else MerlotColors.Surface2,
-            labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-            iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-            selectedContainerColor = MerlotColors.Accent,
-            selectedLabelColor = MerlotColors.Black,
-            selectedLeadingIconColor = MerlotColors.Black,
-            selectedTrailingIconColor = MerlotColors.Black
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            borderColor = if (isFocused) MerlotColors.Accent else MerlotColors.Border,
-            selectedBorderColor = MerlotColors.Accent,
-            borderWidth = if (isFocused) 2.dp else 1.dp,
-            selectedBorderWidth = 1.dp,
-            enabled = true,
-            selected = selected
-        ),
-        modifier = Modifier
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                    onClick(); true
-                } else false
-            }
+        label = {
+            Text(label, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) MerlotColors.Black else MerlotColors.TextPrimary)
+        }
     )
 }
 

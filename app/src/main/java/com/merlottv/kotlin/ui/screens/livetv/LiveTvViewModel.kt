@@ -152,6 +152,9 @@ class LiveTvViewModel @Inject constructor(
     private var sessionTotalRebufferMs = 0L
     private var wasPlayingBeforeBuffer = false
 
+    // Stall watchdog — auto-reconnects when buffering exceeds threshold
+    private var stallWatchdogJob: Job? = null
+
     // ═══════════════════════════════════════════════════════════════════
     // Priority Connection Pre-Warm — keeps favorite channel connections hot
     // No background decoders (saves hardware codecs for the active player).
@@ -163,6 +166,8 @@ class LiveTvViewModel @Inject constructor(
         private const val MAX_PREWARM_CHANNELS = 4
         private const val PREWARM_BYTES = 256 * 1024 // 256KB prefetch per channel
         private const val PREWARM_REFRESH_MS = 30_000L // Re-warm every 30s to keep connections alive
+        private const val STALL_WATCHDOG_MS = 30_000L // Auto-reconnect after 30s of buffering
+        private const val VLC_STALL_WATCHDOG_MS = 20_000L // VLC stall timeout (shorter, VLC buffers less)
 
         // Local affiliate channels that can't handle Apollo's aggressive 10-min buffer.
         // These get a gentle TiviMate-style config instead.
@@ -327,6 +332,21 @@ class LiveTvViewModel @Inject constructor(
                         Log.d("LiveTvVM", "VLC: Buffering ${pct}%")
                         if (pct < 100f) {
                             _uiState.value = _uiState.value.copy(isBuffering = true)
+                            // Start VLC stall watchdog — auto-failover if stuck buffering
+                            if (vlcBufferTimeout?.isActive != true) {
+                                vlcBufferTimeout = viewModelScope.launch {
+                                    delay(VLC_STALL_WATCHDOG_MS)
+                                    if (isPlayerReleased) return@launch
+                                    if (_uiState.value.isBuffering && _uiState.value.isUsingVlc) {
+                                        Log.w("LiveTvVM", "VLC stall watchdog triggered — buffering for ${VLC_STALL_WATCHDOG_MS / 1000}s, failing over")
+                                        stopVlc()
+                                        switchToExoPlayer()
+                                        handlePlaybackError()
+                                    }
+                                }
+                            }
+                        } else {
+                            vlcBufferTimeout?.cancel()
                         }
                     }
                     VlcMediaPlayer.Event.EncounteredError -> {
@@ -573,6 +593,9 @@ class LiveTvViewModel @Inject constructor(
                             Player.STATE_READY -> {
                                 updateFrameRate()
                                 updateBitrate()
+                                // Cancel stall watchdog — stream is alive
+                                stallWatchdogJob?.cancel()
+                                stallWatchdogJob = null
                                 // Track rebuffer end
                                 if (wasPlayingBeforeBuffer && rebufferStartTime > 0) {
                                     val rebufferDuration = System.currentTimeMillis() - rebufferStartTime
@@ -600,8 +623,25 @@ class LiveTvViewModel @Inject constructor(
                                             rebufferCount = sessionRebufferCount
                                         )
                                         Log.d("LiveTvVM", "Rebuffer #$sessionRebufferCount started")
+
+                                        // Start stall watchdog — if still buffering after 30s, auto-reconnect
+                                        stallWatchdogJob?.cancel()
+                                        stallWatchdogJob = viewModelScope.launch {
+                                            delay(STALL_WATCHDOG_MS)
+                                            if (isPlayerReleased) return@launch
+                                            if (_uiState.value.isBuffering) {
+                                                Log.w("LiveTvVM", "Stall watchdog triggered — buffering for ${STALL_WATCHDOG_MS / 1000}s, forcing reconnect")
+                                                handlePlaybackError()
+                                            }
+                                        }
                                     }
                                 }
+                            }
+                            Player.STATE_ENDED -> {
+                                // Stream ended unexpectedly — force reconnect
+                                Log.w("LiveTvVM", "Stream ended unexpectedly, forcing reconnect")
+                                stallWatchdogJob?.cancel()
+                                handlePlaybackError()
                             }
                         }
                     }
@@ -885,6 +925,10 @@ class LiveTvViewModel @Inject constructor(
         sessionTotalRebufferMs = 0L
         rebufferStartTime = 0L
         wasPlayingBeforeBuffer = false
+
+        // Cancel any active stall watchdog
+        stallWatchdogJob?.cancel()
+        stallWatchdogJob = null
 
         // If VLC is active, stop it and switch back to ExoPlayer for new channel
         if (_uiState.value.isUsingVlc) {
@@ -1559,6 +1603,7 @@ class LiveTvViewModel @Inject constructor(
         super.onCleared()
         isPlayerReleased = true
         failoverMessageJob?.cancel()
+        stallWatchdogJob?.cancel()
         // Cancel all pre-warm jobs
         for ((id, job) in prewarmJobs) {
             job.cancel()

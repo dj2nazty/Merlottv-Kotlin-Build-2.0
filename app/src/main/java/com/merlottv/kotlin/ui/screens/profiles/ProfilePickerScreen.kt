@@ -34,8 +34,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import com.merlottv.kotlin.ui.components.MerlotChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -279,36 +278,13 @@ private fun CreateProfileDialog(
         // Tab selector: Colors vs Avatars
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Colors", "Avatars").forEach { tab ->
-                var chipFocused by remember { mutableStateOf(false) }
-                FilterChip(
-                    selected = avatarTab == tab,
+                val isSelected = avatarTab == tab
+                MerlotChip(
+                    selected = isSelected,
                     onClick = { avatarTab = tab },
-                    label = { Text(tab, fontSize = 12.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (chipFocused) Color(0xFF555555) else MerlotColors.Surface2,
-                        labelColor = if (chipFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        iconColor = if (chipFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                        selectedContainerColor = MerlotColors.Accent,
-                        selectedLabelColor = MerlotColors.Black,
-                        selectedLeadingIconColor = MerlotColors.Black,
-                        selectedTrailingIconColor = MerlotColors.Black
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (chipFocused) MerlotColors.Accent else MerlotColors.Border,
-                        selectedBorderColor = MerlotColors.Accent,
-                        borderWidth = if (chipFocused) 2.dp else 1.dp,
-                        selectedBorderWidth = 1.dp,
-                        enabled = true,
-                        selected = avatarTab == tab
-                    ),
-                    modifier = Modifier
-                        .onFocusChanged { chipFocused = it.isFocused }
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
-                                avatarTab = tab; true
-                            } else false
-                        }
-                        .focusable()
+                    label = {
+                        Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                    }
                 )
             }
         }

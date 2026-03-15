@@ -42,6 +42,7 @@ import com.merlottv.kotlin.ui.components.MerlotLoadingScreen
 import com.merlottv.kotlin.ui.components.TrailerPlayer
 import com.merlottv.kotlin.ui.components.TrailerPlayerEntryPoint
 import com.merlottv.kotlin.ui.components.YouTubeWebPlayer
+import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
@@ -170,43 +171,18 @@ fun SpaceXScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(SpaceXTab.entries.toList()) { tab ->
-                    var chipFocused by remember { mutableStateOf(false) }
-                    FilterChip(
-                        selected = uiState.selectedTab == tab,
+                    val isSelected = uiState.selectedTab == tab
+                    MerlotChip(
+                        selected = isSelected,
                         onClick = { viewModel.selectTab(tab) },
+                        containerColor = Color(0xFF2A2A2A),
                         label = {
                             Text(
                                 tab.title,
-                                fontWeight = if (uiState.selectedTab == tab) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MerlotColors.Black else MerlotColors.TextMuted
                             )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = if (chipFocused) Color(0xFF555555) else Color(0xFF2A2A2A),
-                            labelColor = if (chipFocused) MerlotColors.White else MerlotColors.TextMuted,
-                            iconColor = if (chipFocused) MerlotColors.White else MerlotColors.TextMuted,
-                            selectedContainerColor = MerlotColors.Accent,
-                            selectedLabelColor = MerlotColors.Black,
-                            selectedLeadingIconColor = MerlotColors.Black,
-                            selectedTrailingIconColor = MerlotColors.Black
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = if (chipFocused) MerlotColors.Accent else Color.Transparent,
-                            selectedBorderColor = MerlotColors.Accent,
-                            borderWidth = if (chipFocused) 2.dp else 1.dp,
-                            selectedBorderWidth = 1.dp,
-                            enabled = true,
-                            selected = uiState.selectedTab == tab
-                        ),
-                        modifier = Modifier
-                            .onFocusChanged { chipFocused = it.isFocused }
-                            .focusable()
-                            .onPreviewKeyEvent { event ->
-                                if (event.type == KeyEventType.KeyDown &&
-                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                ) {
-                                    viewModel.selectTab(tab); true
-                                } else false
-                            }
+                        }
                     )
                 }
             }

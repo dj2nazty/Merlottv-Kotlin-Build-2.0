@@ -33,8 +33,7 @@ import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import com.merlottv.kotlin.ui.components.MerlotChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.SuggestionChip
@@ -516,39 +515,12 @@ fun VodDetailScreen(
                         ) {
                             items(uiState.seasons) { season ->
                                 val isSelected = uiState.selectedSeason == season
-                                var isFocused by remember { mutableStateOf(false) }
-                                FilterChip(
+                                MerlotChip(
                                     selected = isSelected,
                                     onClick = { viewModel.selectSeason(season) },
-                                    label = { Text("Season $season", fontSize = 12.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = if (isFocused) FocusedButtonGrey else MerlotColors.Surface2,
-                                        labelColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                                        iconColor = if (isFocused) MerlotColors.White else MerlotColors.TextPrimary,
-                                        selectedContainerColor = MerlotColors.Accent,
-                                        selectedLabelColor = MerlotColors.Black,
-                                        selectedLeadingIconColor = MerlotColors.Black,
-                                        selectedTrailingIconColor = MerlotColors.Black
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        borderColor = if (isFocused) FocusedButtonGreyLight else MerlotColors.Border,
-                                        selectedBorderColor = MerlotColors.Accent,
-                                        borderWidth = if (isFocused) 2.dp else 1.dp,
-                                        selectedBorderWidth = 1.dp,
-                                        enabled = true,
-                                        selected = isSelected
-                                    ),
-                                    modifier = Modifier
-                                        .onFocusChanged { isFocused = it.isFocused }
-                                        .focusable()
-                                        .onPreviewKeyEvent { event ->
-                                            if (event.type == KeyEventType.KeyDown &&
-                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                            ) {
-                                                viewModel.selectSeason(season)
-                                                true
-                                            } else false
-                                        }
+                                    label = {
+                                        Text("Season $season", fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                                    }
                                 )
                             }
                         }
