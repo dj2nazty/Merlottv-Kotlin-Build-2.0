@@ -218,16 +218,16 @@ private fun FullscreenPlayer(
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-            // ExoPlayer PlayerView
+            // ExoPlayer PlayerView — uses active player (Apollo or gentle)
             AndroidView(
                 factory = { context ->
                     androidx.media3.ui.PlayerView(context).apply {
                         useController = false
-                        player = viewModel.player
+                        player = viewModel.getActivePlayer()
                     }
                 },
                 update = { playerView ->
-                    playerView.player = viewModel.player
+                    playerView.player = viewModel.getActivePlayer()
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -895,7 +895,7 @@ private fun ChannelListView(
                         }
                     },
                     update = { playerView ->
-                        playerView.player = viewModel.player
+                        playerView.player = viewModel.getActivePlayer()
                     },
                     modifier = Modifier.fillMaxSize()
                 )

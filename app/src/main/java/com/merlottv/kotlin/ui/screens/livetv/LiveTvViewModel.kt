@@ -144,7 +144,93 @@ class LiveTvViewModel @Inject constructor(
         private const val MAX_PREWARM_CHANNELS = 4
         private const val PREWARM_BYTES = 256 * 1024 // 256KB prefetch per channel
         private const val PREWARM_REFRESH_MS = 30_000L // Re-warm every 30s to keep connections alive
+
+        // Local affiliate channels that can't handle Apollo's aggressive 10-min buffer.
+        // These get a gentle TiviMate-style config instead.
+        private val LOCAL_AFFILIATE_PATTERNS = listOf(
+            "wtvg", "wtol", "wnwo", "wupw",  // Call signs
+            "abc", "cbs", "nbc", "fox"         // Network names (matched with channel name)
+        )
     }
+
+    /**
+     * Detect if a channel is a local affiliate that needs gentle buffer treatment.
+     * Matches against call signs (WTVG, WTOL, WNWO, WUPW) and network names.
+     */
+    private fun isLocalAffiliate(channel: Channel): Boolean {
+        val nameLower = channel.name.lowercase()
+        return LOCAL_AFFILIATE_PATTERNS.any { pattern ->
+            nameLower.contains(pattern)
+        }
+    }
+
+    /**
+     * Gentle ExoPlayer for local affiliate channels.
+     * Uses TiviMate-proven 50s buffer instead of Apollo's aggressive 10-min.
+     */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    val gentlePlayer: ExoPlayer = run {
+        val userBufferMs = try {
+            runBlocking { settingsDataStore.bufferDurationMs.first() }
+        } catch (e: Exception) { 1000 }
+
+        val gentleLoadControl = DefaultLoadControl.Builder()
+            .setAllocator(DefaultAllocator(true, 65_536))
+            .setBufferDurationsMs(
+                50_000,  // 50s min buffer — TiviMate proven
+                50_000,  // 50s max buffer
+                userBufferMs.coerceAtLeast(500), // Slider controls startup
+                2_000    // 2s rebuffer resume
+            )
+            .setPrioritizeTimeOverSizeThresholds(true) // Time first — gentle on servers
+            .setTargetBufferBytes(60 * 1024 * 1024)    // 60MB cap — plenty for 50s
+            .setBackBuffer(20_000, true)                // 20s back-buffer
+            .build()
+
+        val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
+            .setResetOnNetworkTypeChange(true)
+            .build()
+
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(5_000)
+            .setReadTimeoutMs(8_000)
+            .setAllowCrossProtocolRedirects(true)
+            .setKeepPostFor302Redirects(true)
+            .setDefaultRequestProperties(mapOf("Connection" to "keep-alive", "Accept" to "*/*"))
+            .setTransferListener(bandwidthMeter)
+
+        val dataSourceFactory = DefaultDataSource.Factory(application, httpFactory)
+        val gentleMediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+            .setLiveTargetOffsetMs(10_000) // 10s behind live edge — extra headroom
+
+        val trackSelector = DefaultTrackSelector(application).apply {
+            parameters = buildUponParameters()
+                .setForceLowestBitrate(false)
+                .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                .setAllowAudioMixedMimeTypeAdaptiveness(true)
+                .build()
+        }
+
+        val renderersFactory = DefaultRenderersFactory(application)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+
+        ExoPlayer.Builder(application)
+            .setLoadControl(gentleLoadControl)
+            .setMediaSourceFactory(gentleMediaSourceFactory)
+            .setBandwidthMeter(bandwidthMeter)
+            .setTrackSelector(trackSelector)
+            .setRenderersFactory(renderersFactory)
+            .build()
+            .apply {
+                playWhenReady = true
+                Log.d("LiveTvVM", "Gentle player created for local affiliates (50s buffer, 60MB cap)")
+            }
+    }
+
+    /** Get the active ExoPlayer for the current channel */
+    private var usingGentlePlayer = false
+    fun getActivePlayer(): ExoPlayer = if (usingGentlePlayer) gentlePlayer else player
 
     // channelId → active pre-warm job
     private val prewarmJobs = mutableMapOf<String, Job>()
@@ -187,10 +273,10 @@ class LiveTvViewModel @Inject constructor(
     fun playWithVlc(streamUrl: String) {
         if (isPlayerReleased) return
 
-        // Stop ExoPlayer
+        // Stop whichever ExoPlayer is active
         try {
-            player.stop()
-            player.clearMediaItems()
+            getActivePlayer().stop()
+            getActivePlayer().clearMediaItems()
         } catch (_: Exception) {}
 
         // Release previous VLC player if exists
@@ -336,32 +422,21 @@ class LiveTvViewModel @Inject constructor(
         // Even if internet dies for 9 minutes, playback continues.
         // The user's slider still controls startup speed (bufferForPlaybackMs).
 
-        val steadyBuffer = 600_000      // 10 MINUTES — Apollo uses 0x927C0 (600,000ms)
-        val playbackBuffer = userBufferMs.coerceAtLeast(500) // Slider controls startup (default 1000ms, min 500ms)
-        val rebufferBuffer = 2_500      // 2.5s after rebuffer — Apollo uses 0x9C4 (2,500ms)
+        // === RESTORED: Full Apollo 10-minute buffer for all normal channels ===
+        val steadyBuffer = 600_000      // 10 MINUTES — Apollo's 0x927C0
+        val playbackBuffer = userBufferMs.coerceAtLeast(500)
+        val rebufferBuffer = 2_500      // 2.5s — Apollo's 0x9C4
 
-        // Dynamic memory cap: use HALF of available heap (Apollo's exact approach)
-        // On 3GB TV with largeHeap: ~288MB for buffer alone
         val maxHeapBytes = Runtime.getRuntime().maxMemory()
-        val targetBufferBytes = (maxHeapBytes / 2).toInt()
+        val targetBufferBytes = (maxHeapBytes / 2).toInt() // HALF of heap — Apollo exact
         Log.d("LiveTvVM", "Apollo buffer: heap=${maxHeapBytes/1024/1024}MB, buffer cap=${targetBufferBytes/1024/1024}MB, steady=${steadyBuffer/1000}s")
 
         val loadControl = DefaultLoadControl.Builder()
-            .setAllocator(DefaultAllocator(true, 65_536)) // 64KB chunks
-            .setBufferDurationsMs(
-                /* minBufferMs */                      steadyBuffer,
-                /* maxBufferMs */                      steadyBuffer,  // min=max for predictable behavior
-                /* bufferForPlaybackMs */               playbackBuffer,
-                /* bufferForPlaybackAfterRebufferMs */  rebufferBuffer
-            )
-            // === KEY APOLLO DIFFERENCE: Size over time ===
-            // false = fill bytes first, then worry about time thresholds
-            // This makes the buffer fill as fast as the connection allows
-            .setPrioritizeTimeOverSizeThresholds(false)
-            // Dynamic cap: half of available heap (Apollo's Runtime.maxMemory()/2)
+            .setAllocator(DefaultAllocator(true, 65_536))
+            .setBufferDurationsMs(steadyBuffer, steadyBuffer, playbackBuffer, rebufferBuffer)
+            .setPrioritizeTimeOverSizeThresholds(false) // Size first — Apollo exact
             .setTargetBufferBytes(targetBufferBytes)
-            // Back-buffer: retain 60s of played content (Apollo uses 0xEA60 = 60,000ms)
-            .setBackBuffer(60_000, /* retainBackBufferFromKeyframe */ true)
+            .setBackBuffer(60_000, true) // 60s back-buffer — Apollo exact
             .build()
 
         // === SSL bypass for IPTV streams (TiviMate-style) ===
@@ -400,9 +475,7 @@ class LiveTvViewModel @Inject constructor(
 
         val dataSourceFactory = DefaultDataSource.Factory(application, httpDataSourceFactory)
 
-        // === Apollo-style MediaSourceFactory with 5s live offset ===
-        // Apollo uses setLiveTargetOffsetMs(0x1388) = 5,000ms
-        // Closer to live edge = more responsive, but needs big buffer to compensate
+        // === Apollo-style 5s live offset for normal channels ===
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
             .setLiveTargetOffsetMs(5_000) // 5s behind live edge (Apollo: 0x1388)
 
@@ -799,25 +872,56 @@ class LiveTvViewModel @Inject constructor(
             switchToExoPlayer()
         }
 
+        // Detect if this is a local affiliate → use gentle player
+        val isGentle = isLocalAffiliate(channel)
+        val wasGentle = usingGentlePlayer
+
+        // Stop the previously active player
+        val prevPlayer = if (wasGentle) gentlePlayer else player
         try {
-            player.stop()
-            player.clearMediaItems()
-            // Build media item with live configuration for better live stream handling
+            prevPlayer.stop()
+            prevPlayer.clearMediaItems()
+        } catch (_: Exception) {}
+
+        // Also stop the other player if it was left running
+        if (isGentle != wasGentle) {
+            val otherPlayer = if (wasGentle) player else gentlePlayer
+            try {
+                otherPlayer.stop()
+                otherPlayer.clearMediaItems()
+            } catch (_: Exception) {}
+        }
+
+        usingGentlePlayer = isGentle
+        val activePlayer = if (isGentle) gentlePlayer else player
+
+        if (isGentle) {
+            Log.d("LiveTvVM", "Local affiliate detected: '${channel.name}' → using gentle player (50s buffer)")
+        } else {
+            Log.d("LiveTvVM", "Normal channel: '${channel.name}' → using Apollo player (10-min buffer)")
+        }
+
+        try {
+            // Local affiliates get more conservative live config
+            val targetOffset = if (isGentle) 10_000L else 8_000L
+            val minOffset = if (isGentle) 5_000L else 3_000L
+            val maxOffset = if (isGentle) 60_000L else 45_000L
+
             val mediaItem = MediaItem.Builder()
                 .setUri(channel.streamUrl)
                 .setLiveConfiguration(
                     MediaItem.LiveConfiguration.Builder()
-                        .setMaxPlaybackSpeed(1.04f)     // Catch up gently if behind
-                        .setMinPlaybackSpeed(0.96f)     // Slow down gently if too far ahead
-                        .setTargetOffsetMs(8_000)       // Target 8s behind live edge (was 10s)
-                        .setMinOffsetMs(3_000)          // Never closer than 3s to edge (was 5s)
-                        .setMaxOffsetMs(45_000)         // Allow up to 45s behind (was 30s) — prevents forced rebuffer
+                        .setMaxPlaybackSpeed(1.04f)
+                        .setMinPlaybackSpeed(0.96f)
+                        .setTargetOffsetMs(targetOffset)
+                        .setMinOffsetMs(minOffset)
+                        .setMaxOffsetMs(maxOffset)
                         .build()
                 )
                 .build()
-            player.setMediaItem(mediaItem)
-            player.prepare()
-            player.play()
+            activePlayer.setMediaItem(mediaItem)
+            activePlayer.prepare()
+            activePlayer.play()
         } catch (e: Exception) {
             Log.e("LiveTvVM", "Player error in safePlayChannel", e)
         }
@@ -857,23 +961,25 @@ class LiveTvViewModel @Inject constructor(
                 if (retryDelayMs > 0) delay(retryDelayMs)
                 if (isPlayerReleased) return@launch
                 try {
-                    player.stop()
-                    player.clearMediaItems()
+                    val ap = getActivePlayer()
+                    ap.stop()
+                    ap.clearMediaItems()
+                    val isGentle = isLocalAffiliate(currentChannel)
                     val mediaItem = MediaItem.Builder()
                         .setUri(currentChannel.streamUrl)
                         .setLiveConfiguration(
                             MediaItem.LiveConfiguration.Builder()
                                 .setMaxPlaybackSpeed(1.04f)
                                 .setMinPlaybackSpeed(0.96f)
-                                .setTargetOffsetMs(8_000)
-                                .setMinOffsetMs(3_000)
-                                .setMaxOffsetMs(45_000)
+                                .setTargetOffsetMs(if (isGentle) 10_000 else 8_000)
+                                .setMinOffsetMs(if (isGentle) 5_000 else 3_000)
+                                .setMaxOffsetMs(if (isGentle) 60_000 else 45_000)
                                 .build()
                         )
                         .build()
-                    player.setMediaItem(mediaItem)
-                    player.prepare()
-                    player.play()
+                    ap.setMediaItem(mediaItem)
+                    ap.prepare()
+                    ap.play()
                     _uiState.value = _uiState.value.copy(isFailingOver = false, failoverMessage = "")
                 } catch (e: Exception) {
                     Log.e("LiveTvVM", "Retry $sameUrlRetryCount failed", e)
@@ -910,8 +1016,9 @@ class LiveTvViewModel @Inject constructor(
                 if (backupChannel != null) {
                     triedStreamUrls.add(backupChannel.streamUrl)
                     try {
-                        player.stop()
-                        player.clearMediaItems()
+                        val ap = getActivePlayer()
+                        ap.stop()
+                        ap.clearMediaItems()
                         val mediaItem = MediaItem.Builder()
                             .setUri(backupChannel.streamUrl)
                             .setLiveConfiguration(
@@ -924,9 +1031,9 @@ class LiveTvViewModel @Inject constructor(
                                     .build()
                             )
                             .build()
-                        player.setMediaItem(mediaItem)
-                        player.prepare()
-                        player.play()
+                        ap.setMediaItem(mediaItem)
+                        ap.prepare()
+                        ap.play()
                     } catch (e: Exception) {
                         Log.e("LiveTvVM", "Backup play failed", e)
                     }
@@ -1281,5 +1388,6 @@ class LiveTvViewModel @Inject constructor(
         try { libVLC?.release() } catch (_: Exception) {}
         libVLC = null
         try { player.release() } catch (_: Exception) {}
+        try { gentlePlayer.release() } catch (_: Exception) {}
     }
 }
