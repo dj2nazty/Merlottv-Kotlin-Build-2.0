@@ -235,7 +235,7 @@ private fun FullscreenPlayer(
 
         // Transparent EPG Info Overlay (slides up from bottom)
         AnimatedVisibility(
-            visible = uiState.showOverlay,
+            visible = uiState.showOverlay && !uiState.showQuickMenu,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -307,55 +307,6 @@ private fun FullscreenPlayer(
             }
         }
 
-        // Channel name badge (top-right) — shows during quick menu only
-        AnimatedVisibility(
-            visible = uiState.showQuickMenu,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-        ) {
-            uiState.selectedChannel?.let { ch ->
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MerlotColors.Black.copy(alpha = 0.8f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Text(
-                        text = ch.name,
-                        color = MerlotColors.Accent,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    // Show frame rate if available
-                    if (uiState.videoFrameRate.isNotEmpty()) {
-                        Text(
-                            text = "${uiState.videoResolution} • ${uiState.videoFrameRate}",
-                            color = MerlotColors.TextMuted,
-                            fontSize = 10.sp
-                        )
-                    } else if (uiState.videoResolution.isNotEmpty()) {
-                        Text(
-                            text = uiState.videoResolution,
-                            color = MerlotColors.TextMuted,
-                            fontSize = 10.sp
-                        )
-                    }
-                    // Show stream source
-                    if (uiState.streamSource.isNotEmpty()) {
-                        Text(
-                            text = "Source: ${uiState.streamSource}",
-                            color = MerlotColors.TextMuted.copy(alpha = 0.7f),
-                            fontSize = 9.sp
-                        )
-                    }
-                }
-            }
-        }
-
         // Quick Menu overlay (OK button popup) — centered on screen
         AnimatedVisibility(
             visible = uiState.showQuickMenu,
@@ -395,178 +346,402 @@ private fun QuickMenuOverlay(
     val firstItemFocusRequester = remember { FocusRequester() }
     val currentChannel = uiState.selectedChannel
     val isFavorite = currentChannel != null && uiState.favoriteIds.contains(currentChannel.id)
+    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
     LaunchedEffect(Unit) {
         delay(100)
         try { firstItemFocusRequester.requestFocus() } catch (_: Exception) {}
     }
 
-    Column(
+    Row(
         modifier = Modifier
-            .width(340.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MerlotColors.Black.copy(alpha = 0.92f))
-            .border(1.dp, Color(0xFF888888).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-            .padding(vertical = 12.dp)
+            .fillMaxWidth(0.92f)
+            .fillMaxHeight(0.62f)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MerlotColors.Black.copy(alpha = 0.94f))
+            .border(1.dp, Color(0xFF888888).copy(alpha = 0.4f), RoundedCornerShape(16.dp))
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                     onDismiss()
                     true
                 } else false
-            },
-        horizontalAlignment = Alignment.CenterHorizontally
+            }
     ) {
-        // Title
-        Text(
-            text = "Quick Menu",
-            color = MerlotColors.Accent,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-
-        // Stream source + player engine indicator
-        val sourceText = buildString {
-            if (uiState.streamSource.isNotEmpty()) append("Source: ${uiState.streamSource}")
-            if (isNotEmpty()) append(" • ")
-            append("Engine: ${if (uiState.isUsingVlc) "VLC" else "ExoPlayer"}")
-        }
-        Text(
-            text = sourceText,
-            color = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.TextMuted,
-            fontSize = 10.sp,
-            modifier = Modifier.padding(bottom = 2.dp)
-        )
-
-        // Buffer config info — Live Offset, Buffer Size, Memory Cap
-        val bufferInfo = buildString {
-            append("Profile: ${uiState.bufferConfigLabel}")
-            append(" • Buffer: ${if (uiState.bufferSizeSec >= 60) "${uiState.bufferSizeSec / 60}min" else "${uiState.bufferSizeSec}s"}")
-            append(" • RAM: ${uiState.bufferMemoryCapMb}MB")
-            append(" • Offset: ${uiState.liveOffsetMs / 1000}s")
-        }
-        Text(
-            text = bufferInfo,
-            color = if (uiState.bufferConfigLabel == "Apollo") Color(0xFF4CAF50) else Color(0xFF2196F3),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-
-        // Frame rate + resolution + bitrate info
-        val infoLine = buildString {
-            if (uiState.videoResolution.isNotEmpty()) {
-                append(uiState.videoResolution)
-                val qualityLabel = getQualityLabel(uiState.videoResolution)
-                if (qualityLabel.isNotEmpty()) append(" • $qualityLabel")
-            }
-            if (uiState.videoFrameRate.isNotEmpty()) {
-                if (isNotEmpty()) append(" • ")
-                append(uiState.videoFrameRate)
-            }
-            if (uiState.videoBitrateKbps > 0) {
-                if (isNotEmpty()) append(" • ")
-                if (uiState.videoBitrateKbps >= 1000) {
-                    append(String.format("%.1f Mbps", uiState.videoBitrateKbps / 1000f))
-                } else {
-                    append("${uiState.videoBitrateKbps} Kbps")
-                }
-            }
-        }
-        if (infoLine.isNotEmpty()) {
+        // ── LEFT PANEL: Menu Actions ──
+        Column(
+            modifier = Modifier
+                .weight(0.4f)
+                .fillMaxHeight()
+                .padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top
+        ) {
+            // Title
             Text(
-                text = infoLine,
-                color = MerlotColors.Accent.copy(alpha = 0.8f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = "Quick Menu",
+                color = MerlotColors.Accent,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            // Stream source + player engine indicator
+            val sourceText = buildString {
+                if (uiState.streamSource.isNotEmpty()) append("Source: ${uiState.streamSource}")
+                if (isNotEmpty()) append(" • ")
+                append("Engine: ${if (uiState.isUsingVlc) "VLC" else "ExoPlayer"}")
+            }
+            Text(
+                text = sourceText,
+                color = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.TextMuted,
+                fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
-        } else {
-            Spacer(modifier = Modifier.height(4.dp))
-        }
 
-        // Rebuffer stats
-        if (uiState.rebufferCount > 0 || uiState.totalRebufferMs > 0L) {
-            val rebufferInfo = buildString {
-                append("Rebuffers: ${uiState.rebufferCount}")
-                if (uiState.totalRebufferMs > 0L) {
-                    append(" • Total: ${String.format("%.1f", uiState.totalRebufferMs / 1000f)}s")
+            // Buffer config info
+            val bufferInfo = buildString {
+                append("Profile: ${uiState.bufferConfigLabel}")
+                append(" • Buffer: ${if (uiState.bufferSizeSec >= 60) "${uiState.bufferSizeSec / 60}min" else "${uiState.bufferSizeSec}s"}")
+                append(" • RAM: ${uiState.bufferMemoryCapMb}MB")
+                append(" • Offset: ${uiState.liveOffsetMs / 1000}s")
+            }
+            Text(
+                text = bufferInfo,
+                color = if (uiState.bufferConfigLabel == "Apollo") Color(0xFF4CAF50) else Color(0xFF2196F3),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            // Frame rate + resolution + bitrate info
+            val infoLine = buildString {
+                if (uiState.videoResolution.isNotEmpty()) {
+                    append(uiState.videoResolution)
+                    val qualityLabel = getQualityLabel(uiState.videoResolution)
+                    if (qualityLabel.isNotEmpty()) append(" • $qualityLabel")
+                }
+                if (uiState.videoFrameRate.isNotEmpty()) {
+                    if (isNotEmpty()) append(" • ")
+                    append(uiState.videoFrameRate)
+                }
+                if (uiState.videoBitrateKbps > 0) {
+                    if (isNotEmpty()) append(" • ")
+                    if (uiState.videoBitrateKbps >= 1000) {
+                        append(String.format("%.1f Mbps", uiState.videoBitrateKbps / 1000f))
+                    } else {
+                        append("${uiState.videoBitrateKbps} Kbps")
+                    }
                 }
             }
-            Text(
-                text = rebufferInfo,
-                color = if (uiState.rebufferCount >= 3) Color(0xFFFF6B6B) else MerlotColors.TextMuted,
-                fontSize = 9.sp,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        } else {
-            Text(
-                text = "No rebuffers",
-                color = Color(0xFF4CAF50),
-                fontSize = 9.sp,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
+            if (infoLine.isNotEmpty()) {
+                Text(
+                    text = infoLine,
+                    color = MerlotColors.Accent.copy(alpha = 0.8f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
 
-        // Recent channels (last 3)
-        val recentChannels = uiState.recentChannels
-        if (recentChannels.isNotEmpty()) {
-            Text(
-                text = "RECENT CHANNELS",
-                color = MerlotColors.TextMuted,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 2.dp)
-            )
-            recentChannels.forEachIndexed { index, channel ->
-                QuickMenuItem(
-                    icon = Icons.Default.Tv,
-                    label = channel.name,
-                    enabled = true,
-                    onClick = { onRecentChannelClick(index) },
-                    focusRequester = if (index == 0) firstItemFocusRequester else null
+            // Rebuffer stats
+            if (uiState.rebufferCount > 0 || uiState.totalRebufferMs > 0L) {
+                val rebufferInfo = buildString {
+                    append("Rebuffers: ${uiState.rebufferCount}")
+                    if (uiState.totalRebufferMs > 0L) {
+                        append(" • Total: ${String.format("%.1f", uiState.totalRebufferMs / 1000f)}s")
+                    }
+                }
+                Text(
+                    text = rebufferInfo,
+                    color = if (uiState.rebufferCount >= 3) Color(0xFFFF6B6B) else MerlotColors.TextMuted,
+                    fontSize = 9.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            } else {
+                Text(
+                    text = "No rebuffers",
+                    color = Color(0xFF4CAF50),
+                    fontSize = 9.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+
+            // Recent channels (last 3)
+            val recentChannels = uiState.recentChannels
+            if (recentChannels.isNotEmpty()) {
+                Text(
+                    text = "RECENT CHANNELS",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 2.dp)
+                )
+                recentChannels.forEachIndexed { index, channel ->
+                    QuickMenuItem(
+                        icon = Icons.Default.Tv,
+                        label = channel.name,
+                        enabled = true,
+                        onClick = { onRecentChannelClick(index) },
+                        focusRequester = if (index == 0) firstItemFocusRequester else null
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            // Add/Remove from favorites
+            QuickMenuItem(
+                icon = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                label = if (isFavorite) "Remove from Favorites" else "Add to Favorites",
+                iconTint = if (isFavorite) MerlotColors.Accent else MerlotColors.TextMuted,
+                enabled = currentChannel != null,
+                onClick = onToggleFavorite,
+                focusRequester = if (recentChannels.isEmpty()) firstItemFocusRequester else null
+            )
+
+            // Toggle CC / Subtitles
+            QuickMenuItem(
+                icon = if (uiState.subtitlesEnabled) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled,
+                label = if (uiState.subtitlesEnabled) "Subtitles: ON" else "Subtitles: OFF",
+                iconTint = if (uiState.subtitlesEnabled) MerlotColors.Accent else MerlotColors.TextMuted,
+                enabled = true,
+                onClick = onToggleSubtitles
+            )
+
+            // Toggle Player Engine (ExoPlayer <-> VLC)
+            QuickMenuItem(
+                icon = Icons.Default.Hd,
+                label = if (uiState.isUsingVlc) "Player: VLC" else "Player: ExoPlayer",
+                iconTint = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.Accent,
+                enabled = currentChannel != null,
+                onClick = onTogglePlayerEngine
+            )
+
+            // Close button
+            QuickMenuItem(
+                icon = Icons.Default.Close,
+                label = "Close",
+                enabled = true,
+                onClick = onDismiss
+            )
         }
 
-        // Add/Remove from favorites
-        QuickMenuItem(
-            icon = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-            label = if (isFavorite) "Remove from Favorites" else "Add to Favorites",
-            iconTint = if (isFavorite) MerlotColors.Accent else MerlotColors.TextMuted,
-            enabled = currentChannel != null,
-            onClick = onToggleFavorite,
-            focusRequester = if (recentChannels.isEmpty()) firstItemFocusRequester else null
+        // ── Vertical Divider ──
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(1.dp)
+                .background(Color(0xFF888888).copy(alpha = 0.4f))
         )
 
-        // Toggle CC / Subtitles
-        QuickMenuItem(
-            icon = if (uiState.subtitlesEnabled) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled,
-            label = if (uiState.subtitlesEnabled) "Subtitles: ON" else "Subtitles: OFF",
-            iconTint = if (uiState.subtitlesEnabled) MerlotColors.Accent else MerlotColors.TextMuted,
-            enabled = true,
-            onClick = onToggleSubtitles
-        )
+        // ── RIGHT PANEL: Channel EPG Info ──
+        Column(
+            modifier = Modifier
+                .weight(0.6f)
+                .fillMaxHeight()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
+            // Channel header: logo + name + number/group
+            if (currentChannel != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    if (currentChannel.logoUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = currentChannel.logoUrl,
+                            contentDescription = currentChannel.name,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MerlotColors.Surface2)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+                    Column {
+                        Text(
+                            text = currentChannel.name,
+                            color = MerlotColors.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        val channelMeta = buildString {
+                            if (currentChannel.number > 0) append("CH ${currentChannel.number}")
+                            if (currentChannel.group.isNotEmpty()) {
+                                if (isNotEmpty()) append(" \u2022 ")
+                                append(currentChannel.group)
+                            }
+                        }
+                        if (channelMeta.isNotEmpty()) {
+                            Text(
+                                text = channelMeta,
+                                color = MerlotColors.TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
 
-        // Toggle Player Engine (ExoPlayer ↔ VLC)
-        QuickMenuItem(
-            icon = Icons.Default.Hd,
-            label = if (uiState.isUsingVlc) "Player: VLC" else "Player: ExoPlayer",
-            iconTint = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.Accent,
-            enabled = currentChannel != null,
-            onClick = onTogglePlayerEngine
-        )
+                // Resolution badge
+                if (uiState.videoResolution.isNotEmpty()) {
+                    val qualityLabel = getQualityLabel(uiState.videoResolution)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .padding(bottom = 12.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MerlotColors.AccentAlpha10)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Hd,
+                            contentDescription = null,
+                            tint = MerlotColors.Accent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = uiState.videoResolution,
+                            color = MerlotColors.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (qualityLabel.isNotEmpty()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = qualityLabel,
+                                color = MerlotColors.Accent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
-        // Close button (replaces old "Channel Info")
-        QuickMenuItem(
-            icon = Icons.Default.Close,
-            label = "Close",
-            enabled = true,
-            onClick = onDismiss
-        )
+                // Thin separator
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color(0xFF888888).copy(alpha = 0.25f))
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Current program
+                uiState.currentProgram?.let { program ->
+                    // NOW label
+                    Text(
+                        text = "NOW",
+                        color = Color(0xFF4CAF50),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    // Program title
+                    Text(
+                        text = program.title,
+                        color = MerlotColors.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    // Description
+                    if (program.description.isNotEmpty()) {
+                        Text(
+                            text = program.description,
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp,
+                            maxLines = 3,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                    // Time range
+                    val startStr = timeFormat.format(Date(program.startTime))
+                    val endStr = timeFormat.format(Date(program.endTime))
+                    Text(
+                        text = "$startStr - $endStr",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    // Progress bar
+                    val now = System.currentTimeMillis()
+                    val duration = (program.endTime - program.startTime).coerceAtLeast(1L)
+                    val elapsed = (now - program.startTime).coerceIn(0L, duration)
+                    val progress = elapsed.toFloat() / duration.toFloat()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(MerlotColors.Surface2)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(fraction = progress)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MerlotColors.Accent)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                } ?: run {
+                    // No EPG data
+                    Text(
+                        text = "No program info available",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                }
+
+                // Next program
+                uiState.nextProgram?.let { next ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        Text(
+                            text = "NEXT",
+                            color = MerlotColors.Accent.copy(alpha = 0.7f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = next.title,
+                            color = MerlotColors.TextMuted,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = timeFormat.format(Date(next.startTime)),
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            } else {
+                // No channel selected
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No channel selected",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
     }
 }
 
