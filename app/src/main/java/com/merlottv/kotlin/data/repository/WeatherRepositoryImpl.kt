@@ -1,0 +1,197 @@
+package com.merlottv.kotlin.data.repository
+
+import android.util.Log
+import com.merlottv.kotlin.BuildConfig
+import com.merlottv.kotlin.domain.model.CurrentWeather
+import com.merlottv.kotlin.domain.model.DayForecast
+import com.merlottv.kotlin.domain.model.RadarFrame
+import com.merlottv.kotlin.domain.repository.WeatherRepository
+import com.squareup.moshi.Moshi
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@Singleton
+class WeatherRepositoryImpl @Inject constructor(
+    private val okHttpClient: OkHttpClient,
+    private val moshi: Moshi
+) : WeatherRepository {
+
+    private val boundedIo = Dispatchers.IO.limitedParallelism(2)
+
+    private val weatherClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
+    }
+
+    // In-memory cache
+    private val cache = ConcurrentHashMap<String, CacheEntry>()
+    private val WEATHER_CACHE_TTL = 15 * 60 * 1000L    // 15 minutes
+    private val RADAR_CACHE_TTL = 2 * 60 * 1000L        // 2 minutes
+
+    private data class CacheEntry(val data: Any, val timestamp: Long)
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> getCached(key: String, ttl: Long): T? {
+        val entry = cache[key] ?: return null
+        return if (System.currentTimeMillis() - entry.timestamp < ttl) {
+            entry.data as? T
+        } else {
+            cache.remove(key)
+            null
+        }
+    }
+
+    private fun putCache(key: String, data: Any) {
+        cache[key] = CacheEntry(data, System.currentTimeMillis())
+    }
+
+    private val mapAdapter by lazy {
+        moshi.adapter(Map::class.java)
+    }
+
+    companion object {
+        private const val TAG = "WeatherRepo"
+        private const val WEATHER_BASE = "https://api.weatherapi.com/v1"
+        private const val RADAR_API = "https://api.rainviewer.com/public/weather-maps.json"
+    }
+
+    // ─── Weather + Forecast (single API call) ────────────────────────────
+
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun getCurrentAndForecast(zipCode: String): Pair<CurrentWeather, List<DayForecast>>? {
+        val cacheKey = "weather_$zipCode"
+        getCached<Pair<CurrentWeather, List<DayForecast>>>(cacheKey, WEATHER_CACHE_TTL)?.let { return it }
+
+        return withContext(boundedIo) {
+            try {
+                val url = "$WEATHER_BASE/forecast.json?key=${BuildConfig.WEATHER_API_KEY}&q=$zipCode&days=7&aqi=no&alerts=no"
+                val json = fetchJson(url) ?: return@withContext null
+
+                // Parse current conditions
+                val current = json["current"] as? Map<String, Any?> ?: return@withContext null
+                val location = json["location"] as? Map<String, Any?> ?: return@withContext null
+                val conditionMap = current["condition"] as? Map<String, Any?>
+
+                val currentWeather = CurrentWeather(
+                    tempF = (current["temp_f"] as? Number)?.toDouble() ?: 0.0,
+                    tempC = (current["temp_c"] as? Number)?.toDouble() ?: 0.0,
+                    feelsLikeF = (current["feelslike_f"] as? Number)?.toDouble() ?: 0.0,
+                    feelsLikeC = (current["feelslike_c"] as? Number)?.toDouble() ?: 0.0,
+                    condition = conditionMap?.get("text")?.toString() ?: "Unknown",
+                    conditionIconUrl = "https:" + (conditionMap?.get("icon")?.toString() ?: ""),
+                    windMph = (current["wind_mph"] as? Number)?.toDouble() ?: 0.0,
+                    windDir = current["wind_dir"]?.toString() ?: "",
+                    humidity = (current["humidity"] as? Number)?.toInt() ?: 0,
+                    pressureIn = (current["pressure_in"] as? Number)?.toDouble() ?: 0.0,
+                    uvIndex = (current["uv"] as? Number)?.toDouble() ?: 0.0,
+                    visibilityMiles = (current["vis_miles"] as? Number)?.toDouble() ?: 0.0,
+                    locationName = location["name"]?.toString() ?: "",
+                    region = location["region"]?.toString() ?: "",
+                    localTime = location["localtime"]?.toString() ?: "",
+                    isDay = (current["is_day"] as? Number)?.toInt() == 1,
+                    lat = (location["lat"] as? Number)?.toDouble() ?: 0.0,
+                    lon = (location["lon"] as? Number)?.toDouble() ?: 0.0
+                )
+
+                // Parse 7-day forecast
+                val forecast = json["forecast"] as? Map<String, Any?>
+                val forecastDays = (forecast?.get("forecastday") as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
+
+                val dayForecasts = forecastDays.mapNotNull { dayMap ->
+                    val dateStr = dayMap["date"]?.toString() ?: return@mapNotNull null
+                    val day = dayMap["day"] as? Map<String, Any?> ?: return@mapNotNull null
+                    val dayCond = day["condition"] as? Map<String, Any?>
+
+                    // Parse day of week from date string
+                    val dayOfWeek = try {
+                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                        val date = sdf.parse(dateStr)
+                        val cal = Calendar.getInstance().apply { time = date!! }
+                        val dayNames = arrayOf("", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+                        dayNames[cal.get(Calendar.DAY_OF_WEEK)]
+                    } catch (_: Exception) { "?" }
+
+                    DayForecast(
+                        date = dateStr,
+                        dayOfWeek = dayOfWeek,
+                        maxTempF = (day["maxtemp_f"] as? Number)?.toDouble() ?: 0.0,
+                        minTempF = (day["mintemp_f"] as? Number)?.toDouble() ?: 0.0,
+                        condition = dayCond?.get("text")?.toString() ?: "Unknown",
+                        conditionIconUrl = "https:" + (dayCond?.get("icon")?.toString() ?: ""),
+                        chanceOfRain = (day["daily_chance_of_rain"] as? Number)?.toInt()
+                            ?: (day["daily_chance_of_rain"]?.toString()?.toIntOrNull() ?: 0),
+                        chanceOfSnow = (day["daily_chance_of_snow"] as? Number)?.toInt()
+                            ?: (day["daily_chance_of_snow"]?.toString()?.toIntOrNull() ?: 0),
+                        avgHumidity = (day["avghumidity"] as? Number)?.toInt() ?: 0,
+                        maxWindMph = (day["maxwind_mph"] as? Number)?.toDouble() ?: 0.0
+                    )
+                }
+
+                val result = Pair(currentWeather, dayForecasts)
+                putCache(cacheKey, result)
+                result
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch weather for $zipCode", e)
+                null
+            }
+        }
+    }
+
+    // ─── Radar Frames (RainViewer) ───────────────────────────────────────
+
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun getRadarFrames(): List<RadarFrame> {
+        getCached<List<RadarFrame>>("radar", RADAR_CACHE_TTL)?.let { return it }
+
+        return withContext(boundedIo) {
+            try {
+                val json = fetchJson(RADAR_API) ?: return@withContext emptyList()
+
+                val host = json["host"]?.toString() ?: "https://tilecache.rainviewer.com"
+                val radar = json["radar"] as? Map<String, Any?> ?: return@withContext emptyList()
+                val past = (radar["past"] as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
+
+                val frames = past.mapNotNull { frame ->
+                    val path = frame["path"]?.toString() ?: return@mapNotNull null
+                    val time = (frame["time"] as? Number)?.toLong() ?: return@mapNotNull null
+                    RadarFrame(path = path, time = time, host = host)
+                }
+
+                putCache("radar", frames)
+                frames
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch radar frames", e)
+                emptyList()
+            }
+        }
+    }
+
+    // ─── Network ─────────────────────────────────────────────────────────
+
+    @Suppress("UNCHECKED_CAST")
+    private fun fetchJson(url: String): Map<String, Any?>? {
+        val request = Request.Builder().url(url)
+            .header("Accept", "application/json")
+            .build()
+        val response = weatherClient.newCall(request).execute()
+        if (!response.isSuccessful) {
+            Log.w(TAG, "HTTP ${response.code}: $url")
+            return null
+        }
+        val body = response.body?.string() ?: return null
+        return mapAdapter.fromJson(body) as? Map<String, Any?>
+    }
+}

@@ -23,6 +23,7 @@ import com.merlottv.kotlin.ui.screens.search.SearchScreen
 import com.merlottv.kotlin.ui.screens.settings.SettingsScreen
 import com.merlottv.kotlin.ui.screens.sports.GameDetailScreen
 import com.merlottv.kotlin.ui.screens.spacex.SpaceXScreen
+import com.merlottv.kotlin.ui.screens.weather.WeatherScreen
 import com.merlottv.kotlin.ui.screens.sports.SportsScreen
 import com.merlottv.kotlin.ui.screens.sports.TeamDetailScreen
 import com.merlottv.kotlin.ui.screens.tvguide.TvGuideScreen
@@ -175,6 +176,11 @@ fun MerlotNavHost(
         composable(Screen.SpaceX.route) {
             onLiveTvFullscreenChanged(false)
             SpaceXScreen()
+        }
+
+        composable(Screen.Weather.route) {
+            onLiveTvFullscreenChanged(false)
+            WeatherScreen()
         }
 
         composable(Screen.Settings.route) {

@@ -13,11 +13,14 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 57
-        versionName = "2.34.1"
+        versionCode = 58
+        versionName = "2.35.0"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")
+
+        // WeatherAPI.com key (free tier, 1M calls/month — sign up at weatherapi.com/signup.aspx)
+        buildConfigField("String", "WEATHER_API_KEY", "\"7fc76f5d36d6412c9a2193939261503\"")
 
         vectorDrawables {
             useSupportLibrary = true

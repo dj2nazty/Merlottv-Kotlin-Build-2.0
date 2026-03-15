@@ -54,6 +54,10 @@ class SettingsDataStore(private val context: Context) {
         val BUFFER_DURATION_MS = intPreferencesKey("live_tv_buffer_duration_ms")
         const val DEFAULT_BUFFER_MS = 1000 // 1.0 second default (matches TiviMate)
 
+        // Weather
+        val WEATHER_ZIP = stringPreferencesKey("weather_zip_code")
+        const val DEFAULT_WEATHER_ZIP = "43616"
+
         // Subtitle settings
         val SUBTITLES_ENABLED = booleanPreferencesKey("subtitles_enabled")
         val SUBTITLE_LANGUAGE = stringPreferencesKey("subtitle_language")
@@ -257,6 +261,15 @@ class SettingsDataStore(private val context: Context) {
         // Clamp to valid range: 300ms – 3000ms
         val clamped = ms.coerceIn(300, 3000)
         context.settingsDataStore.edit { it[BUFFER_DURATION_MS] = clamped }
+    }
+
+    // ─── Weather ZIP Code ───
+    val weatherZipCode: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[WEATHER_ZIP] ?: DEFAULT_WEATHER_ZIP
+    }
+
+    suspend fun setWeatherZipCode(zip: String) {
+        context.settingsDataStore.edit { it[WEATHER_ZIP] = zip }
     }
 
     // ─── Live TV Category Order ───
