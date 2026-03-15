@@ -104,23 +104,29 @@ class AccountViewModel @Inject constructor(
                     deviceCodeRepository.deleteCode(code)
                 }
 
+                var linked = false
                 deviceCodeRepository.observeCodeStatus(code).collect { status ->
+                    if (linked) return@collect // Ignore emissions after link (delete triggers Expired)
                     when (status) {
                         is DeviceCodeStatus.Linked -> {
+                            linked = true
                             countdownJob?.cancel()
+                            val linkedEmail = status.email
+                            val linkedPassword = status.password
+                            // Delete code first (cleans up Firestore), then sign in
                             deviceCodeRepository.deleteCode(code)
-                            if (status.password.isNotBlank()) {
+                            if (linkedPassword.isNotBlank()) {
                                 // Auto sign-in: web page provided credentials
                                 _uiState.update {
                                     it.copy(isLoading = true, error = null, deviceCode = null)
                                 }
-                                authRepository.signInWithEmail(status.email.trim(), status.password)
+                                authRepository.signInWithEmail(linkedEmail.trim(), linkedPassword)
                                     .onFailure { e ->
                                         _uiState.update {
                                             it.copy(
                                                 mode = AccountMode.DEVICE_CODE_PASSWORD,
-                                                linkedEmail = status.email,
-                                                email = status.email,
+                                                linkedEmail = linkedEmail,
+                                                email = linkedEmail,
                                                 password = "",
                                                 isLoading = false,
                                                 error = "Auto sign-in failed: ${formatError(e)}"
@@ -132,8 +138,8 @@ class AccountViewModel @Inject constructor(
                                 _uiState.update {
                                     it.copy(
                                         mode = AccountMode.DEVICE_CODE_PASSWORD,
-                                        linkedEmail = status.email,
-                                        email = status.email,
+                                        linkedEmail = linkedEmail,
+                                        email = linkedEmail,
                                         password = "",
                                         error = null
                                     )
