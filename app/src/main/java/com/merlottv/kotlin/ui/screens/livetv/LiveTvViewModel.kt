@@ -96,7 +96,12 @@ data class LiveTvUiState(
     val videoBitrateKbps: Int = 0,
     // Player engine: "exo" or "vlc"
     val activePlayerEngine: String = "exo",
-    val isUsingVlc: Boolean = false
+    val isUsingVlc: Boolean = false,
+    // Buffer config info for Quick Menu display
+    val bufferConfigLabel: String = "Apollo",
+    val bufferSizeSec: Int = 600,
+    val bufferMemoryCapMb: Int = 0,
+    val liveOffsetMs: Long = 5_000
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -934,7 +939,13 @@ class LiveTvViewModel @Inject constructor(
             rebufferCount = 0,
             isBuffering = false,
             lastRebufferDurationMs = 0L,
-            totalRebufferMs = 0L
+            totalRebufferMs = 0L,
+            // Buffer config info for Quick Menu
+            bufferConfigLabel = if (usingGentlePlayer) "Gentle (Local)" else "Apollo",
+            bufferSizeSec = if (usingGentlePlayer) 50 else 600,
+            bufferMemoryCapMb = if (usingGentlePlayer) 60
+                else (Runtime.getRuntime().maxMemory() / 2 / 1024 / 1024).toInt(),
+            liveOffsetMs = if (usingGentlePlayer) 10_000 else 5_000
         )
     }
 

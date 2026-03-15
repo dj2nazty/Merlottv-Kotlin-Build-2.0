@@ -435,6 +435,21 @@ private fun QuickMenuOverlay(
             text = sourceText,
             color = if (uiState.isUsingVlc) Color(0xFFFF9800) else MerlotColors.TextMuted,
             fontSize = 10.sp,
+            modifier = Modifier.padding(bottom = 2.dp)
+        )
+
+        // Buffer config info — Live Offset, Buffer Size, Memory Cap
+        val bufferInfo = buildString {
+            append("Profile: ${uiState.bufferConfigLabel}")
+            append(" • Buffer: ${if (uiState.bufferSizeSec >= 60) "${uiState.bufferSizeSec / 60}min" else "${uiState.bufferSizeSec}s"}")
+            append(" • RAM: ${uiState.bufferMemoryCapMb}MB")
+            append(" • Offset: ${uiState.liveOffsetMs / 1000}s")
+        }
+        Text(
+            text = bufferInfo,
+            color = if (uiState.bufferConfigLabel == "Apollo") Color(0xFF4CAF50) else Color(0xFF2196F3),
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(bottom = 4.dp)
         )
 
