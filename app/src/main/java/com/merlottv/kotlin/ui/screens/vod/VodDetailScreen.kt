@@ -119,6 +119,12 @@ fun VodDetailScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MerlotColors.Background)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                    onBack()
+                    true
+                } else false
+            }
     ) {
         when {
             uiState.isLoading -> {
