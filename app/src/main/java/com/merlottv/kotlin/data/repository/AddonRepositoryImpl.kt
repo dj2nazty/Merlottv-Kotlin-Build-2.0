@@ -78,16 +78,22 @@ class AddonRepositoryImpl @Inject constructor(
         addon: Addon,
         type: String,
         catalogId: String,
-        skip: Int
+        skip: Int,
+        genre: String?
     ): List<MetaPreview> {
         return withContext(Dispatchers.IO) {
             try {
                 val base = addon.url.removeSuffix("/manifest.json")
-                val url = if (skip > 0) {
-                    "$base/catalog/$type/$catalogId/skip=$skip.json"
+                // Build URL with optional genre and skip extra params
+                val extras = mutableListOf<String>()
+                if (genre != null) extras.add("genre=$genre")
+                if (skip > 0) extras.add("skip=$skip")
+                val url = if (extras.isNotEmpty()) {
+                    "$base/catalog/$type/$catalogId/${extras.joinToString("&")}.json"
                 } else {
                     "$base/catalog/$type/$catalogId.json"
                 }
+                android.util.Log.d("AddonRepo", "getCatalog URL: $url")
                 val request = Request.Builder().url(url).build()
                 val response = fastClient.newCall(request).execute()
                 val body = response.body?.string() ?: return@withContext emptyList()
@@ -262,7 +268,8 @@ class AddonRepositoryImpl @Inject constructor(
                     extra = (cat["extra"] as? List<Map<String, Any?>>)?.map { ex ->
                         CatalogExtra(
                             name = ex["name"] as? String ?: "",
-                            isRequired = ex["isRequired"] as? Boolean ?: false
+                            isRequired = ex["isRequired"] as? Boolean ?: false,
+                            options = (ex["options"] as? List<String>) ?: emptyList()
                         )
                     } ?: emptyList()
                 )

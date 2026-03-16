@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -140,6 +143,7 @@ fun VodScreen(
                             when (tab) {
                                 "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
                                 "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
+
                                 else -> {}
                             }
                             if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
@@ -160,6 +164,73 @@ fun VodScreen(
             }
         }
 
+        // Genre & Year filter chip rows (only on Movies/Series tabs)
+        if (uiState.selectedTab != "All" && (uiState.availableGenres.isNotEmpty() || uiState.availableYears.isNotEmpty())) {
+            // Genre filter row
+            if (uiState.availableGenres.isNotEmpty()) {
+                Column(modifier = Modifier.padding(start = 16.dp, top = 4.dp)) {
+                    Text(
+                        "Genre",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(end = 16.dp)
+                    ) {
+                        items(uiState.availableGenres) { genre ->
+                            MerlotChip(
+                                selected = genre == uiState.selectedGenre,
+                                onClick = { viewModel.onGenreSelected(genre) },
+                                label = {
+                                    Text(
+                                        genre,
+                                        fontSize = 11.sp,
+                                        color = if (genre == uiState.selectedGenre) MerlotColors.Black else MerlotColors.TextPrimary
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Year filter row
+            if (uiState.availableYears.isNotEmpty()) {
+                Column(modifier = Modifier.padding(start = 16.dp, top = 4.dp)) {
+                    Text(
+                        "Year",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(end = 16.dp)
+                    ) {
+                        items(uiState.availableYears) { year ->
+                            MerlotChip(
+                                selected = year == uiState.selectedYear,
+                                onClick = { viewModel.onYearSelected(year) },
+                                label = {
+                                    Text(
+                                        year,
+                                        fontSize = 11.sp,
+                                        color = if (year == uiState.selectedYear) MerlotColors.Black else MerlotColors.TextPrimary
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
         when {
             uiState.isLoading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -167,6 +238,15 @@ fun VodScreen(
                         CircularProgressIndicator(color = MerlotColors.Accent)
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("Loading catalogs...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                    }
+                }
+            }
+            uiState.isFilterLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MerlotColors.Accent)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Loading...", color = MerlotColors.TextMuted, fontSize = 12.sp)
                     }
                 }
             }
@@ -181,26 +261,59 @@ fun VodScreen(
                 }
             }
             else -> {
-                LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-                    items(
-                        uiState.filteredSections,
-                        key = { "${it.addonName}_${it.catalogId}_${it.type}" }
-                    ) { section ->
-                        val isFirst = section == uiState.filteredSections.first()
-                        CatalogSectionRow(
-                            section = section,
-                            onItemClick = { item ->
-                                lastFocusedItemId = item.id
-                                onNavigateToDetail(item.type, item.id)
-                            },
-                            onItemLongClick = { item ->
-                                viewModel.toggleFavorite(item)
-                            },
-                            favoriteIds = favoriteIds,
-                            firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null,
-                            focusRequesters = focusRequesters,
-                            onItemFocused = { itemId -> lastFocusedItemId = itemId }
-                        )
+                val isFilterActive = uiState.selectedGenre != null || uiState.selectedYear != null
+
+                if (isFilterActive) {
+                    // Grid layout for genre/year filtered results
+                    val allItems = uiState.filteredSections.flatMap { it.items }
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 130.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(allItems, key = { it.id }) { item ->
+                            val itemFocusRequester = remember {
+                                focusRequesters.getOrPut(item.id) { FocusRequester() }
+                            }
+                            val isFirst = item == allItems.firstOrNull()
+                            VodCard(
+                                item = item,
+                                onClick = {
+                                    lastFocusedItemId = item.id
+                                    onNavigateToDetail(item.type, item.id)
+                                },
+                                onLongClick = { viewModel.toggleFavorite(item) },
+                                isFavorite = item.id in favoriteIds,
+                                focusRequester = if (isFirst) firstCardFocusRequester else itemFocusRequester,
+                                onFocused = { lastFocusedItemId = item.id }
+                            )
+                        }
+                    }
+                } else {
+                    // Normal horizontal row layout for unfiltered catalogs
+                    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+                        items(
+                            uiState.filteredSections,
+                            key = { "${it.addonName}_${it.catalogId}_${it.type}_${it.title}" }
+                        ) { section ->
+                            val isFirst = section == uiState.filteredSections.first()
+                            CatalogSectionRow(
+                                section = section,
+                                onItemClick = { item ->
+                                    lastFocusedItemId = item.id
+                                    onNavigateToDetail(item.type, item.id)
+                                },
+                                onItemLongClick = { item ->
+                                    viewModel.toggleFavorite(item)
+                                },
+                                favoriteIds = favoriteIds,
+                                firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null,
+                                focusRequesters = focusRequesters,
+                                onItemFocused = { itemId -> lastFocusedItemId = itemId }
+                            )
+                        }
                     }
                 }
             }

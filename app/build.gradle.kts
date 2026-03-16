@@ -14,8 +14,8 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 75
-        versionName = "2.43"
+        versionCode = 76
+        versionName = "2.44"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")

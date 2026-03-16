@@ -66,6 +66,12 @@ object DefaultData {
                 )
             ),
             isDefault = true
+        ),
+        Addon(
+            id = "tmdb-addon",
+            name = "TMDB",
+            url = "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json",
+            isDefault = true
         )
     )
 

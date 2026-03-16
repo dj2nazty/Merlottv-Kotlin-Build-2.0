@@ -33,10 +33,15 @@ data class CatalogSection(
 
 data class VodUiState(
     val isLoading: Boolean = true,
+    val isFilterLoading: Boolean = false,
     val selectedTab: String = "All",
     val sections: List<CatalogSection> = emptyList(),
     val filteredSections: List<CatalogSection> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val selectedGenre: String? = null,
+    val selectedYear: String? = null,
+    val availableGenres: List<String> = emptyList(),
+    val availableYears: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -51,13 +56,123 @@ class VodViewModel @Inject constructor(
     val favoriteVodIds: StateFlow<Set<String>> = favoritesRepository.getFavoriteVodIds()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+    // TMDB filter data extracted from manifest
+    private var movieGenres: List<String> = emptyList()
+    private var seriesGenres: List<String> = emptyList()
+    private var yearOptions: List<String> = emptyList()
+    private var tmdbAddon: Addon? = null
+
     init {
         loadAllCatalogs()
     }
 
     fun onTabSelected(tab: String) {
-        _uiState.value = _uiState.value.copy(selectedTab = tab)
+        val genres = when (tab) {
+            "Movies" -> movieGenres
+            "Series" -> seriesGenres
+            else -> emptyList()
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedTab = tab,
+            selectedGenre = null,
+            selectedYear = null,
+            availableGenres = genres,
+            availableYears = if (tab != "All") yearOptions else emptyList()
+        )
         applyFilter(tab)
+    }
+
+    fun onGenreSelected(genre: String?) {
+        val current = _uiState.value
+        val newGenre = if (genre == current.selectedGenre) null else genre
+        _uiState.value = current.copy(selectedGenre = newGenre)
+        if (newGenre != null || current.selectedYear != null) {
+            loadFilteredCatalog(genre = newGenre, year = current.selectedYear)
+        } else {
+            applyFilter(current.selectedTab)
+        }
+    }
+
+    fun onYearSelected(year: String?) {
+        val current = _uiState.value
+        val newYear = if (year == current.selectedYear) null else year
+        _uiState.value = current.copy(selectedYear = newYear)
+        if (newYear != null || current.selectedGenre != null) {
+            loadFilteredCatalog(genre = current.selectedGenre, year = newYear)
+        } else {
+            applyFilter(current.selectedTab)
+        }
+    }
+
+    private fun loadFilteredCatalog(genre: String? = null, year: String? = null) {
+        val addon = tmdbAddon ?: return
+        val tab = _uiState.value.selectedTab
+        val type = if (tab == "Movies") "movie" else "series"
+        val typeLabel = if (type == "movie") "Movies" else "Series"
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = _uiState.value.copy(isFilterLoading = true)
+            try {
+                if (genre != null && year != null) {
+                    // Both genre + year: fetch both in parallel, intersect results
+                    val (genreItems, yearItems) = supervisorScope {
+                        val g = async {
+                            addonRepository.getCatalog(addon, type, "tmdb.top", genre = genre)
+                        }
+                        val y = async {
+                            addonRepository.getCatalog(addon, type, "tmdb.year", genre = year)
+                        }
+                        Pair(g.await(), y.await())
+                    }
+                    val yearIds = yearItems.map { it.id }.toSet()
+                    val items = genreItems.filter { it.id in yearIds }
+                    val title = "$genre $typeLabel — $year"
+
+                    val section = CatalogSection(
+                        title = title, addonName = "TMDB", addonLogo = addon.logo,
+                        brandLogo = "", type = type, catalogId = "tmdb.top+year",
+                        items = items
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        isFilterLoading = false,
+                        filteredSections = if (items.isNotEmpty()) listOf(section) else emptyList()
+                    )
+                } else {
+                    // Single filter: genre OR year
+                    val catalogId: String
+                    val genreParam: String
+                    val title: String
+
+                    if (year != null) {
+                        catalogId = "tmdb.year"
+                        genreParam = year
+                        title = "$year $typeLabel"
+                    } else {
+                        catalogId = "tmdb.top"
+                        genreParam = genre!!
+                        title = "$genre $typeLabel"
+                    }
+
+                    val items = addonRepository.getCatalog(
+                        addon = addon, type = type, catalogId = catalogId, genre = genreParam
+                    )
+                    val section = CatalogSection(
+                        title = title, addonName = "TMDB", addonLogo = addon.logo,
+                        brandLogo = "", type = type, catalogId = catalogId,
+                        items = items
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        isFilterLoading = false,
+                        filteredSections = if (items.isNotEmpty()) listOf(section) else emptyList()
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isFilterLoading = false,
+                    error = "Failed to load filtered content"
+                )
+            }
+        }
     }
 
     private fun applyFilter(tab: String) {
@@ -87,6 +202,21 @@ class VodViewModel @Inject constructor(
                             }
                         }
                     }.awaitAll()
+                }
+
+                // Extract TMDB filter options from manifest
+                val tmdbManifest = manifests.find { it.id == "tmdb-addon" || it.name.contains("TMDB", true) }
+                if (tmdbManifest != null) {
+                    tmdbAddon = tmdbManifest
+                    movieGenres = tmdbManifest.catalogs
+                        .find { it.id == "tmdb.top" && it.type == "movie" }
+                        ?.extra?.find { it.name == "genre" }?.options ?: emptyList()
+                    seriesGenres = tmdbManifest.catalogs
+                        .find { it.id == "tmdb.top" && it.type == "series" }
+                        ?.extra?.find { it.name == "genre" }?.options ?: emptyList()
+                    yearOptions = tmdbManifest.catalogs
+                        .find { it.id == "tmdb.year" && it.type == "movie" }
+                        ?.extra?.find { it.name == "genre" }?.options ?: emptyList()
                 }
 
                 // Step 2: Build catalog jobs
@@ -144,7 +274,7 @@ class VodViewModel @Inject constructor(
                 // Sort: Popular/New/Featured first, then streaming platforms
                 val sorted = sections.sortedWith(compareBy(
                     { getCategoryOrder(it.title, it.catalogId) },
-                    { if (it.type == "movie") 0 else 1 },
+                    { when (it.type) { "movie" -> 0; "series" -> 1; else -> 2 } },
                     { it.title }
                 ))
 
