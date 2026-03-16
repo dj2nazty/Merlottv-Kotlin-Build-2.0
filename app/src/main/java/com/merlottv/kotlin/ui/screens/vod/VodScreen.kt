@@ -54,11 +54,14 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
@@ -300,9 +303,20 @@ private fun CatalogSectionRow(
                             val prevIndex = itemIndex - 1
                             val prevId = section.items[prevIndex].id
                             scope.launch {
-                                lazyRowState.scrollToItem(prevIndex.coerceAtLeast(0))
-                                delay(50)
+                                lazyRowState.animateScrollToItem(prevIndex)
                                 focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } else null,
+                    onRightPress = if (itemIndex < section.items.size - 1) {
+                        {
+                            val nextIndex = itemIndex + 1
+                            val nextId = section.items[nextIndex].id
+                            scope.launch {
+                                lazyRowState.animateScrollToItem(nextIndex)
+                                focusRequesters[nextId]?.let {
                                     try { it.requestFocus() } catch (_: Exception) {}
                                 }
                             }
@@ -322,12 +336,19 @@ private fun VodCard(
     isFavorite: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
-    onLeftPress: (() -> Unit)? = null
+    onLeftPress: (() -> Unit)? = null,
+    onRightPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
     var showHeartOverlay by remember { mutableStateOf(false) }
     var heartIsFilled by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.05f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "cardScale"
+    )
 
     // Auto-hide heart overlay after 1.5 seconds
     if (showHeartOverlay) {
@@ -340,6 +361,10 @@ private fun VodCard(
     Column(
         modifier = Modifier
             .width(130.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .then(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
@@ -355,6 +380,11 @@ private fun VodCard(
                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
                         onLeftPress.invoke()
                         true // consume — prevents bubble to MainActivity's onKeyEvent
+                    }
+                    // Intercept Right for smooth animated scroll
+                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight && onRightPress != null -> {
+                        onRightPress.invoke()
+                        true
                     }
                     event.type == KeyEventType.KeyDown && isSelectKey -> {
                         if (pressStartTime == 0L) pressStartTime = System.currentTimeMillis()

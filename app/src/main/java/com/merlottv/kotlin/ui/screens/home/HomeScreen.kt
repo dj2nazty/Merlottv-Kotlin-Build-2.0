@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -40,6 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +58,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -205,6 +211,9 @@ private fun ContinueWatchingRow(
     focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
     onItemFocused: (String) -> Unit = {}
 ) {
+    val lazyRowState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -225,6 +234,7 @@ private fun ContinueWatchingRow(
             )
         }
         LazyRow(
+            state = lazyRowState,
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -239,11 +249,37 @@ private fun ContinueWatchingRow(
                         focusRequesters.getOrPut(item.id) { FocusRequester() }
                     }
                 }
+                val itemIndex = items.indexOf(item)
+
                 ContinueWatchingCard(
                     item = item,
                     onClick = { onItemClick(item) },
                     focusRequester = itemFocusRequester,
-                    onFocused = { onItemFocused(item.id) }
+                    onFocused = { onItemFocused(item.id) },
+                    onLeftPress = if (itemIndex > 0) {
+                        {
+                            val prevIndex = itemIndex - 1
+                            val prevId = items[prevIndex].id
+                            scope.launch {
+                                lazyRowState.animateScrollToItem(prevIndex)
+                                focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } else null,
+                    onRightPress = if (itemIndex < items.size - 1) {
+                        {
+                            val nextIndex = itemIndex + 1
+                            val nextId = items[nextIndex].id
+                            scope.launch {
+                                lazyRowState.animateScrollToItem(nextIndex)
+                                focusRequesters[nextId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } else null
                 )
             }
         }
@@ -255,13 +291,25 @@ private fun ContinueWatchingCard(
     item: WatchProgressItem,
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
-    onFocused: () -> Unit = {}
+    onFocused: () -> Unit = {},
+    onLeftPress: (() -> Unit)? = null,
+    onRightPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.05f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "cwCardScale"
+    )
 
     Column(
         modifier = Modifier
             .width(160.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .then(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
@@ -270,14 +318,24 @@ private fun ContinueWatchingCard(
                 isFocused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                ) {
-                    onClick(); true
-                } else false
+                when {
+                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
+                        onLeftPress.invoke()
+                        true
+                    }
+                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight && onRightPress != null -> {
+                        onRightPress.invoke()
+                        true
+                    }
+                    event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.DirectionCenter || event.key == Key.Enter) -> {
+                        onClick(); true
+                    }
+                    else -> false
+                }
             }
+            .focusable()
     ) {
         Box {
             AsyncImage(
@@ -544,6 +602,9 @@ private fun CatalogRowSection(
     focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
     onItemFocused: (String) -> Unit = {}
 ) {
+    val lazyRowState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Text(
             text = title,
@@ -553,6 +614,7 @@ private fun CatalogRowSection(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
         LazyRow(
+            state = lazyRowState,
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -566,13 +628,39 @@ private fun CatalogRowSection(
                         focusRequesters.getOrPut(item.id) { FocusRequester() }
                     }
                 }
+                val itemIndex = items.indexOf(item)
+
                 PosterCard(
                     meta = item,
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                     isFavorite = item.id in favoriteIds,
                     focusRequester = itemFocusRequester,
-                    onFocused = { onItemFocused(item.id) }
+                    onFocused = { onItemFocused(item.id) },
+                    onLeftPress = if (itemIndex > 0) {
+                        {
+                            val prevIndex = itemIndex - 1
+                            val prevId = items[prevIndex].id
+                            scope.launch {
+                                lazyRowState.animateScrollToItem(prevIndex)
+                                focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } else null,
+                    onRightPress = if (itemIndex < items.size - 1) {
+                        {
+                            val nextIndex = itemIndex + 1
+                            val nextId = items[nextIndex].id
+                            scope.launch {
+                                lazyRowState.animateScrollToItem(nextIndex)
+                                focusRequesters[nextId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } else null
                 )
             }
         }
@@ -586,12 +674,20 @@ private fun PosterCard(
     onLongClick: () -> Unit = {},
     isFavorite: Boolean = false,
     focusRequester: FocusRequester? = null,
-    onFocused: () -> Unit = {}
+    onFocused: () -> Unit = {},
+    onLeftPress: (() -> Unit)? = null,
+    onRightPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
     var showHeartOverlay by remember { mutableStateOf(false) }
     var heartIsFilled by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.05f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "cardScale"
+    )
 
     // Auto-hide heart overlay after 1.5 seconds
     if (showHeartOverlay) {
@@ -604,6 +700,10 @@ private fun PosterCard(
     Column(
         modifier = Modifier
             .width(130.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .then(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
@@ -612,10 +712,17 @@ private fun PosterCard(
                 isFocused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable()
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
                 when {
+                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
+                        onLeftPress.invoke()
+                        true
+                    }
+                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight && onRightPress != null -> {
+                        onRightPress.invoke()
+                        true
+                    }
                     event.type == KeyEventType.KeyDown && isSelectKey -> {
                         if (pressStartTime == 0L) pressStartTime = System.currentTimeMillis()
                         false
@@ -636,6 +743,7 @@ private fun PosterCard(
                     else -> false
                 }
             }
+            .focusable()
     ) {
         Box {
             AsyncImage(
