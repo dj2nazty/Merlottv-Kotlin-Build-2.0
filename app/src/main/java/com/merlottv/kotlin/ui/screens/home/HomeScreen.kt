@@ -267,18 +267,6 @@ private fun ContinueWatchingRow(
                                 }
                             }
                         }
-                    } else null,
-                    onRightPress = if (itemIndex < items.size - 1) {
-                        {
-                            val nextIndex = itemIndex + 1
-                            val nextId = items[nextIndex].id
-                            scope.launch {
-                                lazyRowState.animateScrollToItem(nextIndex)
-                                focusRequesters[nextId]?.let {
-                                    try { it.requestFocus() } catch (_: Exception) {}
-                                }
-                            }
-                        }
                     } else null
                 )
             }
@@ -292,8 +280,7 @@ private fun ContinueWatchingCard(
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
-    onLeftPress: (() -> Unit)? = null,
-    onRightPress: (() -> Unit)? = null
+    onLeftPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
@@ -322,10 +309,6 @@ private fun ContinueWatchingCard(
                 when {
                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
                         onLeftPress.invoke()
-                        true
-                    }
-                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight && onRightPress != null -> {
-                        onRightPress.invoke()
                         true
                     }
                     event.type == KeyEventType.KeyDown &&
@@ -648,18 +631,6 @@ private fun CatalogRowSection(
                                 }
                             }
                         }
-                    } else null,
-                    onRightPress = if (itemIndex < items.size - 1) {
-                        {
-                            val nextIndex = itemIndex + 1
-                            val nextId = items[nextIndex].id
-                            scope.launch {
-                                lazyRowState.animateScrollToItem(nextIndex)
-                                focusRequesters[nextId]?.let {
-                                    try { it.requestFocus() } catch (_: Exception) {}
-                                }
-                            }
-                        }
                     } else null
                 )
             }
@@ -675,8 +646,7 @@ private fun PosterCard(
     isFavorite: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
-    onLeftPress: (() -> Unit)? = null,
-    onRightPress: (() -> Unit)? = null
+    onLeftPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
@@ -717,10 +687,6 @@ private fun PosterCard(
                 when {
                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
                         onLeftPress.invoke()
-                        true
-                    }
-                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight && onRightPress != null -> {
-                        onRightPress.invoke()
                         true
                     }
                     event.type == KeyEventType.KeyDown && isSelectKey -> {

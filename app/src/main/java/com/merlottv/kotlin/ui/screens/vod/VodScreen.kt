@@ -309,18 +309,6 @@ private fun CatalogSectionRow(
                                 }
                             }
                         }
-                    } else null,
-                    onRightPress = if (itemIndex < section.items.size - 1) {
-                        {
-                            val nextIndex = itemIndex + 1
-                            val nextId = section.items[nextIndex].id
-                            scope.launch {
-                                lazyRowState.animateScrollToItem(nextIndex)
-                                focusRequesters[nextId]?.let {
-                                    try { it.requestFocus() } catch (_: Exception) {}
-                                }
-                            }
-                        }
                     } else null
                 )
             }
@@ -336,8 +324,7 @@ private fun VodCard(
     isFavorite: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
-    onLeftPress: (() -> Unit)? = null,
-    onRightPress: (() -> Unit)? = null
+    onLeftPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
@@ -380,11 +367,6 @@ private fun VodCard(
                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
                         onLeftPress.invoke()
                         true // consume — prevents bubble to MainActivity's onKeyEvent
-                    }
-                    // Intercept Right for smooth animated scroll
-                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight && onRightPress != null -> {
-                        onRightPress.invoke()
-                        true
                     }
                     event.type == KeyEventType.KeyDown && isSelectKey -> {
                         if (pressStartTime == 0L) pressStartTime = System.currentTimeMillis()
