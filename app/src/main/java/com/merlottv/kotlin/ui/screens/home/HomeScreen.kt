@@ -92,7 +92,7 @@ fun HomeScreen(
     var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
     val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
 
-    // Restore focus to the previously selected item, or default to hero carousel
+    // Restore focus to the previously selected item, or default to first content row (NOT hero carousel)
     LaunchedEffect(uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
         if (uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
             delay(300)
@@ -102,7 +102,11 @@ fun HomeScreen(
                 }
             } ?: false
             if (!restored) {
-                try { heroFocusRequester.requestFocus() } catch (_: Exception) {}
+                // Default to first content row below hero, not the hero carousel itself
+                try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {
+                    // Fallback to hero if first row not available yet
+                    try { heroFocusRequester.requestFocus() } catch (_: Exception) {}
+                }
             }
         }
     }

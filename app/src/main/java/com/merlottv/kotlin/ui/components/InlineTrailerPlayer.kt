@@ -79,7 +79,7 @@ fun InlineTrailerPlayer(
             .setMediaSourceFactory(DefaultMediaSourceFactory(httpDataSourceFactory))
             .build()
             .apply {
-                volume = 0f // Muted
+                volume = 1f // Audible trailer audio
                 repeatMode = Player.REPEAT_MODE_ONE // Loop trailer
 
                 addListener(object : Player.Listener {
