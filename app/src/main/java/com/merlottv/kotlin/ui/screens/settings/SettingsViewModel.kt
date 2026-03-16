@@ -414,6 +414,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun removeAddon(url: String) {
+        viewModelScope.launch {
+            addonRepository.removeAddon(url)
+            val addons = addonRepository.getAllAddons().first()
+            _uiState.value = _uiState.value.copy(addons = addons)
+        }
+    }
+
     // ─── Weather Alerts Toggle ───
     fun toggleWeatherAlerts(enabled: Boolean) {
         _uiState.value = _uiState.value.copy(weatherAlertsEnabled = enabled)

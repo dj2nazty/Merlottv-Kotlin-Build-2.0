@@ -12,10 +12,10 @@ import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,7 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,11 +53,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.merlottv.kotlin.data.local.ProfileDataStore
+import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 /** Grey color for focused buttons/rows throughout the app */
@@ -213,20 +218,65 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var selectedTab by rememberSaveable { mutableStateOf("General") }
+    val scrollState = rememberScrollState()
 
-    LazyColumn(
+    // Scroll to top when tab changes
+    LaunchedEffect(selectedTab) {
+        scrollState.scrollTo(0)
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MerlotColors.Background),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .background(MerlotColors.Background)
     ) {
-        item(key = "title") {
-            Text("Settings", color = MerlotColors.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        // Tab row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Settings", color = MerlotColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(modifier = Modifier.width(16.dp))
+
+            val tabs = listOf("General", "Playback", "Sources", "Addons", "Advanced")
+            tabs.forEach { tab ->
+                val isSelected = selectedTab == tab
+                MerlotChip(
+                    selected = isSelected,
+                    onClick = { selectedTab = tab },
+                    label = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
+                            when (tab) {
+                                "General" -> Icon(Icons.Default.Info, null, modifier = Modifier.size(14.dp), tint = tint)
+                                "Playback" -> Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(14.dp), tint = tint)
+                                "Sources" -> Icon(Icons.Default.Settings, null, modifier = Modifier.size(14.dp), tint = tint)
+                                "Addons" -> Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp), tint = tint)
+                                "Advanced" -> Icon(Icons.Default.List, null, modifier = Modifier.size(14.dp), tint = tint)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                        }
+                    }
+                )
+            }
         }
 
-        // ═══ About ═══
-        item(key = "about") {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+
+        // ═══ About ═══ [General]
+        if (selectedTab == "General") {
             SettingsSection(title = "About", icon = { Icon(Icons.Default.Info, null, tint = MerlotColors.Accent) }) {
                 Text("Merlot TV", color = MerlotColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Text("Kotlin Build 2.0", color = MerlotColors.Accent, fontSize = 12.sp)
@@ -264,8 +314,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Speed Test ═══
-        item(key = "speed_test") {
+        // ═══ Speed Test ═══ [General]
+        if (selectedTab == "General") {
             SettingsSection(title = "Internet Speed Test", icon = { Icon(Icons.Default.Refresh, null, tint = MerlotColors.Accent) }) {
                 if (uiState.isRunningSpeedTest) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -295,8 +345,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Live TV Buffer ═══
-        item(key = "buffer") {
+        // ═══ Live TV Buffer ═══ [Playback]
+        if (selectedTab == "Playback") {
             SettingsSection(
                 title = "Live TV Buffer",
                 icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }
@@ -447,8 +497,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Player Settings ═══
-        item(key = "player_settings") {
+        // ═══ Player Settings ═══ [Playback]
+        if (selectedTab == "Playback") {
             SettingsSection(
                 title = "Player Settings",
                 icon = { Text("\uD83C\uDFAC", fontSize = 18.sp) }
@@ -579,8 +629,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Weather Alerts ═══
-        item(key = "weather_alerts") {
+        // ═══ Weather Alerts ═══ [General]
+        if (selectedTab == "General") {
             SettingsSection(
                 title = "Weather Alerts",
                 icon = { Text("⚠", fontSize = 18.sp) }
@@ -627,8 +677,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Profiles ═══
-        item(key = "profiles") {
+        // ═══ Profiles ═══ [General]
+        if (selectedTab == "General") {
             SettingsSection(title = "Profiles", icon = { Icon(Icons.Default.Person, null, tint = MerlotColors.Accent) }) {
                 Text("Each profile has its own favorites and watch history.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
@@ -702,8 +752,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Playlists / M3U ═══
-        item(key = "playlists") {
+        // ═══ Playlists / M3U ═══ [Sources]
+        if (selectedTab == "Sources") {
             SettingsSection(title = "Playlists / M3U", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 Text("Add multiple playlists. All enabled playlists load in Live TV.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
@@ -785,8 +835,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ EPG Sources ═══
-        item(key = "epg") {
+        // ═══ EPG Sources ═══ [Sources]
+        if (selectedTab == "Sources") {
             SettingsSection(title = "EPG Sources", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 Text("Default sources are always loaded. Add custom EPG sources below.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
@@ -829,8 +879,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Backup Stream Sources ═══
-        item(key = "backup_sources") {
+        // ═══ Backup Stream Sources ═══ [Sources]
+        if (selectedTab == "Sources") {
             val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 uri?.let { val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""; viewModel.importBackupFile(content) }
             }
@@ -874,35 +924,8 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Stremio Addons ═══
-        item(key = "addons") {
-            SettingsSection(title = "Stremio Addons", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
-                Text("Default addons are built-in and cannot be removed.", color = MerlotColors.TextMuted, fontSize = 11.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                uiState.addons.forEach { addon ->
-                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) { Text(addon.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(addon.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
-                        if (addon.isDefault) Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                var addonInput by remember { mutableStateOf("") }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    DpadTextField(
-                        value = addonInput,
-                        onValueChange = { addonInput = it },
-                        placeholder = "https://addon.example.com/manifest.json",
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    DpadButton(onClick = { viewModel.addAddon(addonInput); addonInput = "" }) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
-                }
-            }
-        }
-
-        // ═══ Torbox ═══
-        item(key = "torbox") {
+        // ═══ Torbox ═══ [Sources]
+        if (selectedTab == "Sources") {
             SettingsSection(title = "Torbox", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
                 var torboxInput by remember { mutableStateOf(uiState.torboxKey) }
                 DpadTextField(
@@ -916,9 +939,61 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ Live TV Category Order ═══
-        if (uiState.categoryOrder.isNotEmpty()) {
-            item(key = "category_order") {
+        // ═══ Stremio Addons ═══ [Addons]
+        if (selectedTab == "Addons") {
+            SettingsSection(title = "Stremio Addons", icon = { Icon(Icons.Default.Add, null, tint = MerlotColors.Accent) }) {
+                Text("Addons extend Merlot TV with additional streaming sources. Default addons are built-in and cannot be removed.", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                uiState.addons.forEach { addon ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(addon.name, color = MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                if (addon.version.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("v${addon.version}", color = MerlotColors.TextMuted, fontSize = 9.sp)
+                                }
+                            }
+                            if (addon.description.isNotEmpty()) {
+                                Text(addon.description, color = MerlotColors.TextMuted, fontSize = 10.sp, maxLines = 2)
+                            }
+                            Text(addon.url, color = MerlotColors.TextMuted.copy(alpha = 0.6f), fontSize = 9.sp, maxLines = 1)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        if (addon.isDefault) {
+                            Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            IconButton(onClick = { viewModel.removeAddon(addon.url) }) {
+                                Icon(Icons.Default.Delete, "Remove addon", tint = MerlotColors.TextMuted, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Add Custom Addon", color = MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+                var addonInput by remember { mutableStateOf("") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DpadTextField(
+                        value = addonInput,
+                        onValueChange = { addonInput = it },
+                        placeholder = "https://addon.example.com/manifest.json",
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    DpadButton(onClick = { viewModel.addAddon(addonInput); addonInput = "" }, enabled = addonInput.isNotBlank()) {
+                        Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // ═══ Live TV Category Order ═══ [Advanced]
+        if (selectedTab == "Advanced" && uiState.categoryOrder.isNotEmpty()) {
                 var movingIndex by remember { mutableStateOf(-1) }  // -1 = not moving
 
                 SettingsSection(title = "Live TV Categories", icon = { Icon(Icons.Default.List, null, tint = MerlotColors.Accent) }) {
@@ -1047,16 +1122,27 @@ fun SettingsScreen(
                     }
                 }
             }
-        }
 
-        item(key = "spacer") { Spacer(modifier = Modifier.height(16.dp)) }
-    }
+        Spacer(modifier = Modifier.height(16.dp))
+        }  // end scrollable Column
+    }  // end outer Column
 }
 
 @Composable
 private fun SettingsSection(title: String, icon: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
+    var headerFocused by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) { icon(); Spacer(modifier = Modifier.width(8.dp)); Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .padding(bottom = 10.dp)
+                .onFocusChanged { headerFocused = it.isFocused }
+                .focusable()
+        ) {
+            icon()
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(title, color = if (headerFocused) MerlotColors.Accent else MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
         content()
     }
 }
