@@ -17,12 +17,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Movie
@@ -40,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -279,7 +280,6 @@ private fun CatalogSectionRow(
                 val isFirst = firstCardFocusRequester != null && item == section.items.first()
                 val itemFocusRequester = remember {
                     if (isFirst && firstCardFocusRequester != null) {
-                        // Register the first card's requester in the map too for restoration
                         focusRequesters[item.id] = firstCardFocusRequester
                         firstCardFocusRequester
                     } else {
@@ -287,6 +287,7 @@ private fun CatalogSectionRow(
                     }
                 }
                 val itemIndex = section.items.indexOf(item)
+
                 VodCard(
                     item = item,
                     onClick = { onItemClick(item) },
@@ -299,8 +300,8 @@ private fun CatalogSectionRow(
                             val prevIndex = itemIndex - 1
                             val prevId = section.items[prevIndex].id
                             scope.launch {
-                                lazyRowState.animateScrollToItem(prevIndex)
-                                kotlinx.coroutines.delay(50)
+                                lazyRowState.scrollToItem(prevIndex.coerceAtLeast(0))
+                                delay(50)
                                 focusRequesters[prevId]?.let {
                                     try { it.requestFocus() } catch (_: Exception) {}
                                 }
@@ -347,30 +348,27 @@ private fun VodCard(
                 isFocused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable()
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
                 when {
-                    // Intercept Left press to prevent focus escaping to sidebar
+                    // Intercept Left to scroll back in row instead of opening sidebar
                     event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
                         onLeftPress.invoke()
-                        true
+                        true // consume — prevents bubble to MainActivity's onKeyEvent
                     }
                     event.type == KeyEventType.KeyDown && isSelectKey -> {
                         if (pressStartTime == 0L) pressStartTime = System.currentTimeMillis()
-                        false // Don't consume — let repeat events come through
+                        false
                     }
                     event.type == KeyEventType.KeyUp && isSelectKey -> {
                         val held = System.currentTimeMillis() - pressStartTime
                         pressStartTime = 0L
                         if (held >= 600) {
-                            // Long press → toggle favorite
                             heartIsFilled = !isFavorite
                             showHeartOverlay = true
                             onLongClick()
                             true
                         } else {
-                            // Short press → navigate
                             onClick()
                             true
                         }
@@ -378,6 +376,7 @@ private fun VodCard(
                     else -> false
                 }
             }
+            .focusable()
     ) {
         Box {
             AsyncImage(

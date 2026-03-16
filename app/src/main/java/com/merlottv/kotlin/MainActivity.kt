@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
@@ -105,15 +106,15 @@ fun MerlotApp() {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .onPreviewKeyEvent { event ->
+                .onKeyEvent { event ->
                     // D-pad Left at the content edge → show sidebar and give it focus
+                    // Uses onKeyEvent (bubble phase) so child composables like VodCard
+                    // can consume Left first for in-row scrolling via onPreviewKeyEvent
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.DirectionLeft &&
                         showSidebar && !sidebarVisible
                     ) {
                         sidebarVisible = true
-                        // Focus is handled by LaunchedEffect inside SidebarNavigation
-                        // to avoid the race where requestFocus fires before the sidebar is composed
                         true
                     } else {
                         false
