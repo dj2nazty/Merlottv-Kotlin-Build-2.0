@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -80,6 +82,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -220,6 +223,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     var selectedTab by rememberSaveable { mutableStateOf("General") }
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
 
     // Scroll to top when tab changes
     LaunchedEffect(selectedTab) {
@@ -231,7 +235,10 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(MerlotColors.Background)
     ) {
-        // Tab row
+        // Tab row with focus requesters for each tab
+        val tabs = listOf("General", "Playback", "Sources", "Addons", "Advanced")
+        val tabFocusRequesters = remember { tabs.map { FocusRequester() } }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -243,12 +250,12 @@ fun SettingsScreen(
             Text("Settings", color = MerlotColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(modifier = Modifier.width(16.dp))
 
-            val tabs = listOf("General", "Playback", "Sources", "Addons", "Advanced")
-            tabs.forEach { tab ->
+            tabs.forEachIndexed { index, tab ->
                 val isSelected = selectedTab == tab
                 MerlotChip(
                     selected = isSelected,
                     onClick = { selectedTab = tab },
+                    modifier = Modifier.focusRequester(tabFocusRequesters[index]),
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
@@ -267,6 +274,9 @@ fun SettingsScreen(
             }
         }
 
+        // Content area — focusProperties redirects Up to the currently selected tab
+        val selectedTabIndex = tabs.indexOf(selectedTab).coerceAtLeast(0)
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -275,6 +285,16 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
+        // Focus anchor at top — scrolls to top when focused, D-pad Up goes to selected tab
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .onFocusChanged { if (it.isFocused) coroutineScope.launch { scrollState.animateScrollTo(0) } }
+                .focusProperties { up = tabFocusRequesters[selectedTabIndex] }
+                .focusable()
+        )
+
         // ═══ About ═══ [General]
         if (selectedTab == "General") {
             SettingsSection(title = "About", icon = { Icon(Icons.Default.Info, null, tint = MerlotColors.Accent) }) {
@@ -282,7 +302,49 @@ fun SettingsScreen(
                 Text("Kotlin Build 2.0", color = MerlotColors.Accent, fontSize = 12.sp)
                 Text("Version ${uiState.appVersion} (Build ${com.merlottv.kotlin.BuildConfig.VERSION_CODE})", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // Release notes button + panel
+                DpadButton(onClick = { viewModel.toggleReleaseNotes() }) {
+                    Icon(Icons.Default.Info, null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (uiState.showReleaseNotes) "Hide Release Notes" else "View Release Notes", fontSize = 11.sp)
+                }
+                if (uiState.showReleaseNotes) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text("Release Notes — v${uiState.appVersion}", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (uiState.isFetchingReleaseNotes) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MerlotColors.Accent, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Fetching from GitHub...", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                            }
+                        } else {
+                            Text(
+                                uiState.releaseNotes,
+                                color = MerlotColors.TextPrimary,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 if (uiState.updateAvailable) {
+                    val downloadFocus = remember { FocusRequester() }
+                    // Auto-focus the Download button when update becomes available
+                    LaunchedEffect(uiState.updateAvailable) {
+                        if (uiState.updateAvailable && uiState.updateUrl.isNotEmpty()) {
+                            try { downloadFocus.requestFocus() } catch (_: Exception) {}
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth().background(MerlotColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -293,7 +355,8 @@ fun SettingsScreen(
                         }
                         if (uiState.updateUrl.isNotEmpty()) {
                             DpadButton(
-                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))) }
+                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))) },
+                                modifier = Modifier.focusRequester(downloadFocus)
                             ) { Text("Download", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                         }
                     }
@@ -1129,19 +1192,16 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsSection(title: String, icon: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
-    var headerFocused by remember { mutableStateOf(false) }
+private fun SettingsSection(
+    title: String,
+    icon: @Composable () -> Unit = {},
+    content: @Composable () -> Unit
+) {
     Column(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .padding(bottom = 10.dp)
-                .onFocusChanged { headerFocused = it.isFocused }
-                .focusable()
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
             icon()
             Spacer(modifier = Modifier.width(8.dp))
-            Text(title, color = if (headerFocused) MerlotColors.Accent else MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
         content()
     }

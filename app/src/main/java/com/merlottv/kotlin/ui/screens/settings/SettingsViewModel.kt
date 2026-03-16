@@ -66,7 +66,11 @@ data class SettingsUiState(
     val frameRateMatching: String = "off", // "off", "start", "start_stop"
     // Next episode auto-play
     val nextEpisodeAutoPlay: Boolean = true,
-    val nextEpisodeThresholdPercent: Int = 95
+    val nextEpisodeThresholdPercent: Int = 95,
+    // Release notes
+    val releaseNotes: String = "",
+    val isFetchingReleaseNotes: Boolean = false,
+    val showReleaseNotes: Boolean = false
 )
 
 @HiltViewModel
@@ -306,6 +310,60 @@ class SettingsViewModel @Inject constructor(
             }
         } catch (_: Exception) {}
         return false
+    }
+
+    // ─── Release Notes ───
+    fun toggleReleaseNotes() {
+        if (_uiState.value.showReleaseNotes) {
+            // Already showing — just hide
+            _uiState.value = _uiState.value.copy(showReleaseNotes = false)
+            return
+        }
+        // Show and fetch if not already fetched
+        _uiState.value = _uiState.value.copy(showReleaseNotes = true)
+        if (_uiState.value.releaseNotes.isNotEmpty()) return // Already fetched
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isFetchingReleaseNotes = true)
+            try {
+                val notes = withContext(Dispatchers.IO) {
+                    val client = OkHttpClient.Builder()
+                        .connectTimeout(10, TimeUnit.SECONDS)
+                        .readTimeout(10, TimeUnit.SECONDS)
+                        .build()
+                    // Try fetching release for the current version tag
+                    val currentTag = "v${BuildConfig.VERSION_NAME}"
+                    val request = Request.Builder()
+                        .url("https://api.github.com/repos/dj2nazty/Merlottv-Kotlin-Build-2.0/releases/tags/$currentTag")
+                        .header("Accept", "application/vnd.github.v3+json")
+                        .build()
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        val json = JSONObject(response.body?.string() ?: "{}")
+                        json.optString("body", "No release notes available.")
+                    } else {
+                        // Fall back to latest release
+                        val latestReq = Request.Builder()
+                            .url("https://api.github.com/repos/dj2nazty/Merlottv-Kotlin-Build-2.0/releases/latest")
+                            .header("Accept", "application/vnd.github.v3+json")
+                            .build()
+                        val latestResp = client.newCall(latestReq).execute()
+                        val json = JSONObject(latestResp.body?.string() ?: "{}")
+                        val tag = json.optString("tag_name", "")
+                        val body = json.optString("body", "No release notes available.")
+                        "Release $tag:\n$body"
+                    }
+                }
+                _uiState.value = _uiState.value.copy(
+                    releaseNotes = notes,
+                    isFetchingReleaseNotes = false
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    releaseNotes = "Unable to fetch release notes: ${e.message}",
+                    isFetchingReleaseNotes = false
+                )
+            }
+        }
     }
 
     // ─── Backup Stream Sources ───
