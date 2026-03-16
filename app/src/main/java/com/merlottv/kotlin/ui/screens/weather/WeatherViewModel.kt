@@ -6,6 +6,7 @@ import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
 import com.merlottv.kotlin.domain.model.RadarFrame
+import com.merlottv.kotlin.domain.model.WeatherAlert
 import com.merlottv.kotlin.domain.repository.WeatherRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -28,7 +29,9 @@ data class WeatherUiState(
     val zipCode: String = "43616",
     val showZipDialog: Boolean = false,
     val showFullscreenRadar: Boolean = false,
-    val selectedDayIndex: Int = -1  // -1 = no day selected (show current conditions)
+    val selectedDayIndex: Int = -1,  // -1 = no day selected (show current conditions)
+    val alerts: List<WeatherAlert> = emptyList(),
+    val selectedAlertIndex: Int = -1  // -1 = no alert expanded
 )
 
 @HiltViewModel
@@ -94,6 +97,15 @@ class WeatherViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(selectedDayIndex = -1)
     }
 
+    fun selectAlert(index: Int) {
+        val newIndex = if (_uiState.value.selectedAlertIndex == index) -1 else index
+        _uiState.value = _uiState.value.copy(selectedAlertIndex = newIndex)
+    }
+
+    fun dismissAlertDetail() {
+        _uiState.value = _uiState.value.copy(selectedAlertIndex = -1)
+    }
+
     private fun loadAll() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -103,6 +115,14 @@ class WeatherViewModel @Inject constructor(
                 val radarFrames = repository.getRadarFrames()
 
                 if (weatherResult != null) {
+                    // Fetch NWS alerts using the lat/lon from weather data
+                    val alerts = try {
+                        repository.getActiveAlerts(
+                            weatherResult.first.lat,
+                            weatherResult.first.lon
+                        )
+                    } catch (_: Exception) { emptyList() }
+
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         hasLoadedOnce = true,
@@ -110,6 +130,7 @@ class WeatherViewModel @Inject constructor(
                         forecast = weatherResult.second,
                         radarFrames = radarFrames,
                         radarAnimIndex = 0,
+                        alerts = alerts,
                         error = null
                     )
                     // Start radar animation if we have frames

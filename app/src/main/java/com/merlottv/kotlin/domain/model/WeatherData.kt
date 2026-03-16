@@ -59,3 +59,17 @@ data class RadarFrame(
     val time: Long,
     val host: String
 )
+
+data class WeatherAlert(
+    val id: String,
+    val event: String,           // "Tornado Warning", "Wind Advisory"
+    val headline: String,        // Full headline text
+    val description: String,     // Detailed description
+    val severity: String,        // "Extreme", "Severe", "Moderate", "Minor", "Unknown"
+    val urgency: String,         // "Immediate", "Expected", "Future", "Unknown"
+    val senderName: String,      // "NWS Cleveland OH"
+    val areaDesc: String,        // Affected counties/zones
+    val onset: String,           // ISO timestamp — when conditions begin
+    val expires: String,         // ISO timestamp — when alert expires
+    val instruction: String?     // Recommended actions (may be null)
+)

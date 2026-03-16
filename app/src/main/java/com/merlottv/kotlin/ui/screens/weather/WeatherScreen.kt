@@ -67,6 +67,7 @@ import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
 import com.merlottv.kotlin.domain.model.HourForecast
+import com.merlottv.kotlin.domain.model.WeatherAlert
 import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
@@ -89,6 +90,11 @@ fun WeatherScreen(
     // Handle BACK from day detail
     BackHandler(enabled = uiState.selectedDayIndex >= 0) {
         viewModel.dismissDayDetail()
+    }
+
+    // Handle BACK from alert detail
+    BackHandler(enabled = uiState.selectedAlertIndex >= 0) {
+        viewModel.dismissAlertDetail()
     }
 
     // Handle BACK from ZIP dialog
@@ -200,6 +206,25 @@ fun WeatherScreen(
                             onChangeZip = { viewModel.toggleZipDialog() },
                             onRefresh = { viewModel.refresh() }
                         )
+                    }
+
+                    // Weather alerts banner
+                    if (uiState.alerts.isNotEmpty()) {
+                        item {
+                            AlertBanner(
+                                alerts = uiState.alerts,
+                                onAlertClick = { index -> viewModel.selectAlert(index) }
+                            )
+                        }
+                        // Expanded alert detail
+                        if (uiState.selectedAlertIndex in uiState.alerts.indices) {
+                            item {
+                                AlertDetailCard(
+                                    alert = uiState.alerts[uiState.selectedAlertIndex],
+                                    onDismiss = { viewModel.dismissAlertDetail() }
+                                )
+                            }
+                        }
                     }
 
                     // Current conditions
@@ -948,4 +973,236 @@ private fun formatLocalTime(localTime: String): String {
             "$displayHour:$minute $amPm"
         } else localTime
     } catch (_: Exception) { localTime }
+}
+
+// ─── NWS Weather Alerts ─────────────────────────────────────────────────
+
+private fun alertSeverityColor(severity: String): Color = when (severity) {
+    "Extreme" -> Color(0xFFCC0000)
+    "Severe" -> Color(0xFFDD2200)
+    "Moderate" -> Color(0xFFCC6600)
+    "Minor" -> Color(0xFFCCAA00)
+    else -> Color(0xFF888888)
+}
+
+private fun alertSeverityTextColor(severity: String): Color = when (severity) {
+    "Minor" -> Color(0xFF1A1A1A)
+    else -> Color.White
+}
+
+@Composable
+private fun AlertBanner(
+    alerts: List<WeatherAlert>,
+    onAlertClick: (Int) -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val worstSeverity = alerts.firstOrNull()?.severity ?: "Unknown"
+    val bgColor = alertSeverityColor(worstSeverity)
+    val textColor = alertSeverityTextColor(worstSeverity)
+
+    // Build scrolling text from all alerts
+    val alertText = alerts.joinToString("  \u2022  ") { alert ->
+        "\u26A0 ${alert.event}: ${alert.headline}"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor.copy(alpha = 0.9f))
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) MerlotColors.Accent else Color.Transparent,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onAlertClick(0)
+                    true
+                } else false
+            }
+            .focusable()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Severity badge
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.3f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = "\u26A0 ${alerts.size} ALERT${if (alerts.size > 1) "S" else ""}",
+                    color = textColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // Scrolling alert text using marquee-like effect
+            Box(modifier = Modifier.weight(1f)) {
+                // Use basicMarquee on API 33+ or just scrolling text
+                Text(
+                    text = alertText,
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (isFocused) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ENTER for details",
+                    color = textColor.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlertDetailCard(
+    alert: WeatherAlert,
+    onDismiss: () -> Unit
+) {
+    val bgColor = alertSeverityColor(alert.severity)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MerlotColors.Surface2)
+            .border(1.dp, bgColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            .padding(16.dp)
+    ) {
+        // Header row
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Severity badge
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(bgColor)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = alert.severity.uppercase(),
+                    color = alertSeverityTextColor(alert.severity),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Text(
+                text = alert.event,
+                color = MerlotColors.TextPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Sender
+        Text(
+            text = alert.senderName,
+            color = MerlotColors.Accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Headline
+        Text(
+            text = alert.headline,
+            color = MerlotColors.TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Description
+        Text(
+            text = alert.description.trim(),
+            color = MerlotColors.TextMuted,
+            fontSize = 12.sp,
+            lineHeight = 18.sp
+        )
+
+        // Instruction (if available)
+        if (!alert.instruction.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(bgColor.copy(alpha = 0.15f))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "PRECAUTIONS",
+                        color = bgColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = alert.instruction!!.trim(),
+                        color = MerlotColors.TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Area + timing info
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Areas", color = MerlotColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = alert.areaDesc,
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 11.sp,
+                    maxLines = 3
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Press BACK to close",
+            color = MerlotColors.TextMuted,
+            fontSize = 10.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }

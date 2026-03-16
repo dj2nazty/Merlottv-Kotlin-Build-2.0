@@ -6,6 +6,7 @@ import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
 import com.merlottv.kotlin.domain.model.HourForecast
 import com.merlottv.kotlin.domain.model.RadarFrame
+import com.merlottv.kotlin.domain.model.WeatherAlert
 import com.merlottv.kotlin.domain.repository.WeatherRepository
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +42,7 @@ class WeatherRepositoryImpl @Inject constructor(
     private val cache = ConcurrentHashMap<String, CacheEntry>()
     private val WEATHER_CACHE_TTL = 15 * 60 * 1000L    // 15 minutes
     private val RADAR_CACHE_TTL = 2 * 60 * 1000L        // 2 minutes
+    private val ALERTS_CACHE_TTL = 5 * 60 * 1000L        // 5 minutes
 
     private data class CacheEntry(val data: Any, val timestamp: Long)
 
@@ -63,10 +65,30 @@ class WeatherRepositoryImpl @Inject constructor(
         moshi.adapter(Map::class.java)
     }
 
+    // NWS alerts client — separate User-Agent required by api.weather.gov
+    private val nwsClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .header("User-Agent", "MerlotTV/2.37 (merlottv.app)")
+                    .header("Accept", "application/geo+json")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+    }
+
     companion object {
         private const val TAG = "WeatherRepo"
         private const val WEATHER_BASE = "https://api.weatherapi.com/v1"
         private const val RADAR_API = "https://api.rainviewer.com/public/weather-maps.json"
+        private const val NWS_ALERTS_BASE = "https://api.weather.gov/alerts/active"
+
+        private val SEVERITY_ORDER = mapOf(
+            "Extreme" to 0, "Severe" to 1, "Moderate" to 2, "Minor" to 3, "Unknown" to 4
+        )
     }
 
     // ─── Weather + Forecast (single API call) ────────────────────────────
@@ -215,6 +237,91 @@ class WeatherRepositoryImpl @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch radar frames", e)
                 emptyList()
+            }
+        }
+    }
+
+    // ─── NWS Weather Alerts ──────────────────────────────────────────────
+
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun getActiveAlerts(lat: Double, lon: Double): List<WeatherAlert> {
+        val cacheKey = "alerts_${String.format("%.4f", lat)}_${String.format("%.4f", lon)}"
+        getCached<List<WeatherAlert>>(cacheKey, ALERTS_CACHE_TTL)?.let { return it }
+
+        return withContext(boundedIo) {
+            try {
+                val url = "$NWS_ALERTS_BASE?point=${String.format("%.4f", lat)},${String.format("%.4f", lon)}&status=actual"
+                val request = Request.Builder().url(url).build()
+                val response = nwsClient.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "NWS alerts HTTP ${response.code}")
+                    return@withContext emptyList()
+                }
+
+                val body = response.body?.string() ?: return@withContext emptyList()
+                val json = mapAdapter.fromJson(body) as? Map<String, Any?> ?: return@withContext emptyList()
+                val features = (json["features"] as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
+
+                val alerts = features.mapNotNull { feature ->
+                    val props = feature["properties"] as? Map<String, Any?> ?: return@mapNotNull null
+                    val event = props["event"]?.toString() ?: return@mapNotNull null
+
+                    WeatherAlert(
+                        id = props["id"]?.toString() ?: feature["id"]?.toString() ?: "",
+                        event = event,
+                        headline = props["headline"]?.toString() ?: event,
+                        description = props["description"]?.toString() ?: "",
+                        severity = props["severity"]?.toString() ?: "Unknown",
+                        urgency = props["urgency"]?.toString() ?: "Unknown",
+                        senderName = props["senderName"]?.toString() ?: "",
+                        areaDesc = props["areaDesc"]?.toString() ?: "",
+                        onset = props["onset"]?.toString() ?: props["effective"]?.toString() ?: "",
+                        expires = props["expires"]?.toString() ?: "",
+                        instruction = props["instruction"]?.toString()
+                    )
+                }.sortedBy { SEVERITY_ORDER[it.severity] ?: 4 }
+
+                Log.d(TAG, "Fetched ${alerts.size} NWS alerts for ($lat, $lon)")
+                putCache(cacheKey, alerts)
+                alerts
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch NWS alerts", e)
+                emptyList()
+            }
+        }
+    }
+
+    // ─── ZIP → lat/lon geocoding (reuses WeatherAPI) ──────────────────────
+
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun getCoordinatesForZip(zipCode: String): Pair<Double, Double>? {
+        val cacheKey = "coords_$zipCode"
+        getCached<Pair<Double, Double>>(cacheKey, WEATHER_CACHE_TTL)?.let { return it }
+
+        return withContext(boundedIo) {
+            try {
+                // Use the WeatherAPI search endpoint — lightweight, returns lat/lon
+                val url = "$WEATHER_BASE/search.json?key=${BuildConfig.WEATHER_API_KEY}&q=$zipCode"
+                val request = Request.Builder().url(url)
+                    .header("Accept", "application/json")
+                    .build()
+                val response = weatherClient.newCall(request).execute()
+                if (!response.isSuccessful) return@withContext null
+
+                val body = response.body?.string() ?: return@withContext null
+                val list = moshi.adapter(List::class.java).fromJson(body) as? List<*> ?: return@withContext null
+                val first = (list.firstOrNull() as? Map<String, Any?>) ?: return@withContext null
+
+                val lat = (first["lat"] as? Number)?.toDouble() ?: return@withContext null
+                val lon = (first["lon"] as? Number)?.toDouble() ?: return@withContext null
+
+                val result = Pair(lat, lon)
+                putCache(cacheKey, result)
+                result
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to geocode ZIP $zipCode", e)
+                null
             }
         }
     }

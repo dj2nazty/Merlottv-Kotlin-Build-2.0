@@ -39,13 +39,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.collectAsState
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.merlottv.kotlin.ui.components.SidebarNavigation
+import com.merlottv.kotlin.ui.components.WeatherAlertTicker
 import com.merlottv.kotlin.ui.navigation.MerlotNavHost
 import com.merlottv.kotlin.ui.navigation.Screen
 import com.merlottv.kotlin.ui.theme.MerlotColors
 import com.merlottv.kotlin.ui.theme.MerlotTVTheme
+import com.merlottv.kotlin.ui.viewmodels.AlertsViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -69,6 +73,11 @@ fun MerlotApp() {
     var sidebarVisible by remember { mutableStateOf(false) }
     val sidebarFocusRequester = remember { FocusRequester() }
     var showExitDialog by remember { mutableStateOf(false) }
+
+    // Global weather alerts
+    val alertsViewModel: AlertsViewModel = hiltViewModel()
+    val activeAlerts by alertsViewModel.activeAlerts.collectAsState()
+    val showAlertBanner by alertsViewModel.showBanner.collectAsState()
 
     // Always start at ProfilePicker — it auto-redirects to Home if a profile is already set
     // This avoids creating a duplicate ProfileDataStore outside of Hilt
@@ -145,6 +154,15 @@ fun MerlotApp() {
                 onDismiss = { showExitDialog = false }
             )
         }
+
+        // Global weather alert ticker — shows on Live TV and Player (VOD) screens
+        val showTickerOnScreen = currentRoute == Screen.LiveTv.route ||
+            currentRoute == Screen.Player.route
+        WeatherAlertTicker(
+            alerts = activeAlerts,
+            visible = showAlertBanner && showTickerOnScreen,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }
 
