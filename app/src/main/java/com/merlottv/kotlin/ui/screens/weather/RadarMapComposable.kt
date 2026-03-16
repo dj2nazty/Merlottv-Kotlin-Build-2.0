@@ -302,46 +302,118 @@ private fun buildRadarHtml(frames: List<RadarFrame>, lat: Double, lon: Double): 
 
     // ─── Traditional NEXRAD color remap ────────────────────────────────
     // RainViewer free tier only provides "Universal Blue" (scheme 2).
-    // We fetch the raw tiles, then recolor every pixel to the classic
-    // NEXRAD green→yellow→red→magenta palette via a Canvas GridLayer.
+    // That scheme uses: dark blue/cyan → light blue → green → yellow → orange → red → magenta
+    // We remap to classic NEXRAD: dark green → green → yellow → orange → red → magenta
+    //
+    // Strategy: compute a 0–1 "intensity" score from the source pixel's
+    // position on the RainViewer color ramp, then map that score to
+    // the NEXRAD output ramp.
 
-    // Traditional NEXRAD dBZ color scale (green→yellow→orange→red→magenta→white)
-    var nexradColors = [
-        // [minBrightness, maxBrightness, r, g, b]  — maps pixel intensity bands
-        [10,  30,   0, 120,   0],   // dark green  — very light rain
-        [30,  60,   0, 200,   0],   // green       — light rain
-        [60,  90,  50, 255,   0],   // yellow-green
-        [90, 115, 255, 255,   0],   // yellow      — moderate rain
-        [115,140, 255, 200,   0],   // gold
-        [140,165, 255, 140,   0],   // orange      — heavy rain
-        [165,190, 255,  60,   0],   // dark orange
-        [190,210, 255,   0,   0],   // red         — very heavy rain
-        [210,230, 200,   0,   0],   // dark red
-        [230,245, 255,   0, 255],   // magenta     — extreme
-        [245,256, 255, 255, 255]    // white       — hail / intense
+    // NEXRAD output color ramp — 0.0 (lightest) → 1.0 (most intense)
+    var nexradRamp = [
+        [0.00,   0, 100,   0],   // dark green   — very light
+        [0.10,   0, 180,   0],   // green         — light rain
+        [0.20,  50, 220,   0],   // bright green
+        [0.30,   0, 255,   0],   // lime green    — light-moderate
+        [0.40, 180, 255,   0],   // yellow-green
+        [0.50, 255, 255,   0],   // yellow        — moderate
+        [0.58, 255, 200,   0],   // gold
+        [0.65, 255, 140,   0],   // orange        — heavy
+        [0.72, 255,  80,   0],   // dark orange
+        [0.80, 255,   0,   0],   // red           — very heavy
+        [0.88, 200,   0,   0],   // dark red
+        [0.94, 255,   0, 200],   // magenta       — extreme
+        [1.00, 255, 255, 255]    // white         — hail
     ];
+
+    function lerpRamp(t) {
+        t = Math.max(0, Math.min(1, t));
+        for (var i = 0; i < nexradRamp.length - 1; i++) {
+            var lo = nexradRamp[i], hi = nexradRamp[i + 1];
+            if (t >= lo[0] && t <= hi[0]) {
+                var f = (t - lo[0]) / (hi[0] - lo[0]);
+                return [
+                    Math.round(lo[1] + f * (hi[1] - lo[1])),
+                    Math.round(lo[2] + f * (hi[2] - lo[2])),
+                    Math.round(lo[3] + f * (hi[3] - lo[3]))
+                ];
+            }
+        }
+        var last = nexradRamp[nexradRamp.length - 1];
+        return [last[1], last[2], last[3]];
+    }
+
+    // Convert RGB → HSL (returns h in 0-360, s/l in 0-1)
+    function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        var h = 0, s = 0, l = (mx + mn) / 2;
+        if (mx !== mn) {
+            var d = mx - mn;
+            s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+            if (mx === r) h = ((g - b) / d + (g < b ? 6 : 0));
+            else if (mx === g) h = ((b - r) / d + 2);
+            else h = ((r - g) / d + 4);
+            h *= 60;
+        }
+        return [h, s, l];
+    }
 
     function remapColor(r, g, b, a) {
         if (a < 10) return [0, 0, 0, 0]; // transparent stays transparent
-        // Compute intensity from the source pixel (weighted luminance)
-        var intensity = 0.299 * r + 0.587 * g + 0.114 * b;
-        // Also consider max channel for saturated colors
-        var maxC = Math.max(r, g, b);
-        var bright = Math.max(intensity, maxC * 0.8);
-        for (var i = 0; i < nexradColors.length; i++) {
-            var c = nexradColors[i];
-            if (bright >= c[0] && bright < c[1]) {
-                // Interpolate within the band for smooth gradient
-                var t = (bright - c[0]) / (c[1] - c[0]);
-                var nextIdx = Math.min(i + 1, nexradColors.length - 1);
-                var n = nexradColors[nextIdx];
-                var nr = Math.round(c[2] + t * (n[2] - c[2]));
-                var ng = Math.round(c[3] + t * (n[3] - c[3]));
-                var nb = Math.round(c[4] + t * (n[4] - c[4]));
-                return [nr, ng, nb, Math.min(a, 220)];
-            }
+
+        var hsl = rgbToHsl(r, g, b);
+        var hue = hsl[0], sat = hsl[1], lit = hsl[2];
+
+        // Very dark / desaturated pixels → skip (background noise)
+        if (lit < 0.06 || (sat < 0.08 && lit < 0.3)) return [0, 0, 0, 0];
+
+        // RainViewer Universal Blue color ramp (approximate):
+        //   Dark blue/navy (hue ~240) → Cyan (180) → Green (120) →
+        //   Yellow (60) → Orange (30) → Red (0/360) → Magenta (300) → White
+        //
+        // Map source hue+lightness → 0–1 intensity score:
+        var intensity = 0;
+
+        if (sat < 0.15 && lit > 0.7) {
+            // Near-white / very light desaturated → extreme (hail)
+            intensity = 0.95 + lit * 0.05;
+        } else if (hue >= 200 && hue <= 260) {
+            // Blue range — lightest precipitation
+            // Darker blue = very light, brighter blue = light
+            intensity = 0.0 + lit * 0.25;
+        } else if (hue >= 160 && hue < 200) {
+            // Cyan range — light rain
+            intensity = 0.15 + lit * 0.20;
+        } else if (hue >= 100 && hue < 160) {
+            // Green range — light to moderate
+            intensity = 0.25 + lit * 0.20;
+        } else if (hue >= 60 && hue < 100) {
+            // Yellow-green range — moderate
+            intensity = 0.35 + lit * 0.20;
+        } else if (hue >= 40 && hue < 60) {
+            // Yellow range — moderate to heavy
+            intensity = 0.45 + lit * 0.15;
+        } else if (hue >= 20 && hue < 40) {
+            // Orange range — heavy
+            intensity = 0.55 + lit * 0.20;
+        } else if ((hue >= 0 && hue < 20) || hue >= 350) {
+            // Red range — very heavy
+            intensity = 0.70 + lit * 0.18;
+        } else if (hue >= 280 && hue < 350) {
+            // Magenta/purple range — extreme
+            intensity = 0.85 + lit * 0.12;
+        } else {
+            // Fallback
+            intensity = lit * 0.5;
         }
-        return [r, g, b, a]; // fallback
+
+        intensity = Math.max(0, Math.min(1, intensity));
+        var out = lerpRamp(intensity);
+        // Scale alpha by intensity — light rain is more transparent, heavy rain more opaque
+        // This matches traditional radar where greens are translucent and reds are solid
+        var outAlpha = Math.round(80 + intensity * 100); // 80–180 range
+        return [out[0], out[1], out[2], Math.min(a, outAlpha)];
     }
 
     // Custom Canvas GridLayer that fetches RainViewer tiles and recolors them
@@ -403,7 +475,7 @@ private fun buildRadarHtml(frames: List<RadarFrame>, lat: Double, lon: Double): 
             radarLayers[currentFrame].setOpacity(0);
         }
         // Show new
-        radarLayers[idx].setOpacity(0.85);
+        radarLayers[idx].setOpacity(0.65);
         currentFrame = idx;
 
         // Update timestamp
