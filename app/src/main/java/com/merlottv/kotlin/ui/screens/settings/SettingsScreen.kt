@@ -255,7 +255,27 @@ fun SettingsScreen(
                 MerlotChip(
                     selected = isSelected,
                     onClick = { selectedTab = tab },
-                    modifier = Modifier.focusRequester(tabFocusRequesters[index]),
+                    modifier = Modifier
+                        .focusRequester(tabFocusRequesters[index])
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown) {
+                                when (event.key) {
+                                    Key.DirectionLeft -> {
+                                        if (index > 0) {
+                                            try { tabFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                            true // Consume — don't let sidebar steal focus
+                                        } else true // On first tab, consume Left to block sidebar
+                                    }
+                                    Key.DirectionRight -> {
+                                        if (index < tabs.size - 1) {
+                                            try { tabFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                        }
+                                        true // Consume to prevent focus from leaving tabs
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        },
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
