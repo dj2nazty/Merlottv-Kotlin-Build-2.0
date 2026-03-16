@@ -58,6 +58,9 @@ class SettingsDataStore(private val context: Context) {
         val WEATHER_ZIP = stringPreferencesKey("weather_zip_code")
         const val DEFAULT_WEATHER_ZIP = "43616"
 
+        // Weather alerts on Live TV / VOD
+        val WEATHER_ALERTS_ENABLED = booleanPreferencesKey("weather_alerts_enabled")
+
         // Subtitle settings
         val SUBTITLES_ENABLED = booleanPreferencesKey("subtitles_enabled")
         val SUBTITLE_LANGUAGE = stringPreferencesKey("subtitle_language")
@@ -217,6 +220,15 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setCustomAddons(json: String) {
         context.settingsDataStore.edit { it[CUSTOM_ADDONS] = json }
+    }
+
+    // ─── Weather Alerts Toggle ───
+    val weatherAlertsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[WEATHER_ALERTS_ENABLED] ?: true // Enabled by default
+    }
+
+    suspend fun setWeatherAlertsEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[WEATHER_ALERTS_ENABLED] = enabled }
     }
 
     // ─── Subtitle Settings ───

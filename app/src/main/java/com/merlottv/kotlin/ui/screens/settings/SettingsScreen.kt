@@ -447,6 +447,54 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ Weather Alerts ═══
+        item(key = "weather_alerts") {
+            SettingsSection(
+                title = "Weather Alerts",
+                icon = { Text("⚠", fontSize = 18.sp) }
+            ) {
+                Text(
+                    "Show scrolling NWS weather alert ticker on Live TV and VOD screens when active alerts exist for your area.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                        .dpadFocusable(onClick = { viewModel.toggleWeatherAlerts(!uiState.weatherAlertsEnabled) })
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            "Alert Ticker on Live TV & VOD",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (uiState.weatherAlertsEnabled) "Enabled — alerts scroll at top of screen"
+                            else "Disabled — alerts only show on Weather screen",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = uiState.weatherAlertsEnabled,
+                        onCheckedChange = { viewModel.toggleWeatherAlerts(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MerlotColors.Accent,
+                            checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.height(24.dp)
+                    )
+                }
+            }
+        }
+
         // ═══ Profiles ═══
         item(key = "profiles") {
             SettingsSection(title = "Profiles", icon = { Icon(Icons.Default.Person, null, tint = MerlotColors.Accent) }) {

@@ -59,7 +59,9 @@ data class SettingsUiState(
     val categoryOrder: List<String> = emptyList(),
     val availableCategories: List<String> = emptyList(),
     // Live TV buffer duration (ms) — adjustable 300–3000 in 100ms steps
-    val bufferDurationMs: Int = 800
+    val bufferDurationMs: Int = 800,
+    // Weather alerts on Live TV / VOD
+    val weatherAlertsEnabled: Boolean = true
 )
 
 @HiltViewModel
@@ -89,6 +91,7 @@ class SettingsViewModel @Inject constructor(
             val customEpg = settingsDataStore.customEpgSources.first()
             val backupSources = settingsDataStore.backupSources.first()
             val bufferMs = settingsDataStore.bufferDurationMs.first()
+            val weatherAlertsOn = settingsDataStore.weatherAlertsEnabled.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -100,7 +103,8 @@ class SettingsViewModel @Inject constructor(
                 customEpgSources = customEpg,
                 defaultEpgSources = defaultEpg,
                 backupSources = backupSources,
-                bufferDurationMs = bufferMs
+                bufferDurationMs = bufferMs,
+                weatherAlertsEnabled = weatherAlertsOn
             )
         }
     }
@@ -393,6 +397,14 @@ class SettingsViewModel @Inject constructor(
             addonRepository.addAddon(url)
             val addons = addonRepository.getAllAddons().first()
             _uiState.value = _uiState.value.copy(addons = addons)
+        }
+    }
+
+    // ─── Weather Alerts Toggle ───
+    fun toggleWeatherAlerts(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(weatherAlertsEnabled = enabled)
+        viewModelScope.launch {
+            settingsDataStore.setWeatherAlertsEnabled(enabled)
         }
     }
 

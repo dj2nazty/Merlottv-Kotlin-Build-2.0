@@ -32,10 +32,21 @@ class AlertsViewModel @Inject constructor(
     private val _showBanner = MutableStateFlow(false)
     val showBanner: StateFlow<Boolean> = _showBanner.asStateFlow()
 
+    // Whether the user has enabled alerts on Live TV / VOD (from Settings)
+    private val _alertsEnabled = MutableStateFlow(true)
+    val alertsEnabled: StateFlow<Boolean> = _alertsEnabled.asStateFlow()
+
     // Track if user manually dismissed the banner (resets on new alerts)
     private var dismissedAlertIds = setOf<String>()
 
     init {
+        // Collect the weather alerts setting
+        viewModelScope.launch {
+            settingsDataStore.weatherAlertsEnabled.collect { enabled ->
+                _alertsEnabled.value = enabled
+            }
+        }
+
         // Start polling for alerts
         viewModelScope.launch {
             while (true) {

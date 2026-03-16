@@ -78,6 +78,7 @@ fun MerlotApp() {
     val alertsViewModel: AlertsViewModel = hiltViewModel()
     val activeAlerts by alertsViewModel.activeAlerts.collectAsState()
     val showAlertBanner by alertsViewModel.showBanner.collectAsState()
+    val alertsEnabled by alertsViewModel.alertsEnabled.collectAsState()
 
     // Always start at ProfilePicker — it auto-redirects to Home if a profile is already set
     // This avoids creating a duplicate ProfileDataStore outside of Hilt
@@ -160,7 +161,7 @@ fun MerlotApp() {
             currentRoute == Screen.Player.route
         WeatherAlertTicker(
             alerts = activeAlerts,
-            visible = showAlertBanner && showTickerOnScreen,
+            visible = showAlertBanner && showTickerOnScreen && alertsEnabled,
             modifier = Modifier.align(Alignment.TopCenter)
         )
     }
