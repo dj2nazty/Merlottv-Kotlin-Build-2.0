@@ -63,6 +63,7 @@ import com.merlottv.kotlin.ui.theme.MerlotColors
 fun SidebarNavigation(
     currentRoute: String?,
     onNavigate: (Screen) -> Unit,
+    onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester = remember { FocusRequester() }
 ) {
@@ -181,6 +182,7 @@ fun SidebarNavigation(
                         isSelected = currentRoute == screen.route,
                         isExpanded = isExpanded,
                         onClick = { onNavigate(screen) },
+                        onDismiss = onDismiss,
                         modifier = if (index == 0) Modifier.focusRequester(focusRequester) else Modifier
                     )
                 }
@@ -388,6 +390,7 @@ private fun SidebarItem(
     isSelected: Boolean,
     isExpanded: Boolean,
     onClick: () -> Unit,
+    onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -440,6 +443,10 @@ private fun SidebarItem(
                     when (event.key) {
                         Key.DirectionCenter, Key.Enter -> {
                             onClick()
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            onDismiss()
                             true
                         }
                         else -> false

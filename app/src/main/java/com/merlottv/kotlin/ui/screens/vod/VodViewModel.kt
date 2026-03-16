@@ -2,17 +2,21 @@ package com.merlottv.kotlin.ui.screens.vod
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.merlottv.kotlin.data.local.FavoriteVodMeta
 import com.merlottv.kotlin.domain.model.Addon
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
+import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
@@ -37,11 +41,15 @@ data class VodUiState(
 
 @HiltViewModel
 class VodViewModel @Inject constructor(
-    private val addonRepository: AddonRepository
+    private val addonRepository: AddonRepository,
+    private val favoritesRepository: FavoritesRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VodUiState())
     val uiState: StateFlow<VodUiState> = _uiState.asStateFlow()
+
+    val favoriteVodIds: StateFlow<Set<String>> = favoritesRepository.getFavoriteVodIds()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     init {
         loadAllCatalogs()
@@ -217,5 +225,21 @@ class VodViewModel @Inject constructor(
 
     fun retry() {
         loadAllCatalogs()
+    }
+
+    fun toggleFavorite(item: MetaPreview) {
+        viewModelScope.launch {
+            favoritesRepository.toggleFavoriteVodWithMeta(
+                item.id,
+                FavoriteVodMeta(
+                    id = item.id,
+                    name = item.name,
+                    poster = item.poster,
+                    type = item.type,
+                    imdbRating = item.imdbRating,
+                    description = item.description
+                )
+            )
+        }
     }
 }

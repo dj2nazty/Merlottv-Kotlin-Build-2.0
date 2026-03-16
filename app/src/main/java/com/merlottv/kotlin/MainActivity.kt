@@ -46,7 +46,7 @@ fun MerlotApp() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     var isLiveTvFullscreen by remember { mutableStateOf(false) }
-    var sidebarVisible by remember { mutableStateOf(true) }
+    var sidebarVisible by remember { mutableStateOf(false) }
     val sidebarFocusRequester = remember { FocusRequester() }
 
     // Always start at ProfilePicker — it auto-redirects to Home if a profile is already set
@@ -91,7 +91,8 @@ fun MerlotApp() {
                             launchSingleTop = true
                             restoreState = true
                         }
-                    }
+                    },
+                    onDismiss = { sidebarVisible = false }
                 )
             }
 

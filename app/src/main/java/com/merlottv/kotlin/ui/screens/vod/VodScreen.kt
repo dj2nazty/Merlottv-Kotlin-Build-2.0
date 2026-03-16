@@ -58,6 +58,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 
 @Composable
 fun VodScreen(
@@ -65,6 +67,7 @@ fun VodScreen(
     viewModel: VodViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val favoriteIds by viewModel.favoriteVodIds.collectAsState()
     val firstCardFocusRequester = remember { FocusRequester() }
 
     // Request focus on first content card when content loads
@@ -161,6 +164,10 @@ fun VodScreen(
                             onItemClick = { item ->
                                 onNavigateToDetail(item.type, item.id)
                             },
+                            onItemLongClick = { item ->
+                                viewModel.toggleFavorite(item)
+                            },
+                            favoriteIds = favoriteIds,
                             firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null
                         )
                     }
@@ -174,6 +181,8 @@ fun VodScreen(
 private fun CatalogSectionRow(
     section: CatalogSection,
     onItemClick: (MetaPreview) -> Unit,
+    onItemLongClick: (MetaPreview) -> Unit = {},
+    favoriteIds: Set<String> = emptySet(),
     firstCardFocusRequester: FocusRequester? = null
 ) {
     Column(
@@ -247,6 +256,8 @@ private fun CatalogSectionRow(
                 VodCard(
                     item = item,
                     onClick = { onItemClick(item) },
+                    onLongClick = { onItemLongClick(item) },
+                    isFavorite = item.id in favoriteIds,
                     focusRequester = if (isFirst) firstCardFocusRequester else null
                 )
             }
@@ -258,9 +269,22 @@ private fun CatalogSectionRow(
 private fun VodCard(
     item: MetaPreview,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    isFavorite: Boolean = false,
     focusRequester: FocusRequester? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    var pressStartTime by remember { mutableStateOf(0L) }
+    var showHeartOverlay by remember { mutableStateOf(false) }
+    var heartIsFilled by remember { mutableStateOf(false) }
+
+    // Auto-hide heart overlay after 1.5 seconds
+    if (showHeartOverlay) {
+        LaunchedEffect(showHeartOverlay) {
+            delay(1500)
+            showHeartOverlay = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -272,12 +296,29 @@ private fun VodCard(
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                ) {
-                    onClick()
-                    true
-                } else false
+                val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
+                when {
+                    event.type == KeyEventType.KeyDown && isSelectKey -> {
+                        if (pressStartTime == 0L) pressStartTime = System.currentTimeMillis()
+                        false // Don't consume — let repeat events come through
+                    }
+                    event.type == KeyEventType.KeyUp && isSelectKey -> {
+                        val held = System.currentTimeMillis() - pressStartTime
+                        pressStartTime = 0L
+                        if (held >= 600) {
+                            // Long press → toggle favorite
+                            heartIsFilled = !isFavorite
+                            showHeartOverlay = true
+                            onLongClick()
+                            true
+                        } else {
+                            // Short press → navigate
+                            onClick()
+                            true
+                        }
+                    }
+                    else -> false
+                }
             }
     ) {
         Box {
@@ -311,6 +352,44 @@ private fun VodCard(
                         color = MerlotColors.Warn,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Favorite heart overlay (shows after long-press)
+            if (showHeartOverlay) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(MerlotColors.Black.copy(alpha = 0.7f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (heartIsFilled) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = if (heartIsFilled) "Added to favorites" else "Removed from favorites",
+                        tint = if (heartIsFilled) Color(0xFFFF4081) else MerlotColors.White,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+            }
+
+            // Small heart badge when favorited (always visible)
+            if (isFavorite && !showHeartOverlay) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MerlotColors.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "Favorited",
+                        tint = Color(0xFFFF4081),
+                        modifier = Modifier.size(12.dp)
                     )
                 }
             }

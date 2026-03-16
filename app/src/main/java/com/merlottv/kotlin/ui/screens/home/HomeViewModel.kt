@@ -4,17 +4,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import com.merlottv.kotlin.data.local.WatchProgressItem
+import com.merlottv.kotlin.data.local.FavoriteVodMeta
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
+import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
@@ -35,11 +39,15 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
-    private val watchProgressDataStore: WatchProgressDataStore
+    private val watchProgressDataStore: WatchProgressDataStore,
+    private val favoritesRepository: FavoritesRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    val favoriteVodIds: StateFlow<Set<String>> = favoritesRepository.getFavoriteVodIds()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     // Limit concurrent catalog HTTP requests — max 6 instead of 30+ simultaneous
     private val catalogDispatcher = Dispatchers.IO.limitedParallelism(6)
@@ -178,6 +186,22 @@ class HomeViewModel @Inject constructor(
                     error = e.message
                 )
             }
+        }
+    }
+
+    fun toggleFavorite(item: MetaPreview) {
+        viewModelScope.launch {
+            favoritesRepository.toggleFavoriteVodWithMeta(
+                item.id,
+                FavoriteVodMeta(
+                    id = item.id,
+                    name = item.name,
+                    poster = item.poster,
+                    type = item.type,
+                    imdbRating = item.imdbRating,
+                    description = item.description
+                )
+            )
         }
     }
 }
