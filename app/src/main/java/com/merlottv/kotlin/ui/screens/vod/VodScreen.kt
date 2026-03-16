@@ -475,6 +475,7 @@ private fun VodCard(
     onLeftPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    var isTrailerPlaying by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
     var showHeartOverlay by remember { mutableStateOf(false) }
     var heartIsFilled by remember { mutableStateOf(false) }
@@ -497,11 +498,26 @@ private fun VodCard(
         label = "cardScale"
     )
 
-    // Width expansion on focus (like NuvioTV card expansion)
+    // Width: expands to landscape hero when trailer plays, normal poster otherwise
     val cardWidth by animateDpAsState(
-        targetValue = if (isFocused) 140.dp else 130.dp,
-        animationSpec = tween(durationMillis = 200),
+        targetValue = when {
+            isTrailerPlaying -> 280.dp  // Landscape hero width for trailer
+            isFocused -> 140.dp
+            else -> 130.dp
+        },
+        animationSpec = tween(durationMillis = 350),
         label = "cardWidth"
+    )
+
+    // Height: switches to 16:9 landscape when trailer plays, 3:2 poster otherwise
+    val cardHeight by animateDpAsState(
+        targetValue = when {
+            isTrailerPlaying -> 158.dp  // 280 * 9/16 = 157.5 ≈ 158dp (16:9)
+            isFocused -> 210.dp         // 140 * 1.5
+            else -> 195.dp              // 130 * 1.5
+        },
+        animationSpec = tween(durationMillis = 350),
+        label = "cardHeight"
     )
 
     // Auto-hide heart overlay after 1.5 seconds
@@ -564,7 +580,7 @@ private fun VodCard(
                 contentDescription = item.name,
                 modifier = Modifier
                     .width(cardWidth)
-                    .height(cardWidth * 1.5f)
+                    .height(cardHeight)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MerlotColors.Surface2)
                     .then(
@@ -574,15 +590,16 @@ private fun VodCard(
                 contentScale = ContentScale.Crop
             )
 
-            // Inline trailer preview (plays after 2s focus)
+            // Inline trailer preview (plays after 2s focus, expands to landscape hero)
             CardTrailerPreview(
                 isFocused = isFocused,
                 contentId = item.id,
                 contentType = item.type,
                 title = item.name,
+                onTrailerStateChanged = { playing -> isTrailerPlaying = playing },
                 modifier = Modifier
                     .width(cardWidth)
-                    .height(cardWidth * 1.5f)
+                    .height(cardHeight)
                     .clip(RoundedCornerShape(8.dp))
             )
 

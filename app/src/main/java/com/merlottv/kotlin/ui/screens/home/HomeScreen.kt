@@ -703,6 +703,7 @@ private fun PosterCard(
     onLeftPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    var isTrailerPlaying by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
     var showHeartOverlay by remember { mutableStateOf(false) }
     var heartIsFilled by remember { mutableStateOf(false) }
@@ -725,11 +726,26 @@ private fun PosterCard(
         label = "cardScale"
     )
 
-    // Width expansion on focus
+    // Width: expands to landscape hero when trailer plays
     val cardWidth by animateDpAsState(
-        targetValue = if (isFocused) 140.dp else 130.dp,
-        animationSpec = tween(durationMillis = 200),
+        targetValue = when {
+            isTrailerPlaying -> 280.dp
+            isFocused -> 140.dp
+            else -> 130.dp
+        },
+        animationSpec = tween(durationMillis = 350),
         label = "cardWidth"
+    )
+
+    // Height: switches to 16:9 landscape when trailer plays
+    val cardHeight by animateDpAsState(
+        targetValue = when {
+            isTrailerPlaying -> 158.dp
+            isFocused -> 210.dp
+            else -> 195.dp
+        },
+        animationSpec = tween(durationMillis = 350),
+        label = "cardHeight"
     )
 
     // Auto-hide heart overlay after 1.5 seconds
@@ -791,7 +807,7 @@ private fun PosterCard(
                 contentDescription = meta.name,
                 modifier = Modifier
                     .width(cardWidth)
-                    .height(cardWidth * 1.5f)
+                    .height(cardHeight)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MerlotColors.Surface2)
                     .then(
@@ -801,15 +817,16 @@ private fun PosterCard(
                 contentScale = ContentScale.Crop
             )
 
-            // Inline trailer preview (plays after 2s focus)
+            // Inline trailer preview (plays after 2s focus, expands to landscape hero)
             CardTrailerPreview(
                 isFocused = isFocused,
                 contentId = meta.id,
                 contentType = meta.type,
                 title = meta.name,
+                onTrailerStateChanged = { playing -> isTrailerPlaying = playing },
                 modifier = Modifier
                     .width(cardWidth)
-                    .height(cardWidth * 1.5f)
+                    .height(cardHeight)
                     .clip(RoundedCornerShape(8.dp))
             )
 

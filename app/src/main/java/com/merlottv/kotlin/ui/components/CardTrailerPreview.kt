@@ -51,6 +51,7 @@ fun CardTrailerPreview(
     contentType: String,
     title: String,
     focusDelayMs: Long = 2000L,
+    onTrailerStateChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -77,6 +78,7 @@ fun CardTrailerPreview(
         if (!isFocused) {
             shouldShowTrailer = false
             trailerResult = null
+            onTrailerStateChanged(false)
             return@LaunchedEffect
         }
 
@@ -105,6 +107,7 @@ fun CardTrailerPreview(
         if (result != null) {
             trailerResult = result
             shouldShowTrailer = true
+            onTrailerStateChanged(true)
         }
     }
 
