@@ -238,12 +238,40 @@ private fun buildRadarHtml(frames: List<RadarFrame>, lat: Double, lon: Double): 
         font-size: 11px;
         z-index: 1000;
     }
+    #legend {
+        position: absolute;
+        bottom: 40px;
+        right: 10px;
+        background: rgba(0,0,0,0.85);
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-family: sans-serif;
+        font-size: 9px;
+        color: #aaa;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .legend-row { display: flex; align-items: center; gap: 5px; }
+    .legend-swatch {
+        width: 14px; height: 8px; border-radius: 2px;
+        display: inline-block; flex-shrink: 0;
+    }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="timestamp"></div>
 <div id="framecount"></div>
+<div id="legend">
+    <div class="legend-row"><span class="legend-swatch" style="background:#007800"></span>Light</div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#00C800"></span>Moderate</div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#FFFF00"></span>Heavy</div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#FF8C00"></span>Very Heavy</div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#FF0000"></span>Intense</div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#FF00FF"></span>Extreme</div>
+</div>
 <script>
     var map = L.map('map', {
         center: [$lat, $lon],
@@ -272,9 +300,95 @@ private fun buildRadarHtml(frames: List<RadarFrame>, lat: Double, lon: Double): 
     var radarLayers = [];
     var currentFrame = 0;
 
-    // Pre-create all radar tile layers
+    // ─── Traditional NEXRAD color remap ────────────────────────────────
+    // RainViewer free tier only provides "Universal Blue" (scheme 2).
+    // We fetch the raw tiles, then recolor every pixel to the classic
+    // NEXRAD green→yellow→red→magenta palette via a Canvas GridLayer.
+
+    // Traditional NEXRAD dBZ color scale (green→yellow→orange→red→magenta→white)
+    var nexradColors = [
+        // [minBrightness, maxBrightness, r, g, b]  — maps pixel intensity bands
+        [10,  30,   0, 120,   0],   // dark green  — very light rain
+        [30,  60,   0, 200,   0],   // green       — light rain
+        [60,  90,  50, 255,   0],   // yellow-green
+        [90, 115, 255, 255,   0],   // yellow      — moderate rain
+        [115,140, 255, 200,   0],   // gold
+        [140,165, 255, 140,   0],   // orange      — heavy rain
+        [165,190, 255,  60,   0],   // dark orange
+        [190,210, 255,   0,   0],   // red         — very heavy rain
+        [210,230, 200,   0,   0],   // dark red
+        [230,245, 255,   0, 255],   // magenta     — extreme
+        [245,256, 255, 255, 255]    // white       — hail / intense
+    ];
+
+    function remapColor(r, g, b, a) {
+        if (a < 10) return [0, 0, 0, 0]; // transparent stays transparent
+        // Compute intensity from the source pixel (weighted luminance)
+        var intensity = 0.299 * r + 0.587 * g + 0.114 * b;
+        // Also consider max channel for saturated colors
+        var maxC = Math.max(r, g, b);
+        var bright = Math.max(intensity, maxC * 0.8);
+        for (var i = 0; i < nexradColors.length; i++) {
+            var c = nexradColors[i];
+            if (bright >= c[0] && bright < c[1]) {
+                // Interpolate within the band for smooth gradient
+                var t = (bright - c[0]) / (c[1] - c[0]);
+                var nextIdx = Math.min(i + 1, nexradColors.length - 1);
+                var n = nexradColors[nextIdx];
+                var nr = Math.round(c[2] + t * (n[2] - c[2]));
+                var ng = Math.round(c[3] + t * (n[3] - c[3]));
+                var nb = Math.round(c[4] + t * (n[4] - c[4]));
+                return [nr, ng, nb, Math.min(a, 220)];
+            }
+        }
+        return [r, g, b, a]; // fallback
+    }
+
+    // Custom Canvas GridLayer that fetches RainViewer tiles and recolors them
+    var NexradRadarLayer = L.GridLayer.extend({
+        options: { tileSize: 256, opacity: 0, zIndex: 10 },
+
+        initialize: function(tileUrl, options) {
+            this._radarUrl = tileUrl;
+            L.setOptions(this, options);
+        },
+
+        createTile: function(coords, done) {
+            var tile = document.createElement('canvas');
+            var size = this.getTileSize();
+            tile.width = size.x;
+            tile.height = size.y;
+
+            var img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = function() {
+                var ctx = tile.getContext('2d');
+                ctx.drawImage(img, 0, 0, size.x, size.y);
+                var imageData = ctx.getImageData(0, 0, size.x, size.y);
+                var data = imageData.data;
+                for (var p = 0; p < data.length; p += 4) {
+                    var result = remapColor(data[p], data[p+1], data[p+2], data[p+3]);
+                    data[p]   = result[0];
+                    data[p+1] = result[1];
+                    data[p+2] = result[2];
+                    data[p+3] = result[3];
+                }
+                ctx.putImageData(imageData, 0, 0);
+                done(null, tile);
+            };
+            img.onerror = function() { done(null, tile); };
+            img.src = this._radarUrl
+                .replace('{z}', coords.z)
+                .replace('{x}', coords.x)
+                .replace('{y}', coords.y);
+            return tile;
+        }
+    });
+
+    // Pre-create all radar tile layers with NEXRAD recoloring
     for (var i = 0; i < frames.length; i++) {
-        var layer = L.tileLayer(frames[i].host + frames[i].path + '/512/{z}/{x}/{y}/2/1_1.png', {
+        var url = frames[i].host + frames[i].path + '/512/{z}/{x}/{y}/2/1_1.png';
+        var layer = new NexradRadarLayer(url, {
             opacity: 0,
             zIndex: 10 + i
         });
@@ -289,7 +403,7 @@ private fun buildRadarHtml(frames: List<RadarFrame>, lat: Double, lon: Double): 
             radarLayers[currentFrame].setOpacity(0);
         }
         // Show new
-        radarLayers[idx].setOpacity(0.7);
+        radarLayers[idx].setOpacity(0.85);
         currentFrame = idx;
 
         // Update timestamp
