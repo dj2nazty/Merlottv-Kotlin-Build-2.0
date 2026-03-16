@@ -261,7 +261,10 @@ class SettingsViewModel @Inject constructor(
                 val assets = result.optJSONArray("assets")
                 val downloadUrl = if (assets != null && assets.length() > 0) {
                     assets.getJSONObject(0).optString("browser_download_url", "")
-                } else ""
+                } else {
+                    // No APK asset — fall back to release page URL
+                    result.optString("html_url", "")
+                }
 
                 val isNewer = isVersionNewer(latestVersion, BuildConfig.VERSION_NAME)
 

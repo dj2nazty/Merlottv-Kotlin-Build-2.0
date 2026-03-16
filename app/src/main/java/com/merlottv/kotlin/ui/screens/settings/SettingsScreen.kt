@@ -815,7 +815,6 @@ fun SettingsScreen(
                                     else Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
                                 )
                                 .onFocusChanged { isFocused = it.isFocused }
-                                .focusable()
                                 .onPreviewKeyEvent { event ->
                                     if (event.type == KeyEventType.KeyDown) {
                                         when (event.key) {
@@ -851,6 +850,7 @@ fun SettingsScreen(
                                         }
                                     } else false
                                 }
+                                .focusable()
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -886,11 +886,30 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(3.dp))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
+                    // Explicit Left/Right focus handling between buttons prevents
+                    // the sidebar from hijacking Left on the Reset button
+                    val saveOrderFocus = remember { FocusRequester() }
+                    val resetFocus = remember { FocusRequester() }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DpadButton(onClick = { movingIndex = -1; viewModel.saveCategoryOrder() }) {
+                        DpadButton(
+                            onClick = { movingIndex = -1; viewModel.saveCategoryOrder() },
+                            modifier = Modifier.focusRequester(saveOrderFocus)
+                        ) {
                             Text("Save Order", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
-                        DpadButton(onClick = { movingIndex = -1; viewModel.resetCategoryOrder() }) {
+                        DpadButton(
+                            onClick = { movingIndex = -1; viewModel.resetCategoryOrder() },
+                            modifier = Modifier
+                                .focusRequester(resetFocus)
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.DirectionLeft
+                                    ) {
+                                        try { saveOrderFocus.requestFocus() } catch (_: Exception) {}
+                                        true
+                                    } else false
+                                }
+                        ) {
                             Text("Reset", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }

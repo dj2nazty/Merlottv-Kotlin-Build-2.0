@@ -107,9 +107,10 @@ fun MerlotApp() {
             modifier = Modifier
                 .fillMaxSize()
                 .onKeyEvent { event ->
-                    // D-pad Left at the content edge → show sidebar and give it focus
-                    // Uses onKeyEvent (bubble phase) so child composables like VodCard
-                    // can consume Left first for in-row scrolling via onPreviewKeyEvent
+                    // Bubble phase: open sidebar when Left is not consumed by any child.
+                    // Home/VOD cards consume Left via onPreviewKeyEvent — this only fires
+                    // at the leftmost item. Settings buttons also handle Left/Right
+                    // between themselves explicitly to prevent sidebar hijacking.
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.DirectionLeft &&
                         showSidebar && !sidebarVisible
