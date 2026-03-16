@@ -293,7 +293,11 @@ fun VodScreen(
                     }
                 } else {
                     // Normal horizontal row layout for unfiltered catalogs
-                    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+                    val catalogListState = rememberLazyListState()
+                    LazyColumn(
+                        state = catalogListState,
+                        contentPadding = PaddingValues(bottom = 24.dp)
+                    ) {
                         items(
                             uiState.filteredSections,
                             key = { "${it.addonName}_${it.catalogId}_${it.type}_${it.title}" }

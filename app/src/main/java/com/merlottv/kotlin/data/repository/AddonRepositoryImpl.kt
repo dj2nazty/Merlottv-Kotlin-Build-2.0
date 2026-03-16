@@ -38,6 +38,14 @@ class AddonRepositoryImpl @Inject constructor(
     private val manifestCache = ConcurrentHashMap<String, Pair<Addon, Long>>()
     private val CACHE_TTL = TimeUnit.MINUTES.toMillis(30)
 
+    // Catalog cache: URL -> (List<MetaPreview>, timestamp) — 10 min TTL
+    private val catalogCache = ConcurrentHashMap<String, Pair<List<MetaPreview>, Long>>()
+    private val CATALOG_CACHE_TTL = TimeUnit.MINUTES.toMillis(10)
+
+    // Meta cache: "type:id" -> (Meta, timestamp) — 15 min TTL
+    private val metaCache = ConcurrentHashMap<String, Pair<Meta, Long>>()
+    private val META_CACHE_TTL = TimeUnit.MINUTES.toMillis(15)
+
     // Per-request client with shorter timeout for catalog/meta fetches
     private val fastClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
@@ -93,11 +101,26 @@ class AddonRepositoryImpl @Inject constructor(
                 } else {
                     "$base/catalog/$type/$catalogId.json"
                 }
-                android.util.Log.d("AddonRepo", "getCatalog URL: $url")
+
+                // Check catalog cache first
+                catalogCache[url]?.let { (items, timestamp) ->
+                    if (System.currentTimeMillis() - timestamp < CATALOG_CACHE_TTL) {
+                        Log.d("AddonRepo", "getCatalog CACHE HIT: $url (${items.size} items)")
+                        return@withContext items
+                    }
+                }
+
+                Log.d("AddonRepo", "getCatalog URL: $url")
                 val request = Request.Builder().url(url).build()
                 val response = fastClient.newCall(request).execute()
                 val body = response.body?.string() ?: return@withContext emptyList()
-                parseCatalogResponse(body)
+                val items = parseCatalogResponse(body)
+
+                // Cache the result
+                if (items.isNotEmpty()) {
+                    catalogCache[url] = Pair(items, System.currentTimeMillis())
+                }
+                items
             } catch (e: Exception) {
                 e.printStackTrace()
                 emptyList()
@@ -106,13 +129,22 @@ class AddonRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getMeta(type: String, id: String): Meta? {
+        // Check meta cache first
+        val cacheKey = "$type:$id"
+        metaCache[cacheKey]?.let { (meta, timestamp) ->
+            if (System.currentTimeMillis() - timestamp < META_CACHE_TTL) {
+                Log.d("AddonRepo", "getMeta CACHE HIT: $cacheKey")
+                return meta
+            }
+        }
+
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
             // Query ALL addons in parallel for massive speed improvement
             val results = supervisorScope {
                 _addons.value.map { addon ->
                     async(Dispatchers.IO) {
-                        withTimeoutOrNull(7000L) {
+                        withTimeoutOrNull(5000L) { // Reduced from 7s to 5s
                             try {
                                 val base = addon.url.removeSuffix("/manifest.json")
                                 val url = "$base/meta/$type/$id.json"
@@ -135,9 +167,9 @@ class AddonRepositoryImpl @Inject constructor(
 
             if (results.isEmpty()) return@withContext null
 
-            // For movies, return the richest result (most fields populated)
-            if (type != "series") {
-                return@withContext results.maxByOrNull {
+            val best = if (type != "series") {
+                // For movies, return the richest result (most fields populated)
+                results.maxByOrNull {
                     (if (it.description.isNotEmpty()) 1 else 0) +
                     (if (it.poster.isNotEmpty()) 1 else 0) +
                     (if (it.background.isNotEmpty()) 1 else 0) +
@@ -145,19 +177,26 @@ class AddonRepositoryImpl @Inject constructor(
                     it.genres.size + it.cast.size +
                     it.trailerStreams.size
                 }
+            } else {
+                // For series, prefer one with episodes/videos
+                val withVideos = results.filter { it.videos.isNotEmpty() }
+                if (withVideos.isNotEmpty()) {
+                    withVideos.maxByOrNull { it.videos.size }
+                } else {
+                    // Fallback: return richest metadata even without episodes
+                    results.maxByOrNull {
+                        (if (it.description.isNotEmpty()) 1 else 0) +
+                        (if (it.poster.isNotEmpty()) 1 else 0) +
+                        it.genres.size + it.cast.size
+                    }
+                }
             }
 
-            // For series, prefer one with episodes/videos
-            val withVideos = results.filter { it.videos.isNotEmpty() }
-            if (withVideos.isNotEmpty()) {
-                return@withContext withVideos.maxByOrNull { it.videos.size }
+            // Cache the result
+            if (best != null) {
+                metaCache[cacheKey] = Pair(best, System.currentTimeMillis())
             }
-            // Fallback: return richest metadata even without episodes
-            results.maxByOrNull {
-                (if (it.description.isNotEmpty()) 1 else 0) +
-                (if (it.poster.isNotEmpty()) 1 else 0) +
-                it.genres.size + it.cast.size
-            }
+            best
         }
     }
 
