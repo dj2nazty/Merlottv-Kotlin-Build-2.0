@@ -68,14 +68,17 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
+import com.merlottv.kotlin.data.repository.SkipIntroRepository
 import com.merlottv.kotlin.data.repository.SubtitleRepository
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Subtitle
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import com.merlottv.kotlin.core.player.FrameRateUtils
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
@@ -128,6 +131,18 @@ fun PlayerScreen(
     var currentStreamUrl by remember { mutableStateOf(streamUrl) }
     var isLoadingStreams by remember { mutableStateOf(false) }
 
+    // Next episode auto-play state
+    var showNextEpisode by remember { mutableStateOf(false) }
+    var nextEpisodeInfo by remember { mutableStateOf<NextEpisodeInfo?>(null) }
+    var nextEpisodeAutoPlayEnabled by remember { mutableStateOf(true) }
+    var nextEpisodeThreshold by remember { mutableStateOf(95) }
+
+    // Skip intro state
+    var skipIntervals by remember { mutableStateOf<List<SkipInterval>>(emptyList()) }
+    var activeSkipInterval by remember { mutableStateOf<SkipInterval?>(null) }
+    var showSkipButton by remember { mutableStateOf(false) }
+    var dismissedSkipTypes by remember { mutableStateOf<Set<SkipType>>(emptySet()) }
+
     val watchProgressStore = remember {
         try { WatchProgressDataStore(context.applicationContext) } catch (_: Exception) { null }
     }
@@ -138,6 +153,33 @@ fun PlayerScreen(
         okhttp3.OkHttpClient.Builder().build(),
         com.squareup.moshi.Moshi.Builder().build()
     ) }
+    val skipIntroRepo = remember { SkipIntroRepository(context.applicationContext) }
+
+    // Auto frame rate matching — detect video fps and switch display refresh rate
+    val frameRateMode = remember { mutableStateOf("off") }
+    LaunchedEffect(Unit) {
+        val mode = try { settingsStore?.frameRateMatching?.first() } catch (_: Exception) { null }
+        frameRateMode.value = mode ?: "off"
+    }
+    LaunchedEffect(streamUrl, frameRateMode.value) {
+        if (frameRateMode.value == "off" || activity == null) return@LaunchedEffect
+        try {
+            val detection = FrameRateUtils.detectFrameRate(Uri.parse(streamUrl))
+            if (detection != null) {
+                FrameRateUtils.matchFrameRate(activity, detection.snapped)
+            }
+        } catch (_: Exception) {}
+    }
+    // Restore frame rate on exit if mode is START_STOP
+    DisposableEffect(frameRateMode.value) {
+        onDispose {
+            if (frameRateMode.value == "start_stop" && activity != null) {
+                kotlinx.coroutines.GlobalScope.launch(Dispatchers.Main) {
+                    try { FrameRateUtils.restoreOriginalMode(activity) } catch (_: Exception) {}
+                }
+            }
+        }
+    }
 
     val player = remember {
         val loadControl = DefaultLoadControl.Builder()
@@ -177,6 +219,13 @@ fun PlayerScreen(
                     }
                 })
             }
+    }
+
+    // MediaSession — exposes playback state to system media controls (remote, Google Assistant)
+    val mediaSession = remember(player) {
+        MediaSession.Builder(context, player)
+            .setId("merlot_vod_${contentId.hashCode()}")
+            .build()
     }
 
     // Load subtitle settings + fetch subtitles
@@ -222,6 +271,24 @@ fun PlayerScreen(
         }
     }
 
+    // Load skip intro intervals when duration becomes available
+    LaunchedEffect(totalDuration, contentId, contentType) {
+        if (totalDuration <= 0 || contentId.isEmpty()) return@LaunchedEffect
+        if (contentType == "series") {
+            // Parse season/episode from contentId if possible (format: "tt1234567:1:3" = imdb:season:episode)
+            val parts = contentId.split(":")
+            val seriesId = parts.getOrNull(0) ?: contentId
+            val season = parts.getOrNull(1)?.toIntOrNull() ?: 1
+            val episode = parts.getOrNull(2)?.toIntOrNull() ?: 1
+            skipIntervals = skipIntroRepo.getSkipIntervals(
+                seriesId = seriesId,
+                season = season,
+                episode = episode,
+                totalDurationMs = totalDuration
+            )
+        }
+    }
+
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     // Move focus into the options panel when it opens
@@ -249,6 +316,29 @@ fun PlayerScreen(
                 if (player.isPlaying) {
                     currentPosition = player.currentPosition
                     totalDuration = player.duration.coerceAtLeast(0)
+                    // Check next episode threshold
+                    if (nextEpisodeAutoPlayEnabled && !showNextEpisode &&
+                        contentType == "series" && totalDuration > 0 && nextEpisodeInfo != null
+                    ) {
+                        val percent = (currentPosition.toFloat() / totalDuration * 100).toInt()
+                        if (percent >= nextEpisodeThreshold) {
+                            showNextEpisode = true
+                        }
+                    }
+                    // Check skip intro intervals
+                    if (skipIntervals.isNotEmpty()) {
+                        val matchingInterval = skipIntervals.firstOrNull { interval ->
+                            currentPosition in interval.startMs..interval.endMs &&
+                                interval.type !in dismissedSkipTypes
+                        }
+                        if (matchingInterval != null && activeSkipInterval?.type != matchingInterval.type) {
+                            activeSkipInterval = matchingInterval
+                            showSkipButton = true
+                        } else if (matchingInterval == null && showSkipButton) {
+                            showSkipButton = false
+                            activeSkipInterval = null
+                        }
+                    }
                     // Save progress every ~30 seconds (10 cycles × 3s)
                     saveCounter++
                     if (saveCounter >= 10) {
@@ -269,7 +359,8 @@ fun PlayerScreen(
             val pos = player.currentPosition
             val dur = player.duration.coerceAtLeast(0)
             val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
-            // Release player FIRST to free memory immediately (critical for Live TV transition)
+            // Release MediaSession + player to free memory immediately
+            mediaSession.release()
             player.release()
             // Save progress async — survives composable disposal via GlobalScope
             kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
@@ -563,6 +654,64 @@ fun PlayerScreen(
                     Text(formatTime(totalDuration), color = MerlotColors.TextMuted, fontSize = 10.sp)
                 }
             }
+        }
+
+        // Skip Intro button overlay
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 140.dp)
+        ) {
+            SkipIntroButton(
+                visible = showSkipButton,
+                skipInterval = activeSkipInterval,
+                onSkip = { endMs ->
+                    showSkipButton = false
+                    dismissedSkipTypes = dismissedSkipTypes + (activeSkipInterval?.type ?: SkipType.INTRO)
+                    activeSkipInterval = null
+                    player.seekTo(endMs)
+                },
+                onDismiss = {
+                    showSkipButton = false
+                    dismissedSkipTypes = dismissedSkipTypes + (activeSkipInterval?.type ?: SkipType.INTRO)
+                    activeSkipInterval = null
+                }
+            )
+        }
+
+        // Next episode auto-play overlay
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 80.dp)
+        ) {
+            NextEpisodeCardOverlay(
+                visible = showNextEpisode,
+                episodeInfo = nextEpisodeInfo,
+                onPlayNow = {
+                    showNextEpisode = false
+                    // Navigate to next episode — save current progress first
+                    val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            watchProgressStore?.saveProgress(
+                                id, player.currentPosition,
+                                player.duration.coerceAtLeast(0),
+                                title, poster, contentType
+                            )
+                        } catch (_: Exception) {}
+                    }
+                    // Play next episode URL if available
+                    nextEpisodeInfo?.streamUrl?.let { nextUrl ->
+                        player.stop()
+                        val mediaItem = MediaItem.fromUri(Uri.parse(nextUrl))
+                        player.setMediaItem(mediaItem)
+                        player.prepare()
+                        player.play()
+                    }
+                },
+                onDismiss = { showNextEpisode = false }
+            )
         }
 
         // Subtitle size indicator at bottom when active

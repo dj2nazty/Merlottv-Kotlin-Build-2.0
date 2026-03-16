@@ -61,7 +61,12 @@ data class SettingsUiState(
     // Live TV buffer duration (ms) — adjustable 300–3000 in 100ms steps
     val bufferDurationMs: Int = 800,
     // Weather alerts on Live TV / VOD
-    val weatherAlertsEnabled: Boolean = true
+    val weatherAlertsEnabled: Boolean = true,
+    // Auto frame rate matching
+    val frameRateMatching: String = "off", // "off", "start", "start_stop"
+    // Next episode auto-play
+    val nextEpisodeAutoPlay: Boolean = true,
+    val nextEpisodeThresholdPercent: Int = 95
 )
 
 @HiltViewModel
@@ -92,6 +97,9 @@ class SettingsViewModel @Inject constructor(
             val backupSources = settingsDataStore.backupSources.first()
             val bufferMs = settingsDataStore.bufferDurationMs.first()
             val weatherAlertsOn = settingsDataStore.weatherAlertsEnabled.first()
+            val frameRateMode = settingsDataStore.frameRateMatching.first()
+            val nextEpAutoPlay = settingsDataStore.nextEpisodeAutoPlay.first()
+            val nextEpThreshold = settingsDataStore.nextEpisodeThresholdPercent.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -104,7 +112,10 @@ class SettingsViewModel @Inject constructor(
                 defaultEpgSources = defaultEpg,
                 backupSources = backupSources,
                 bufferDurationMs = bufferMs,
-                weatherAlertsEnabled = weatherAlertsOn
+                weatherAlertsEnabled = weatherAlertsOn,
+                frameRateMatching = frameRateMode,
+                nextEpisodeAutoPlay = nextEpAutoPlay,
+                nextEpisodeThresholdPercent = nextEpThreshold
             )
         }
     }
@@ -417,6 +428,30 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(bufferDurationMs = clamped)
         viewModelScope.launch {
             settingsDataStore.setBufferDurationMs(clamped)
+        }
+    }
+
+    // ─── Frame Rate Matching ───
+    fun setFrameRateMatching(mode: String) {
+        _uiState.value = _uiState.value.copy(frameRateMatching = mode)
+        viewModelScope.launch {
+            settingsDataStore.setFrameRateMatching(mode)
+        }
+    }
+
+    // ─── Next Episode Auto-Play ───
+    fun toggleNextEpisodeAutoPlay(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(nextEpisodeAutoPlay = enabled)
+        viewModelScope.launch {
+            settingsDataStore.setNextEpisodeAutoPlay(enabled)
+        }
+    }
+
+    fun setNextEpisodeThreshold(percent: Int) {
+        val clamped = percent.coerceIn(85, 99)
+        _uiState.value = _uiState.value.copy(nextEpisodeThresholdPercent = clamped)
+        viewModelScope.launch {
+            settingsDataStore.setNextEpisodeThresholdPercent(clamped)
         }
     }
 

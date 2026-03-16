@@ -14,8 +14,8 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 74
-        versionName = "2.42"
+        versionCode = 75
+        versionName = "2.43"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")
@@ -116,6 +116,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.2.1")
     implementation("androidx.media3:media3-datasource:1.2.1")
     implementation("androidx.media3:media3-common:1.2.1")
+    implementation("androidx.media3:media3-session:1.2.1")
 
     // LibVLC — fallback player engine for streams ExoPlayer can't handle
     // Apollo App uses this as a secondary player for maximum codec compatibility

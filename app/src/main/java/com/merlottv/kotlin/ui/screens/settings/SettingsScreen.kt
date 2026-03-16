@@ -447,6 +447,138 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ Player Settings ═══
+        item(key = "player_settings") {
+            SettingsSection(
+                title = "Player Settings",
+                icon = { Text("\uD83C\uDFAC", fontSize = 18.sp) }
+            ) {
+                // Frame Rate Matching
+                Text(
+                    "Auto frame rate matching detects video frame rate and switches your display refresh rate to match, eliminating judder on 24fps cinema content.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val frameRateModes = listOf("off" to "Off", "start" to "Match on Start", "start_stop" to "Match & Restore")
+                frameRateModes.forEach { (mode, label) ->
+                    val isSelected = uiState.frameRateMatching == mode
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isSelected) MerlotColors.Accent.copy(alpha = 0.15f) else MerlotColors.Surface2,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .dpadFocusable(onClick = { viewModel.setFrameRateMatching(mode) })
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(label, color = if (isSelected) MerlotColors.Accent else MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                when (mode) {
+                                    "off" -> "No frame rate switching"
+                                    "start" -> "Switch display on playback start"
+                                    else -> "Switch on start, restore original on stop"
+                                },
+                                color = MerlotColors.TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, null, tint = MerlotColors.Accent, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Next Episode Auto-Play
+                Text(
+                    "Auto-play next episode when the current one nears completion. Shows a countdown card before switching.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                        .dpadFocusable(onClick = { viewModel.toggleNextEpisodeAutoPlay(!uiState.nextEpisodeAutoPlay) })
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            "Next Episode Auto-Play",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (uiState.nextEpisodeAutoPlay) "Enabled — shows countdown card at ${uiState.nextEpisodeThresholdPercent}%"
+                            else "Disabled",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = uiState.nextEpisodeAutoPlay,
+                        onCheckedChange = { viewModel.toggleNextEpisodeAutoPlay(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MerlotColors.Accent,
+                            checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.height(24.dp)
+                    )
+                }
+
+                // Threshold control (only when auto-play is enabled)
+                if (uiState.nextEpisodeAutoPlay) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Trigger at:", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        val thresholdPercent = uiState.nextEpisodeThresholdPercent
+                        Text(
+                            "◀",
+                            color = MerlotColors.Accent,
+                            fontSize = 14.sp,
+                            modifier = Modifier.dpadFocusable(onClick = {
+                                if (thresholdPercent > 85) viewModel.setNextEpisodeThreshold(thresholdPercent - 1)
+                            })
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "${thresholdPercent}%",
+                            color = MerlotColors.Accent,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "▶",
+                            color = MerlotColors.Accent,
+                            fontSize = 14.sp,
+                            modifier = Modifier.dpadFocusable(onClick = {
+                                if (thresholdPercent < 99) viewModel.setNextEpisodeThreshold(thresholdPercent + 1)
+                            })
+                        )
+                    }
+                }
+            }
+        }
+
         // ═══ Weather Alerts ═══
         item(key = "weather_alerts") {
             SettingsSection(

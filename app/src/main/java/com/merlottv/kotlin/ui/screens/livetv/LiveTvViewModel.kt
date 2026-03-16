@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.session.MediaSession
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -255,6 +256,21 @@ class LiveTvViewModel @Inject constructor(
     /** Get the active ExoPlayer for the current channel */
     private var usingGentlePlayer = false
     fun getActivePlayer(): ExoPlayer = if (usingGentlePlayer) gentlePlayer else player
+
+    // MediaSession — exposes playback state to system media controls (remote, Google Assistant)
+    private var mediaSession: MediaSession? = null
+
+    /** Create or update MediaSession for the active player */
+    private fun ensureMediaSession() {
+        val activePlayer = getActivePlayer()
+        // Release old session if player changed
+        if (mediaSession?.player != activePlayer) {
+            mediaSession?.release()
+            mediaSession = MediaSession.Builder(getApplication(), activePlayer)
+                .setId("merlot_livetv")
+                .build()
+        }
+    }
 
     // channelId → active pre-warm job
     private val prewarmJobs = mutableMapOf<String, Job>()
@@ -985,6 +1001,7 @@ class LiveTvViewModel @Inject constructor(
             activePlayer.setMediaItem(mediaItem)
             activePlayer.prepare()
             activePlayer.play()
+            ensureMediaSession()
         } catch (e: Exception) {
             Log.e("LiveTvVM", "Player error in safePlayChannel", e)
         }
@@ -1612,6 +1629,9 @@ class LiveTvViewModel @Inject constructor(
         prewarmJobs.clear()
         prewarmChannelUrls.clear()
         prewarmedChannelIds.clear()
+        // Release MediaSession
+        try { mediaSession?.release() } catch (_: Exception) {}
+        mediaSession = null
         // Release VLC
         stopVlc()
         try { libVLC?.release() } catch (_: Exception) {}

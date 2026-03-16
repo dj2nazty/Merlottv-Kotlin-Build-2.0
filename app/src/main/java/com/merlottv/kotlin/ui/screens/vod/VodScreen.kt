@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
+import com.merlottv.kotlin.ui.components.CardTrailerPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -458,6 +459,18 @@ private fun VodCard(
                         else Modifier
                     ),
                 contentScale = ContentScale.Crop
+            )
+
+            // Inline trailer preview (plays after 2s focus)
+            CardTrailerPreview(
+                isFocused = isFocused,
+                contentId = item.id,
+                contentType = item.type,
+                title = item.name,
+                modifier = Modifier
+                    .width(cardWidth)
+                    .height(cardWidth * 1.5f)
+                    .clip(RoundedCornerShape(8.dp))
             )
 
             // Rating badge

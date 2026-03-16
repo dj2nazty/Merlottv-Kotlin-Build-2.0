@@ -75,6 +75,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.domain.model.MetaPreview
+import com.merlottv.kotlin.ui.components.CardTrailerPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 @Composable
@@ -798,6 +799,18 @@ private fun PosterCard(
                         else Modifier
                     ),
                 contentScale = ContentScale.Crop
+            )
+
+            // Inline trailer preview (plays after 2s focus)
+            CardTrailerPreview(
+                isFocused = isFocused,
+                contentId = meta.id,
+                contentType = meta.type,
+                title = meta.name,
+                modifier = Modifier
+                    .width(cardWidth)
+                    .height(cardWidth * 1.5f)
+                    .clip(RoundedCornerShape(8.dp))
             )
 
             if (meta.imdbRating.isNotEmpty()) {

@@ -67,6 +67,13 @@ class SettingsDataStore(private val context: Context) {
         val SUBTITLE_SIZE = floatPreferencesKey("subtitle_size")         // 1.0 = normal
         val SUBTITLE_FONT = stringPreferencesKey("subtitle_font")       // "default", "monospace", "serif"
 
+        // Frame rate matching — switches display refresh rate to match video (eliminates judder)
+        val FRAME_RATE_MATCHING = stringPreferencesKey("frame_rate_matching") // "off", "start", "start_stop"
+
+        // Next episode auto-play
+        val NEXT_EPISODE_AUTOPLAY = booleanPreferencesKey("next_episode_autoplay")
+        val NEXT_EPISODE_THRESHOLD_PERCENT = intPreferencesKey("next_episode_threshold_percent") // 90-99
+
         const val DEFAULT_PLAYLIST = "https://x-api.uk/get.php?username=MetrlotBackup&password=2813308004&type=m3u_plus"
         const val DEFAULT_TORBOX_KEY = "50c74a49-a6bc-40e9-931e-1cee1943e87b"
     }
@@ -262,6 +269,32 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setSubtitleFont(font: String) {
         context.settingsDataStore.edit { it[SUBTITLE_FONT] = font }
+    }
+
+    // ─── Frame Rate Matching ───
+    val frameRateMatching: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[FRAME_RATE_MATCHING] ?: "off"
+    }
+
+    suspend fun setFrameRateMatching(mode: String) {
+        context.settingsDataStore.edit { it[FRAME_RATE_MATCHING] = mode }
+    }
+
+    // ─── Next Episode Auto-Play ───
+    val nextEpisodeAutoPlay: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[NEXT_EPISODE_AUTOPLAY] ?: true
+    }
+
+    suspend fun setNextEpisodeAutoPlay(enabled: Boolean) {
+        context.settingsDataStore.edit { it[NEXT_EPISODE_AUTOPLAY] = enabled }
+    }
+
+    val nextEpisodeThresholdPercent: Flow<Int> = context.settingsDataStore.data.map { prefs ->
+        prefs[NEXT_EPISODE_THRESHOLD_PERCENT] ?: 95
+    }
+
+    suspend fun setNextEpisodeThresholdPercent(percent: Int) {
+        context.settingsDataStore.edit { it[NEXT_EPISODE_THRESHOLD_PERCENT] = percent.coerceIn(85, 99) }
     }
 
     // ─── Live TV Buffer Duration ───
