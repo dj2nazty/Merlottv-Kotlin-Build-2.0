@@ -60,8 +60,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import coil.ImageLoader
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
@@ -199,6 +207,11 @@ fun VodScreen(
     }
 }
 
+/** Focus debounce delay — prevents rapid focus fires during fast D-pad navigation */
+private const val FOCUS_DEBOUNCE_MS = 140L
+/** Number of items to prefetch ahead of visible items */
+private const val POSTER_PREFETCH_DISTANCE = 8
+
 @Composable
 private fun CatalogSectionRow(
     section: CatalogSection,
@@ -273,6 +286,27 @@ private fun CatalogSectionRow(
         // Horizontal poster row
         val lazyRowState = rememberLazyListState()
         val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+
+        // Image prefetching: preload posters 8 items ahead of visible items
+        LaunchedEffect(lazyRowState) {
+            snapshotFlow {
+                lazyRowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            }.distinctUntilChanged().collect { lastVisibleIndex ->
+                val endIndex = (lastVisibleIndex + POSTER_PREFETCH_DISTANCE)
+                    .coerceAtMost(section.items.size - 1)
+                for (i in (lastVisibleIndex + 1)..endIndex) {
+                    val posterUrl = section.items[i].poster
+                    if (posterUrl.isNotEmpty()) {
+                        val request = ImageRequest.Builder(context)
+                            .data(posterUrl)
+                            .size(130, 195)
+                            .build()
+                        ImageLoader(context).enqueue(request)
+                    }
+                }
+            }
+        }
 
         LazyRow(
             state = lazyRowState,
@@ -331,10 +365,29 @@ private fun VodCard(
     var showHeartOverlay by remember { mutableStateOf(false) }
     var heartIsFilled by remember { mutableStateOf(false) }
 
+    // Focus debounce — prevents rapid focus fires during fast D-pad navigation
+    var focusEventId by remember { mutableIntStateOf(0) }
+    var isCardFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(focusEventId, isCardFocused) {
+        if (focusEventId == 0 || !isCardFocused) return@LaunchedEffect
+        val targetEventId = focusEventId
+        delay(FOCUS_DEBOUNCE_MS)
+        if (!isCardFocused || focusEventId != targetEventId) return@LaunchedEffect
+        onFocused()
+    }
+
+    // Scale animation with spring physics (more natural than tween)
     val scale by animateFloatAsState(
         targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
         label = "cardScale"
+    )
+
+    // Width expansion on focus (like NuvioTV card expansion)
+    val cardWidth by animateDpAsState(
+        targetValue = if (isFocused) 140.dp else 130.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "cardWidth"
     )
 
     // Auto-hide heart overlay after 1.5 seconds
@@ -347,7 +400,7 @@ private fun VodCard(
 
     Column(
         modifier = Modifier
-            .width(130.dp)
+            .width(cardWidth)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -358,7 +411,8 @@ private fun VodCard(
             )
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused) onFocused()
+                isCardFocused = it.isFocused
+                if (it.isFocused) focusEventId++
             }
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
@@ -395,8 +449,8 @@ private fun VodCard(
                 model = item.poster,
                 contentDescription = item.name,
                 modifier = Modifier
-                    .width(130.dp)
-                    .height(195.dp)
+                    .width(cardWidth)
+                    .height(cardWidth * 1.5f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MerlotColors.Surface2)
                     .then(
@@ -425,12 +479,21 @@ private fun VodCard(
                 }
             }
 
-            // Favorite heart overlay (shows after long-press)
+            // Favorite heart overlay (shows after long-press) — animated entrance/exit
             if (showHeartOverlay) {
+                val heartScale by animateFloatAsState(
+                    targetValue = 1f,
+                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
+                    label = "heartScale"
+                )
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .size(64.dp)
+                        .graphicsLayer {
+                            scaleX = heartScale
+                            scaleY = heartScale
+                        }
                         .clip(RoundedCornerShape(32.dp))
                         .background(MerlotColors.Black.copy(alpha = 0.7f)),
                     contentAlignment = Alignment.Center

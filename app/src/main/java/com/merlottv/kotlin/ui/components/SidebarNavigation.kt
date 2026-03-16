@@ -2,6 +2,7 @@ package com.merlottv.kotlin.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,6 +41,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -89,11 +92,30 @@ fun SidebarNavigation(
         label = "sidebarWidth"
     )
 
+    // Scale + alpha animation for cinematic sidebar expansion (like NuvioTV)
+    val sidebarScale by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0.97f,
+        animationSpec = tween(250),
+        label = "sidebarScale"
+    )
+    val sidebarAlpha by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0.85f,
+        animationSpec = tween(250),
+        label = "sidebarAlpha"
+    )
+
     Box {
         Column(
             modifier = modifier
                 .width(sidebarWidth)
                 .fillMaxHeight()
+                .graphicsLayer {
+                    val s = sidebarScale
+                    scaleX = s
+                    scaleY = s
+                    alpha = sidebarAlpha
+                    transformOrigin = TransformOrigin(0f, 0f) // Expand from top-left
+                }
                 .background(MerlotColors.SidebarCollapsed)
                 .border(
                     width = 1.dp,
@@ -411,7 +433,7 @@ private fun SidebarItem(
             isSelected -> MerlotColors.AccentAlpha10
             else -> Color.Transparent
         },
-        animationSpec = tween(150),
+        animationSpec = tween(180),
         label = "bgColor"
     )
 
@@ -421,7 +443,7 @@ private fun SidebarItem(
             isFocused -> MerlotColors.White
             else -> MerlotColors.TextMuted
         },
-        animationSpec = tween(150),
+        animationSpec = tween(180),
         label = "iconColor"
     )
 
@@ -430,7 +452,7 @@ private fun SidebarItem(
             isFocused -> focusedGrey
             else -> Color.Transparent
         },
-        animationSpec = tween(150),
+        animationSpec = tween(180),
         label = "borderColor"
     )
 

@@ -43,8 +43,15 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import coil.ImageLoader
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -274,6 +281,11 @@ private fun ContinueWatchingRow(
     }
 }
 
+/** Focus debounce delay — prevents rapid focus fires during fast D-pad navigation */
+private const val HOME_FOCUS_DEBOUNCE_MS = 140L
+/** Number of items to prefetch ahead of visible items */
+private const val HOME_POSTER_PREFETCH_DISTANCE = 8
+
 @Composable
 private fun ContinueWatchingCard(
     item: WatchProgressItem,
@@ -284,15 +296,34 @@ private fun ContinueWatchingCard(
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
+    // Focus debounce
+    var focusEventId by remember { mutableIntStateOf(0) }
+    var isCardFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(focusEventId, isCardFocused) {
+        if (focusEventId == 0 || !isCardFocused) return@LaunchedEffect
+        val targetEventId = focusEventId
+        delay(HOME_FOCUS_DEBOUNCE_MS)
+        if (!isCardFocused || focusEventId != targetEventId) return@LaunchedEffect
+        onFocused()
+    }
+
+    // Spring-based scale animation
     val scale by animateFloatAsState(
         targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
         label = "cwCardScale"
+    )
+
+    // Width expansion on focus
+    val cardWidth by animateDpAsState(
+        targetValue = if (isFocused) 172.dp else 160.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "cwCardWidth"
     )
 
     Column(
         modifier = Modifier
-            .width(160.dp)
+            .width(cardWidth)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -303,7 +334,8 @@ private fun ContinueWatchingCard(
             )
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused) onFocused()
+                isCardFocused = it.isFocused
+                if (it.isFocused) focusEventId++
             }
             .onPreviewKeyEvent { event ->
                 when {
@@ -325,8 +357,8 @@ private fun ContinueWatchingCard(
                 model = item.poster,
                 contentDescription = item.title,
                 modifier = Modifier
-                    .width(160.dp)
-                    .height(90.dp)
+                    .width(cardWidth)
+                    .height(cardWidth * 0.5625f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MerlotColors.Surface2)
                     .then(
@@ -587,6 +619,27 @@ private fun CatalogRowSection(
 ) {
     val lazyRowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Image prefetching: preload posters 8 items ahead of visible items
+    LaunchedEffect(lazyRowState) {
+        snapshotFlow {
+            lazyRowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        }.distinctUntilChanged().collect { lastVisibleIndex ->
+            val endIndex = (lastVisibleIndex + HOME_POSTER_PREFETCH_DISTANCE)
+                .coerceAtMost(items.size - 1)
+            for (i in (lastVisibleIndex + 1)..endIndex) {
+                val posterUrl = items[i].poster
+                if (posterUrl.isNotEmpty()) {
+                    val request = ImageRequest.Builder(context)
+                        .data(posterUrl)
+                        .size(130, 195)
+                        .build()
+                    ImageLoader(context).enqueue(request)
+                }
+            }
+        }
+    }
 
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Text(
@@ -653,10 +706,29 @@ private fun PosterCard(
     var showHeartOverlay by remember { mutableStateOf(false) }
     var heartIsFilled by remember { mutableStateOf(false) }
 
+    // Focus debounce
+    var focusEventId by remember { mutableIntStateOf(0) }
+    var isCardFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(focusEventId, isCardFocused) {
+        if (focusEventId == 0 || !isCardFocused) return@LaunchedEffect
+        val targetEventId = focusEventId
+        delay(HOME_FOCUS_DEBOUNCE_MS)
+        if (!isCardFocused || focusEventId != targetEventId) return@LaunchedEffect
+        onFocused()
+    }
+
+    // Spring-based scale animation
     val scale by animateFloatAsState(
         targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = tween(durationMillis = 150),
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
         label = "cardScale"
+    )
+
+    // Width expansion on focus
+    val cardWidth by animateDpAsState(
+        targetValue = if (isFocused) 140.dp else 130.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "cardWidth"
     )
 
     // Auto-hide heart overlay after 1.5 seconds
@@ -669,7 +741,7 @@ private fun PosterCard(
 
     Column(
         modifier = Modifier
-            .width(130.dp)
+            .width(cardWidth)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -680,7 +752,8 @@ private fun PosterCard(
             )
             .onFocusChanged {
                 isFocused = it.isFocused
-                if (it.isFocused) onFocused()
+                isCardFocused = it.isFocused
+                if (it.isFocused) focusEventId++
             }
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
@@ -716,8 +789,8 @@ private fun PosterCard(
                 model = meta.poster,
                 contentDescription = meta.name,
                 modifier = Modifier
-                    .width(130.dp)
-                    .height(195.dp)
+                    .width(cardWidth)
+                    .height(cardWidth * 1.5f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MerlotColors.Surface2)
                     .then(
@@ -745,12 +818,21 @@ private fun PosterCard(
                 }
             }
 
-            // Favorite heart overlay (shows after long-press)
+            // Favorite heart overlay (shows after long-press) — animated entrance/exit
             if (showHeartOverlay) {
+                val heartScale by animateFloatAsState(
+                    targetValue = 1f,
+                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
+                    label = "heartScale"
+                )
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .size(64.dp)
+                        .graphicsLayer {
+                            scaleX = heartScale
+                            scaleY = heartScale
+                        }
                         .clip(RoundedCornerShape(32.dp))
                         .background(MerlotColors.Black.copy(alpha = 0.7f)),
                     contentAlignment = Alignment.Center

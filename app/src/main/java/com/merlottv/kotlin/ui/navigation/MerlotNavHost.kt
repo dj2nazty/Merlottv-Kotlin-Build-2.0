@@ -45,8 +45,10 @@ fun MerlotNavHost(
         navController = navController,
         startDestination = startDestination,
         modifier = modifier,
-        enterTransition = { fadeIn(animationSpec = androidx.compose.animation.core.tween(200)) },
-        exitTransition = { fadeOut(animationSpec = androidx.compose.animation.core.tween(200)) }
+        enterTransition = { fadeIn(animationSpec = androidx.compose.animation.core.tween(350)) },
+        exitTransition = { fadeOut(animationSpec = androidx.compose.animation.core.tween(350)) },
+        popEnterTransition = { fadeIn(animationSpec = androidx.compose.animation.core.tween(300)) },
+        popExitTransition = { fadeOut(animationSpec = androidx.compose.animation.core.tween(300)) }
     ) {
         // Profile picker
         composable(Screen.ProfilePicker.route) {
