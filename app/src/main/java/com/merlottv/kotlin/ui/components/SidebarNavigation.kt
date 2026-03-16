@@ -70,6 +70,14 @@ fun SidebarNavigation(
     var isExpanded by remember { mutableStateOf(false) }
     var showProfilePicker by remember { mutableStateOf(false) }
 
+    // Always focus the Home item (index 0) when the sidebar first composes.
+    // This runs every time the sidebar is shown (it's conditionally rendered),
+    // with a short delay so the LazyColumn items are laid out first.
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(100)
+        try { focusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
     // Profile data for the M logo picker
     val profileVm: ProfilePickerViewModel = hiltViewModel()
     val profiles by profileVm.profiles.collectAsState()

@@ -1,5 +1,6 @@
 package com.merlottv.kotlin.ui.screens.account
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.domain.repository.AuthRepository
@@ -52,6 +53,7 @@ class AccountViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             authRepository.currentUser.collect { user ->
+                Log.d("MerlotTV", "Auth state changed: user=${user?.email ?: "null"}")
                 _uiState.update { state ->
                     if (user != null) {
                         cancelDeviceCodeFlow()
@@ -113,15 +115,22 @@ class AccountViewModel @Inject constructor(
                             countdownJob?.cancel()
                             val linkedEmail = status.email
                             val linkedPassword = status.password
+                            Log.d("MerlotTV", "Device code linked! email=$linkedEmail, hasPassword=${linkedPassword.isNotBlank()}")
                             // Delete code first (cleans up Firestore), then sign in
                             deviceCodeRepository.deleteCode(code)
                             if (linkedPassword.isNotBlank()) {
                                 // Auto sign-in: web page provided credentials
+                                Log.d("MerlotTV", "Attempting auto sign-in for $linkedEmail")
                                 _uiState.update {
                                     it.copy(isLoading = true, error = null, deviceCode = null)
                                 }
                                 authRepository.signInWithEmail(linkedEmail.trim(), linkedPassword)
+                                    .onSuccess { user ->
+                                        Log.d("MerlotTV", "Auto sign-in SUCCESS for ${user.email}")
+                                        // AuthStateListener in init{} will handle mode transition to SIGNED_IN
+                                    }
                                     .onFailure { e ->
+                                        Log.e("MerlotTV", "Auto sign-in FAILED: ${e.message}", e)
                                         _uiState.update {
                                             it.copy(
                                                 mode = AccountMode.DEVICE_CODE_PASSWORD,
@@ -134,6 +143,7 @@ class AccountViewModel @Inject constructor(
                                         }
                                     }
                             } else {
+                                Log.d("MerlotTV", "No password provided, falling back to manual entry")
                                 // Fallback: ask for password on TV
                                 _uiState.update {
                                     it.copy(
@@ -147,14 +157,18 @@ class AccountViewModel @Inject constructor(
                             }
                         }
                         is DeviceCodeStatus.Expired -> {
+                            Log.d("MerlotTV", "Device code expired")
                             countdownJob?.cancel()
                             _uiState.update { it.copy(mode = AccountMode.SIGNED_OUT, error = "Code expired", deviceCode = null) }
                         }
                         is DeviceCodeStatus.Error -> {
+                            Log.e("MerlotTV", "Device code error: ${status.message}")
                             countdownJob?.cancel()
                             _uiState.update { it.copy(error = status.message) }
                         }
-                        DeviceCodeStatus.Pending -> { /* waiting */ }
+                        DeviceCodeStatus.Pending -> {
+                            Log.d("MerlotTV", "Device code pending, waiting for link...")
+                        }
                     }
                 }
             } catch (e: Exception) {

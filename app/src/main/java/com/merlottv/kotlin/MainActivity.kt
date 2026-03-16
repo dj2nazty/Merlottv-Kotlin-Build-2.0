@@ -102,7 +102,8 @@ fun MerlotApp() {
                         showSidebar && !sidebarVisible
                     ) {
                         sidebarVisible = true
-                        try { sidebarFocusRequester.requestFocus() } catch (_: Exception) {}
+                        // Focus is handled by LaunchedEffect inside SidebarNavigation
+                        // to avoid the race where requestFocus fires before the sidebar is composed
                         true
                     } else {
                         false

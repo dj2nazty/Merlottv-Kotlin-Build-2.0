@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -73,11 +74,22 @@ fun HomeScreen(
     val heroFocusRequester = remember { FocusRequester() }
     val firstRowFocusRequester = remember { FocusRequester() }
 
-    // Request focus on hero carousel (or first row) when screen loads
+    // Focus restoration: track the last focused item ID across navigation
+    var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+
+    // Restore focus to the previously selected item, or default to hero carousel
     LaunchedEffect(uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
         if (uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
             delay(300)
-            try { heroFocusRequester.requestFocus() } catch (_: Exception) {}
+            val restored = lastFocusedItemId?.let { id ->
+                focusRequesters[id]?.let { requester ->
+                    try { requester.requestFocus(); true } catch (_: Exception) { false }
+                }
+            } ?: false
+            if (!restored) {
+                try { heroFocusRequester.requestFocus() } catch (_: Exception) {}
+            }
         }
     }
 
@@ -143,10 +155,13 @@ fun HomeScreen(
                             ContinueWatchingRow(
                                 items = uiState.continueWatching,
                                 onItemClick = { item ->
+                                    lastFocusedItemId = item.id
                                     onNavigateToDetail(item.type, item.id)
                                 },
                                 focusRequester = if (uiState.featuredItems.isEmpty()) heroFocusRequester else null,
-                                firstCardFocusRequester = if (uiState.featuredItems.isNotEmpty()) firstRowFocusRequester else null
+                                firstCardFocusRequester = if (uiState.featuredItems.isNotEmpty()) firstRowFocusRequester else null,
+                                focusRequesters = focusRequesters,
+                                onItemFocused = { itemId -> lastFocusedItemId = itemId }
                             )
                         }
                     }
@@ -164,10 +179,15 @@ fun HomeScreen(
                         CatalogRowSection(
                             title = row.title,
                             items = row.items,
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) },
+                            onItemClick = { item ->
+                                lastFocusedItemId = item.id
+                                onNavigateToDetail(item.type, item.id)
+                            },
                             onItemLongClick = { item -> viewModel.toggleFavorite(item) },
                             favoriteIds = favoriteIds,
-                            firstCardFocusRequester = rowFocusReq
+                            firstCardFocusRequester = rowFocusReq,
+                            focusRequesters = focusRequesters,
+                            onItemFocused = { itemId -> lastFocusedItemId = itemId }
                         )
                     }
                 }
@@ -181,7 +201,9 @@ private fun ContinueWatchingRow(
     items: List<WatchProgressItem>,
     onItemClick: (WatchProgressItem) -> Unit,
     focusRequester: FocusRequester? = null,
-    firstCardFocusRequester: FocusRequester? = null
+    firstCardFocusRequester: FocusRequester? = null,
+    focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
+    onItemFocused: (String) -> Unit = {}
 ) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Row(
@@ -208,11 +230,20 @@ private fun ContinueWatchingRow(
         ) {
             items(items, key = { it.id }) { item ->
                 val isFirst = item == items.first()
+                val defaultReq = if (isFirst) (firstCardFocusRequester ?: focusRequester) else null
+                val itemFocusRequester = remember {
+                    if (defaultReq != null) {
+                        focusRequesters[item.id] = defaultReq
+                        defaultReq
+                    } else {
+                        focusRequesters.getOrPut(item.id) { FocusRequester() }
+                    }
+                }
                 ContinueWatchingCard(
                     item = item,
                     onClick = { onItemClick(item) },
-                    // Use firstCardFocusRequester (from hero DOWN) if available, otherwise focusRequester (initial focus)
-                    focusRequester = if (isFirst) (firstCardFocusRequester ?: focusRequester) else null
+                    focusRequester = itemFocusRequester,
+                    onFocused = { onItemFocused(item.id) }
                 )
             }
         }
@@ -223,7 +254,8 @@ private fun ContinueWatchingRow(
 private fun ContinueWatchingCard(
     item: WatchProgressItem,
     onClick: () -> Unit,
-    focusRequester: FocusRequester? = null
+    focusRequester: FocusRequester? = null,
+    onFocused: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
@@ -234,7 +266,10 @@ private fun ContinueWatchingCard(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
             )
-            .onFocusChanged { isFocused = it.isFocused }
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown &&
@@ -505,7 +540,9 @@ private fun CatalogRowSection(
     onItemClick: (MetaPreview) -> Unit,
     onItemLongClick: (MetaPreview) -> Unit = {},
     favoriteIds: Set<String> = emptySet(),
-    firstCardFocusRequester: FocusRequester? = null
+    firstCardFocusRequester: FocusRequester? = null,
+    focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
+    onItemFocused: (String) -> Unit = {}
 ) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         Text(
@@ -521,12 +558,21 @@ private fun CatalogRowSection(
         ) {
             items(items, key = { it.id }) { item ->
                 val isFirst = firstCardFocusRequester != null && item == items.first()
+                val itemFocusRequester = remember {
+                    if (isFirst && firstCardFocusRequester != null) {
+                        focusRequesters[item.id] = firstCardFocusRequester
+                        firstCardFocusRequester
+                    } else {
+                        focusRequesters.getOrPut(item.id) { FocusRequester() }
+                    }
+                }
                 PosterCard(
                     meta = item,
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                     isFavorite = item.id in favoriteIds,
-                    focusRequester = if (isFirst) firstCardFocusRequester else null
+                    focusRequester = itemFocusRequester,
+                    onFocused = { onItemFocused(item.id) }
                 )
             }
         }
@@ -539,7 +585,8 @@ private fun PosterCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isFavorite: Boolean = false,
-    focusRequester: FocusRequester? = null
+    focusRequester: FocusRequester? = null,
+    onFocused: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
@@ -561,7 +608,10 @@ private fun PosterCard(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
             )
-            .onFocusChanged { isFocused = it.isFocused }
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .focusable()
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter

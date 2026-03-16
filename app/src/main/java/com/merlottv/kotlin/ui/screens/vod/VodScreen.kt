@@ -34,6 +34,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -70,11 +71,22 @@ fun VodScreen(
     val favoriteIds by viewModel.favoriteVodIds.collectAsState()
     val firstCardFocusRequester = remember { FocusRequester() }
 
-    // Request focus on first content card when content loads
+    // Focus restoration: track the last focused item ID across navigation
+    var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+
+    // Restore focus to the previously selected item, or default to first card
     LaunchedEffect(uiState.filteredSections.isNotEmpty()) {
         if (uiState.filteredSections.isNotEmpty()) {
             delay(300)
-            try { firstCardFocusRequester.requestFocus() } catch (_: Exception) {}
+            val restored = lastFocusedItemId?.let { id ->
+                focusRequesters[id]?.let { requester ->
+                    try { requester.requestFocus(); true } catch (_: Exception) { false }
+                }
+            } ?: false
+            if (!restored) {
+                try { firstCardFocusRequester.requestFocus() } catch (_: Exception) {}
+            }
         }
     }
 
@@ -162,13 +174,16 @@ fun VodScreen(
                         CatalogSectionRow(
                             section = section,
                             onItemClick = { item ->
+                                lastFocusedItemId = item.id
                                 onNavigateToDetail(item.type, item.id)
                             },
                             onItemLongClick = { item ->
                                 viewModel.toggleFavorite(item)
                             },
                             favoriteIds = favoriteIds,
-                            firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null
+                            firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null,
+                            focusRequesters = focusRequesters,
+                            onItemFocused = { itemId -> lastFocusedItemId = itemId }
                         )
                     }
                 }
@@ -183,7 +198,9 @@ private fun CatalogSectionRow(
     onItemClick: (MetaPreview) -> Unit,
     onItemLongClick: (MetaPreview) -> Unit = {},
     favoriteIds: Set<String> = emptySet(),
-    firstCardFocusRequester: FocusRequester? = null
+    firstCardFocusRequester: FocusRequester? = null,
+    focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
+    onItemFocused: (String) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -253,12 +270,22 @@ private fun CatalogSectionRow(
         ) {
             items(section.items, key = { it.id }) { item ->
                 val isFirst = firstCardFocusRequester != null && item == section.items.first()
+                val itemFocusRequester = remember {
+                    if (isFirst && firstCardFocusRequester != null) {
+                        // Register the first card's requester in the map too for restoration
+                        focusRequesters[item.id] = firstCardFocusRequester
+                        firstCardFocusRequester
+                    } else {
+                        focusRequesters.getOrPut(item.id) { FocusRequester() }
+                    }
+                }
                 VodCard(
                     item = item,
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                     isFavorite = item.id in favoriteIds,
-                    focusRequester = if (isFirst) firstCardFocusRequester else null
+                    focusRequester = itemFocusRequester,
+                    onFocused = { onItemFocused(item.id) }
                 )
             }
         }
@@ -271,7 +298,8 @@ private fun VodCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isFavorite: Boolean = false,
-    focusRequester: FocusRequester? = null
+    focusRequester: FocusRequester? = null,
+    onFocused: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
@@ -293,7 +321,10 @@ private fun VodCard(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
             )
-            .onFocusChanged { isFocused = it.isFocused }
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .focusable()
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
