@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Movie
@@ -264,7 +267,11 @@ private fun CatalogSectionRow(
         }
 
         // Horizontal poster row
+        val lazyRowState = rememberLazyListState()
+        val scope = rememberCoroutineScope()
+
         LazyRow(
+            state = lazyRowState,
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -279,13 +286,27 @@ private fun CatalogSectionRow(
                         focusRequesters.getOrPut(item.id) { FocusRequester() }
                     }
                 }
+                val itemIndex = section.items.indexOf(item)
                 VodCard(
                     item = item,
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                     isFavorite = item.id in favoriteIds,
                     focusRequester = itemFocusRequester,
-                    onFocused = { onItemFocused(item.id) }
+                    onFocused = { onItemFocused(item.id) },
+                    onLeftPress = if (itemIndex > 0) {
+                        {
+                            val prevIndex = itemIndex - 1
+                            val prevId = section.items[prevIndex].id
+                            scope.launch {
+                                lazyRowState.animateScrollToItem(prevIndex)
+                                kotlinx.coroutines.delay(50)
+                                focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    } else null
                 )
             }
         }
@@ -299,7 +320,8 @@ private fun VodCard(
     onLongClick: () -> Unit = {},
     isFavorite: Boolean = false,
     focusRequester: FocusRequester? = null,
-    onFocused: () -> Unit = {}
+    onFocused: () -> Unit = {},
+    onLeftPress: (() -> Unit)? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
     var pressStartTime by remember { mutableStateOf(0L) }
@@ -329,6 +351,11 @@ private fun VodCard(
             .onPreviewKeyEvent { event ->
                 val isSelectKey = event.key == Key.DirectionCenter || event.key == Key.Enter
                 when {
+                    // Intercept Left press to prevent focus escaping to sidebar
+                    event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && onLeftPress != null -> {
+                        onLeftPress.invoke()
+                        true
+                    }
                     event.type == KeyEventType.KeyDown && isSelectKey -> {
                         if (pressStartTime == 0L) pressStartTime = System.currentTimeMillis()
                         false // Don't consume — let repeat events come through

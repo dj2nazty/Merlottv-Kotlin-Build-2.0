@@ -47,6 +47,13 @@ sealed class Screen(
     data object VodDetail : Screen("vod_detail/{type}/{id}", "Detail", Icons.Default.Movie) {
         fun createRoute(type: String, id: String) = "vod_detail/$type/$id"
     }
+    data object ActorDetail : Screen("actor_detail/{personId}/{personName}", "Actor", Icons.Default.Person) {
+        fun createRoute(personId: Int, personName: String): String {
+            val encodedName = java.net.URLEncoder.encode(personName, "UTF-8")
+            return "actor_detail/$personId/$encodedName"
+        }
+    }
+
     data object Player : Screen("player/{url}?title={title}&contentId={contentId}&poster={poster}&contentType={contentType}", "Player", Icons.Default.LiveTv) {
         fun createRoute(
             url: String,

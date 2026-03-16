@@ -30,6 +30,7 @@ import com.merlottv.kotlin.ui.screens.sports.TeamDetailScreen
 import com.merlottv.kotlin.ui.screens.tvguide.TvGuideScreen
 import com.merlottv.kotlin.ui.screens.vod.VodScreen
 import com.merlottv.kotlin.ui.screens.vod.VodDetailScreen
+import com.merlottv.kotlin.ui.screens.vod.ActorDetailScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -223,6 +224,26 @@ fun MerlotNavHost(
                         )
                     )
                 },
+                onNavigateToDetail = { detailType, detailId ->
+                    val encodedId = URLEncoder.encode(detailId, "UTF-8")
+                    navController.navigate(Screen.VodDetail.createRoute(detailType, encodedId))
+                },
+                onNavigateToActor = { personId, personName ->
+                    navController.navigate(Screen.ActorDetail.createRoute(personId, personName))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.ActorDetail.route,
+            arguments = listOf(
+                navArgument("personId") { type = NavType.IntType },
+                navArgument("personName") { type = NavType.StringType }
+            )
+        ) {
+            onLiveTvFullscreenChanged(false)
+            ActorDetailScreen(
+                onBack = { navController.popBackStack() },
                 onNavigateToDetail = { detailType, detailId ->
                     val encodedId = URLEncoder.encode(detailId, "UTF-8")
                     navController.navigate(Screen.VodDetail.createRoute(detailType, encodedId))

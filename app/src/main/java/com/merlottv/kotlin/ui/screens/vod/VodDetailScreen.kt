@@ -64,8 +64,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.CircleShape
 import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
+import com.merlottv.kotlin.domain.model.TmdbCastMember
 import com.merlottv.kotlin.domain.model.Video
 import com.merlottv.kotlin.ui.components.TrailerPlayer
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -82,6 +85,7 @@ fun VodDetailScreen(
     onBack: () -> Unit,
     onPlay: (streamUrl: String, title: String, contentId: String, poster: String, contentType: String) -> Unit,
     onNavigateToDetail: ((String, String) -> Unit)? = null,
+    onNavigateToActor: ((Int, String) -> Unit)? = null,
     viewModel: VodDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -259,8 +263,29 @@ fun VodDetailScreen(
                                 )
                             }
 
-                            // Cast
-                            if (meta.cast.isNotEmpty()) {
+                            // Cast — show TMDB cast with photos if available, fallback to text
+                            if (uiState.castMembers.isNotEmpty()) {
+                                Text(
+                                    text = "Cast",
+                                    color = MerlotColors.TextMuted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 6.dp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(uiState.castMembers.take(10), key = { it.id }) { castMember ->
+                                        CastMemberCard(
+                                            castMember = castMember,
+                                            onClick = {
+                                                onNavigateToActor?.invoke(castMember.id, castMember.name)
+                                            }
+                                        )
+                                    }
+                                }
+                            } else if (meta.cast.isNotEmpty()) {
                                 Text(
                                     text = "Cast: ${meta.cast.take(5).joinToString(", ")}",
                                     color = MerlotColors.TextMuted,
@@ -880,6 +905,79 @@ private fun EpisodeCard(
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CastMemberCard(
+    castMember: TmdbCastMember,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                ) {
+                    onClick(); true
+                } else false
+            },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(MerlotColors.Surface2)
+                .then(
+                    if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, CircleShape)
+                    else Modifier
+                )
+        ) {
+            if (castMember.profileUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = castMember.profileUrl,
+                    contentDescription = castMember.name,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = castMember.name.firstOrNull()?.uppercase() ?: "?",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = castMember.name,
+            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (castMember.character.isNotEmpty()) {
+            Text(
+                text = castMember.character,
+                color = MerlotColors.TextMuted,
+                fontSize = 8.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

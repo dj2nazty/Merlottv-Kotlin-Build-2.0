@@ -6,8 +6,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
+import com.merlottv.kotlin.data.youtube.TmdbCastRepository
 import com.merlottv.kotlin.data.youtube.TmdbTrailerRepository
 import com.merlottv.kotlin.domain.model.Meta
+import com.merlottv.kotlin.domain.model.TmdbCastMember
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Video
@@ -49,7 +51,9 @@ data class VodDetailUiState(
     val isLoadingSimilar: Boolean = false,
     // Trailer — ytId for direct video, searchQuery for YouTube search fallback
     val trailerYtId: String? = null,
-    val trailerSearchQuery: String? = null
+    val trailerSearchQuery: String? = null,
+    // TMDB cast with photos
+    val castMembers: List<TmdbCastMember> = emptyList()
 )
 
 @HiltViewModel
@@ -58,6 +62,7 @@ class VodDetailViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
     private val favoritesRepository: FavoritesRepository,
     private val tmdbTrailerRepository: TmdbTrailerRepository,
+    private val tmdbCastRepository: TmdbCastRepository,
     application: Application
 ) : ViewModel() {
 
@@ -176,6 +181,25 @@ class VodDetailViewModel @Inject constructor(
                     meta = meta,
                     trailerYtId = addonTrailerYtId
                 )
+            }
+
+            // TMDB cast lookup runs in BACKGROUND — enriches cast with photos
+            if (meta != null && meta.name.isNotEmpty()) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val imdbId = if (id.startsWith("tt")) id else null
+                        val cast = tmdbCastRepository.getCast(
+                            imdbId = imdbId,
+                            title = meta.name,
+                            year = meta.year,
+                            type = type
+                        )
+                        if (cast.isNotEmpty()) {
+                            _uiState.value = _uiState.value.copy(castMembers = cast)
+                            Log.d("VodDetail", "TMDB cast loaded: ${cast.size} members")
+                        }
+                    } catch (_: Exception) {}
+                }
             }
 
             // TMDB trailer lookup runs in BACKGROUND — doesn't block the detail screen
