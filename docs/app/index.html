@@ -394,6 +394,22 @@
             cursor: pointer; padding: 8px;
         }
 
+        /* ─── Video Player ─── */
+        .video-player-overlay {
+            position: fixed; inset: 0; background: #000; z-index: 600;
+            display: flex; flex-direction: column;
+        }
+        .video-player-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 12px; background: rgba(0,0,0,0.8); z-index: 1;
+            padding-top: calc(8px + env(safe-area-inset-top));
+        }
+        .video-player-bar .vp-title { font-size: 13px; font-weight: 600; color: #fff; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 12px; }
+        .video-player-bar button { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; padding: 8px; }
+        .video-player-overlay video {
+            flex: 1; width: 100%; background: #000; object-fit: contain;
+        }
+
         /* ─── Modal ─── */
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500;
@@ -438,7 +454,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.4</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.5</div>
             </form>
         </div>
 
@@ -666,6 +682,16 @@
 
     <!-- ─── TMDB Detail Overlay ─── -->
     <div id="detail-overlay" class="detail-overlay hidden"></div>
+
+    <!-- ─── Video Player ─── -->
+    <div id="video-player" class="video-player-overlay hidden">
+        <div class="video-player-bar">
+            <button onclick="closePlayer()">&#10005; Close</button>
+            <span class="vp-title" id="vp-title"></span>
+            <button onclick="openInVLC()" id="vp-vlc-btn" style="font-size:12px;white-space:nowrap">Open in VLC</button>
+        </div>
+        <video id="vp-video" controls playsinline autoplay webkit-playsinline></video>
+    </div>
 
     <!-- ─── Modal Container ─── -->
     <div id="modal" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
@@ -1822,8 +1848,11 @@
                     else if (text.includes('720') || text.includes('hd')) quality = '720p';
                     else if (text.includes('480')) quality = '480p';
 
-                    // Extract size if available
-                    const sizeMatch = (title + ' ' + name).match(/(\d+\.?\d*)\s*(GB|MB|gb|mb)/);
+                    // Extract size from metadata (multiple patterns)
+                    const sizeText = title + ' ' + name + ' ' + (s.behaviorHints?.filename || '');
+                    const sizeMatch = sizeText.match(/(\d+\.?\d*)\s*(GB|MB|gb|mb|Gb|Mb)/i)
+                        || sizeText.match(/💾\s*(\d+\.?\d*)\s*(GB|MB)/i)
+                        || sizeText.match(/size[:\s]+(\d+\.?\d*)\s*(GB|MB)/i);
                     const size = sizeMatch ? `${sizeMatch[1]} ${sizeMatch[2].toUpperCase()}` : '';
 
                     results.push({ url: finalUrl, title: title || name || finalUrl.split('/').pop(), name, quality, size, addon: addon.name });
@@ -1852,16 +1881,35 @@
             if (r.size) return; // already have size from metadata
             try {
                 const ctrl = new AbortController();
-                const t = setTimeout(() => ctrl.abort(), 4000);
-                const head = await fetch(r.url, { method: 'HEAD', signal: ctrl.signal });
+                const t = setTimeout(() => ctrl.abort(), 5000);
+                // Try HEAD first
+                let cl = null;
+                try {
+                    const head = await fetch(r.url, { method: 'HEAD', signal: ctrl.signal, credentials: 'omit', redirect: 'follow' });
+                    cl = head.headers.get('content-length');
+                } catch (_) {
+                    // HEAD blocked (CORS) — try GET with range header to get just 1 byte + content-range
+                    try {
+                        const rangeResp = await fetch(r.url, {
+                            method: 'GET', signal: ctrl.signal, credentials: 'omit', redirect: 'follow',
+                            headers: { 'Range': 'bytes=0-0' }
+                        });
+                        // content-range: bytes 0-0/TOTAL
+                        const cr = rangeResp.headers.get('content-range') || '';
+                        const totalMatch = cr.match(/\/(\d+)/);
+                        if (totalMatch) cl = totalMatch[1];
+                        else cl = rangeResp.headers.get('content-length');
+                        // Abort the body
+                        rangeResp.body?.cancel?.();
+                    } catch (_) {}
+                }
                 clearTimeout(t);
-                const cl = head.headers.get('content-length');
                 if (cl) {
                     const bytes = parseInt(cl);
-                    r.sizeBytes = bytes;
-                    if (bytes >= 1073741824) r.size = (bytes / 1073741824).toFixed(2) + ' GB';
-                    else if (bytes >= 1048576) r.size = (bytes / 1048576).toFixed(0) + ' MB';
-                    else r.size = (bytes / 1024).toFixed(0) + ' KB';
+                    if (bytes > 1000) { // sanity check
+                        r.sizeBytes = bytes;
+                        r.size = formatBytes(bytes);
+                    }
                 }
             } catch (_) {}
         });
@@ -1927,11 +1975,12 @@
                         <span class="stream-quality ${qualityClass(d.quality)}" style="display:inline-block;margin-right:6px">${d.quality || ''}</span>
                         ${d.size ? d.size + ' · ' : ''}${d.date || ''}
                     </div>
+                    <div style="display:flex;gap:6px;margin-top:6px">
+                        <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playInApp(${i})">&#9654; Play</button>
+                        <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="openInVLCByIndex(${i})">VLC</button>
+                    </div>
                 </div>
-                <div class="dl-item-actions">
-                    ${d.url ? `<button class="dl-play-btn" onclick="playDownload(${i})" title="Play / Open">&#9654;</button>` : ''}
-                    <button class="dl-remove-btn" onclick="removeFromDownloadHistory(${i})" title="Remove">&#10005;</button>
-                </div>
+                <button class="dl-remove-btn" onclick="removeFromDownloadHistory(${i})" title="Remove">&#10005;</button>
             </div>`;
         });
         list.innerHTML = html;
@@ -2319,19 +2368,61 @@
         }
     }
 
-    // ─── Play downloaded item ───
-    function playDownload(index) {
+    // ─── In-App Video Player ───
+    let currentPlayerUrl = ''; // the stream URL for VLC
+
+    function playInApp(index) {
+        const d = downloadHistory[index];
+        if (!d) return;
+
+        const playerEl = document.getElementById('video-player');
+        const videoEl = document.getElementById('vp-video');
+        const titleEl = document.getElementById('vp-title');
+
+        currentPlayerUrl = d.url || '';
+        titleEl.textContent = d.title || 'Video';
+
+        // Use blob URL if available (downloaded in this session), otherwise stream URL
+        const playUrl = d.blobUrl || d.url;
+        if (!playUrl) {
+            alert('No playback URL available. Try re-downloading.');
+            return;
+        }
+
+        videoEl.src = playUrl;
+        playerEl.classList.remove('hidden');
+
+        // Try to enter fullscreen on iOS
+        if (videoEl.webkitEnterFullscreen) {
+            videoEl.play().then(() => {
+                try { videoEl.webkitEnterFullscreen(); } catch(_) {}
+            }).catch(_ => {});
+        } else {
+            videoEl.play().catch(_ => {});
+        }
+    }
+
+    function closePlayer() {
+        const playerEl = document.getElementById('video-player');
+        const videoEl = document.getElementById('vp-video');
+        videoEl.pause();
+        videoEl.src = '';
+        playerEl.classList.add('hidden');
+        currentPlayerUrl = '';
+    }
+
+    function openInVLC() {
+        // vlc-x-callback URL scheme to open a stream in VLC on iOS
+        if (!currentPlayerUrl) return;
+        const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(currentPlayerUrl)}`;
+        window.location.href = vlcUrl;
+    }
+
+    function openInVLCByIndex(index) {
         const d = downloadHistory[index];
         if (!d || !d.url) return;
-        // On iOS Safari, opening the URL in a new tab will either stream it or re-download
-        // Use a link click so Safari handles it natively
-        const a = document.createElement('a');
-        a.href = d.url;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(d.url)}`;
+        window.location.href = vlcUrl;
     }
 
     // ═══════════════════════════════════════════
