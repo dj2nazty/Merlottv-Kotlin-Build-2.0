@@ -454,7 +454,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.5</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.6</div>
             </form>
         </div>
 
@@ -2163,19 +2163,16 @@
                 }
             }
 
-            // Combine chunks and save
+            // Combine chunks into blob — keep in memory for playback
             const blob = new Blob(chunks, { type: 'video/mp4' });
             const blobUrl = URL.createObjectURL(blob);
 
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+            // Store blob in memory map (survives as long as page is open)
+            if (!window._dlBlobs) window._dlBlobs = {};
+            const blobId = 'dl_' + Date.now();
+            window._dlBlobs[blobId] = blobUrl;
 
-            // Save to history with blob URL for replay
+            // Save to history FIRST (before any navigation risk)
             addToDownloadHistory({
                 title: meta.title || filename,
                 filename,
@@ -2184,17 +2181,22 @@
                 poster: meta.poster || '',
                 date: new Date().toLocaleDateString(),
                 url: stream.url,
-                blobUrl: blobUrl
+                blobId: blobId
             });
 
+            renderDownloads();
+
+            // Show success with save + play buttons
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
                 <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
-                <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:6px">
-                    ${formatBytes(downloaded)} saved to Files app. Open with VLC for playback.
+                <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:8px">
+                    ${formatBytes(downloaded)} ready. Play below or save to Files.
+                </div>
+                <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+                    <button class="btn btn-sm btn-primary" onclick="playInApp(0)">&#9654; Play Now</button>
+                    <button class="btn btn-sm btn-secondary" onclick="saveBlobToFiles('${blobId}','${esc(filename.replace(/'/g,''))}')">Save to Files</button>
                 </div>
             </div>`;
-            setTimeout(() => { activeEl.innerHTML = ''; }, 10000);
-            renderDownloads();
 
         } catch (e) {
             if (e.name === 'AbortError') {
@@ -2371,6 +2373,16 @@
     // ─── In-App Video Player ───
     let currentPlayerUrl = ''; // the stream URL for VLC
 
+    function getBlobUrl(d) {
+        // Check in-memory blob map first
+        if (d.blobId && window._dlBlobs && window._dlBlobs[d.blobId]) {
+            return window._dlBlobs[d.blobId];
+        }
+        // Legacy: direct blobUrl field
+        if (d.blobUrl) return d.blobUrl;
+        return null;
+    }
+
     function playInApp(index) {
         const d = downloadHistory[index];
         if (!d) return;
@@ -2383,7 +2395,7 @@
         titleEl.textContent = d.title || 'Video';
 
         // Use blob URL if available (downloaded in this session), otherwise stream URL
-        const playUrl = d.blobUrl || d.url;
+        const playUrl = getBlobUrl(d) || d.url;
         if (!playUrl) {
             alert('No playback URL available. Try re-downloading.');
             return;
@@ -2400,6 +2412,20 @@
         } else {
             videoEl.play().catch(_ => {});
         }
+    }
+
+    function saveBlobToFiles(blobId, filename) {
+        const blobUrl = window._dlBlobs?.[blobId];
+        if (!blobUrl) {
+            alert('File no longer in memory. Play it directly using the Play button or re-download.');
+            return;
+        }
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => document.body.removeChild(a), 100);
     }
 
     function closePlayer() {
