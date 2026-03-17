@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can only read/write their own data
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Device codes: anyone authenticated can create, read, and update codes
+    match /deviceCodes/{code} {
+      allow read, write: if request.auth != null;
+      // Allow unauthenticated read for device code flow (TV polls before auth)
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if request.auth != null;
+    }
+  }
+}

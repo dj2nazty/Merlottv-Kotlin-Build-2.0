@@ -274,14 +274,17 @@ class AccountViewModel @Inject constructor(
     }
 
     fun syncNow() {
-        _uiState.update { it.copy(isSyncing = true) }
+        _uiState.update { it.copy(isSyncing = true, error = null) }
         viewModelScope.launch {
             try {
                 cloudSyncManager.uploadAll()
-            } finally {
+                Log.d("MerlotTV", "Sync Now: upload complete")
                 // Small delay so user sees the indicator
-                delay(1000)
+                delay(500)
                 _uiState.update { it.copy(isSyncing = false) }
+            } catch (e: Exception) {
+                Log.e("MerlotTV", "Sync Now failed: ${e.message}", e)
+                _uiState.update { it.copy(isSyncing = false, error = "Sync failed: ${e.message}") }
             }
         }
     }
@@ -289,7 +292,11 @@ class AccountViewModel @Inject constructor(
     private fun triggerCloudDownload() {
         viewModelScope.launch {
             try {
+                Log.d("MerlotTV", "Cloud sync: downloading all data...")
                 cloudSyncManager.downloadAll()
+                Log.d("MerlotTV", "Cloud sync: download complete, uploading local data...")
+                cloudSyncManager.uploadAll()
+                Log.d("MerlotTV", "Cloud sync: upload complete, starting real-time sync")
                 cloudSyncManager.startRealtimeSync()
             } catch (e: Exception) {
                 Log.e("MerlotTV", "Cloud sync failed: ${e.message}", e)

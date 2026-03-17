@@ -50,23 +50,25 @@ class CloudSyncManager @Inject constructor(
     //  UPLOAD — Local → Firestore
     // ══════════════════════════════════════════════════════
 
-    fun uploadAll() {
-        val uid = uid() ?: return
-        scope.launch {
-            try {
-                Log.d(TAG, "uploadAll for $uid")
-                uploadProfiles()
-                uploadSettings()
-                // Upload favorites and progress for all profiles
-                val profiles = profileDataStore.profiles.first()
-                for (profile in profiles) {
-                    uploadFavorites(profile.id)
-                    uploadWatchProgress(profile.id)
-                }
-                Log.d(TAG, "uploadAll complete")
-            } catch (e: Exception) {
-                Log.e(TAG, "uploadAll failed: ${e.message}", e)
+    suspend fun uploadAll() {
+        val uid = uid() ?: run {
+            Log.w(TAG, "uploadAll: no uid, skipping")
+            return
+        }
+        try {
+            Log.d(TAG, "uploadAll for $uid")
+            uploadProfiles()
+            uploadSettings()
+            // Upload favorites and progress for all profiles
+            val profiles = profileDataStore.profiles.first()
+            for (profile in profiles) {
+                uploadFavorites(profile.id)
+                uploadWatchProgress(profile.id)
             }
+            Log.d(TAG, "uploadAll complete for $uid")
+        } catch (e: Exception) {
+            Log.e(TAG, "uploadAll failed: ${e.message}", e)
+            throw e
         }
     }
 
