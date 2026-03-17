@@ -399,20 +399,31 @@
             cursor: pointer; padding: 8px;
         }
 
-        /* ─── Video Player ─── */
+        /* ─── Video Player (fullscreen) ─── */
         .video-player-overlay {
             position: fixed; inset: 0; background: #000; z-index: 600;
             display: flex; flex-direction: column;
         }
         .video-player-bar {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 8px 12px; background: rgba(0,0,0,0.8); z-index: 1;
+            padding: 8px 12px; background: linear-gradient(rgba(0,0,0,0.9), transparent);
+            z-index: 2; position: absolute; top: 0; left: 0; right: 0;
             padding-top: calc(8px + env(safe-area-inset-top));
+            transition: opacity 0.3s;
         }
-        .video-player-bar .vp-title { font-size: 13px; font-weight: 600; color: #fff; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 12px; }
+        .video-player-bar .vp-title { font-size: 14px; font-weight: 600; color: #fff; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 12px; }
         .video-player-bar button { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; padding: 8px; }
         .video-player-overlay video {
-            flex: 1; width: 100%; background: #000; object-fit: contain;
+            flex: 1; width: 100%; height: 100%; background: #000; object-fit: contain;
+        }
+        .vp-loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: #fff; font-size: 14px; z-index: 1; text-align: center;
+        }
+        .vp-error {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: var(--danger); font-size: 14px; z-index: 1; text-align: center;
+            background: rgba(0,0,0,0.8); padding: 20px; border-radius: 12px; max-width: 80%;
         }
 
         /* ─── Modal ─── */
@@ -459,7 +470,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.0</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.1</div>
             </form>
         </div>
 
@@ -688,14 +699,17 @@
     <!-- ─── TMDB Detail Overlay ─── -->
     <div id="detail-overlay" class="detail-overlay hidden"></div>
 
-    <!-- ─── Video Player ─── -->
+    <!-- ─── Video Player (fullscreen, works offline) ─── -->
     <div id="video-player" class="video-player-overlay hidden">
-        <div class="video-player-bar">
-            <button onclick="closePlayer()">&#10005; Close</button>
+        <div class="video-player-bar" id="vp-bar">
+            <button onclick="closePlayer()" style="font-size:20px">&#10005;</button>
             <span class="vp-title" id="vp-title"></span>
-            <button onclick="openInVLC()" id="vp-vlc-btn" style="font-size:12px;white-space:nowrap">Open in VLC</button>
+            <button onclick="togglePiP()" style="font-size:12px;white-space:nowrap">PiP</button>
         </div>
-        <video id="vp-video" controls playsinline autoplay webkit-playsinline></video>
+        <div class="vp-loading hidden" id="vp-loading"><span class="spinner" style="width:32px;height:32px;border-width:3px"></span><div style="margin-top:8px">Loading video...</div></div>
+        <div class="vp-error hidden" id="vp-error"></div>
+        <video id="vp-video" controls playsinline autoplay webkit-playsinline
+            style="position:absolute;inset:0;width:100%;height:100%"></video>
     </div>
 
     <!-- ─── Modal Container ─── -->
@@ -2049,24 +2063,24 @@
         const empty = document.getElementById('downloads-empty');
         if (!list) return;
 
-        // Render VLC playlist section
-        const playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        // Render MerlotTV playlist section
+        const playlist = JSON.parse(localStorage.getItem('merlot_playlist') || '[]');
         const playlistEl = document.getElementById('downloads-active');
         if (playlistEl && playlist.length > 0 && !activeDownload) {
             let plHtml = `<div class="card" style="margin-bottom:16px;border-color:rgba(0,229,255,0.3)">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                     <h3 style="margin:0;font-size:15px;color:var(--accent)">&#9654; MerlotTV Playlist (${playlist.length})</h3>
                     <div style="display:flex;gap:6px">
-                        <button style="padding:4px 10px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:11px;font-weight:600;cursor:pointer" onclick="playVLCPlaylist()">Play All</button>
-                        <button style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:11px;cursor:pointer" onclick="clearVLCPlaylist()">Clear</button>
+                        <button style="padding:4px 10px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:11px;font-weight:600;cursor:pointer" onclick="playPlaylistItem(0)">Play</button>
+                        <button style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:11px;cursor:pointer" onclick="clearPlaylist()">Clear</button>
                     </div>
                 </div>`;
             playlist.forEach((item, pi) => {
-                plHtml += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,42,58,0.3);font-size:12px">
+                plHtml += `<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid rgba(42,42,58,0.3);font-size:12px;cursor:pointer" onclick="playPlaylistItem(${pi})">
                     <span style="color:var(--accent);font-weight:700;min-width:20px">${pi+1}</span>
                     <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.title)}</span>
                     <span class="stream-quality ${qualityClass(item.quality)}" style="font-size:10px;padding:2px 6px">${item.quality || ''}</span>
-                    <button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:2px 4px" onclick="removeFromPlaylist(${pi})">&#10005;</button>
+                    <button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:2px 4px" onclick="event.stopPropagation();removeFromPlaylist(${pi})">&#10005;</button>
                 </div>`;
             });
             plHtml += '</div>';
@@ -2104,10 +2118,9 @@
                         <span style="color:${statusColor}">${statusLabel}</span>
                     </div>
                     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playOffline(${i})">&#9654; Play Offline</button>` : ''}
-                        <button style="padding:5px 12px;border-radius:6px;border:none;background:${hasLocal ? 'var(--surface2)' : 'var(--accent)'};color:${hasLocal ? 'var(--text)' : '#000'};font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${hasLocal ? 'var(--border)' : 'var(--accent)'}" onclick="openInVLCByIndex(${i})">&#9654; Play in VLC</button>
-                        <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="addToVLCPlaylist(${i})">+ Add to Playlist</button>
-                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveToFiles(${i})">Save to Files</button>` : ''}
+                        <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playVideo(${i})">&#9654; Play${hasLocal ? '' : ' (Stream)'}</button>
+                        <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="addToPlaylist(${i})">+ Playlist</button>
+                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveToFiles(${i})">Save</button>` : ''}
                         ${isFail ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--warn);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="retryDownload(${i})">Retry</button>` : ''}
                     </div>
                 </div>
@@ -2344,10 +2357,10 @@
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
                 <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:8px">
-                    ${formatBytes(downloaded)} saved to device. Works offline!
+                    ${formatBytes(downloaded)} saved to device. Ready for offline playback!
                 </div>
-                <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:4px">
-                    File also saved to Files app — open with VLC for offline playback.
+                <div style="text-align:center;margin-top:10px">
+                    <button class="btn btn-sm btn-primary" onclick="playVideo(0)">&#9654; Play Now</button>
                 </div>
             </div>`;
 
@@ -2529,10 +2542,11 @@
         }
     }
 
-    // ─── In-App Video Player + Offline Playback ───
+    // ─── In-App Video Player (works fully offline) ───
     let currentPlayerUrl = '';
+    let currentPlaylistIndex = -1; // for playlist auto-advance
 
-    // Get a playable blob URL — first check in-memory, then try IndexedDB
+    // Get a playable blob URL — check in-memory, then IndexedDB, then stream URL
     async function getPlayableUrl(d) {
         // 1. In-memory blob (current session downloads)
         if (d.blobId && window._dlBlobs && window._dlBlobs[d.blobId]) {
@@ -2543,7 +2557,6 @@
             const record = await getVideoBlob(d.idbKey);
             if (record && record.blob) {
                 const url = URL.createObjectURL(record.blob);
-                // Cache in memory for subsequent plays
                 if (!window._dlBlobs) window._dlBlobs = {};
                 window._dlBlobs[d.idbKey] = url;
                 return url;
@@ -2553,47 +2566,110 @@
         return d.url || null;
     }
 
-    async function playOffline(index) {
+    async function playVideo(index) {
         const d = downloadHistory[index];
         if (!d) return;
 
         const playerEl = document.getElementById('video-player');
         const videoEl = document.getElementById('vp-video');
         const titleEl = document.getElementById('vp-title');
+        const loadingEl = document.getElementById('vp-loading');
+        const errorEl = document.getElementById('vp-error');
 
         titleEl.textContent = d.title || 'Video';
         currentPlayerUrl = d.url || '';
-
-        // Try to get the local blob first (works offline)
-        const playUrl = await getPlayableUrl(d);
-        if (!playUrl) {
-            alert('Video not available. Try re-downloading while connected to WiFi.');
-            return;
-        }
-
-        videoEl.src = playUrl;
+        currentPlaylistIndex = -1;
+        errorEl.classList.add('hidden');
+        loadingEl.classList.remove('hidden');
         playerEl.classList.remove('hidden');
 
-        // Try to enter fullscreen on iOS
-        if (videoEl.webkitEnterFullscreen) {
-            videoEl.play().then(() => {
-                try { videoEl.webkitEnterFullscreen(); } catch(_) {}
-            }).catch(_ => {});
-        } else {
-            videoEl.play().catch(_ => {});
+        try {
+            const playUrl = await getPlayableUrl(d);
+            if (!playUrl) throw new Error('No video available');
+
+            loadingEl.classList.add('hidden');
+            videoEl.src = playUrl;
+
+            // Set up error handler
+            videoEl.onerror = () => {
+                const mediaErr = videoEl.error;
+                let msg = 'Cannot play this video format in the browser.';
+                if (mediaErr) {
+                    if (mediaErr.code === 4) msg = 'This video format is not supported by your browser. Try downloading an MP4 version.';
+                    else if (mediaErr.code === 2) msg = 'Network error — check your connection.';
+                    else if (mediaErr.code === 3) msg = 'Video decoding failed — file may be corrupt.';
+                }
+                errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>${msg}<br><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
+                errorEl.classList.remove('hidden');
+            };
+
+            // Try to go fullscreen on iOS
+            if (videoEl.webkitEnterFullscreen) {
+                videoEl.play().then(() => {
+                    try { videoEl.webkitEnterFullscreen(); } catch(_) {}
+                }).catch(_ => {});
+            } else {
+                videoEl.play().catch(_ => {});
+            }
+        } catch (e) {
+            loadingEl.classList.add('hidden');
+            errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>${esc(e.message)}<br><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
+            errorEl.classList.remove('hidden');
         }
+    }
+
+    async function playPlaylistItem(index) {
+        const playlist = JSON.parse(localStorage.getItem('merlot_playlist') || '[]');
+        if (!playlist[index]) return;
+
+        const item = playlist[index];
+        currentPlaylistIndex = index;
+
+        const playerEl = document.getElementById('video-player');
+        const videoEl = document.getElementById('vp-video');
+        const titleEl = document.getElementById('vp-title');
+        const loadingEl = document.getElementById('vp-loading');
+        const errorEl = document.getElementById('vp-error');
+
+        titleEl.textContent = `${index + 1}/${playlist.length} — ${item.title}`;
+        currentPlayerUrl = item.url || '';
+        errorEl.classList.add('hidden');
+        loadingEl.classList.remove('hidden');
+        playerEl.classList.remove('hidden');
+
+        // Find matching download history entry for local playback
+        const match = downloadHistory.find(d => d.url === item.url && d.idbKey);
+        let playUrl = null;
+
+        if (match) {
+            playUrl = await getPlayableUrl(match);
+        }
+        if (!playUrl) playUrl = item.url; // fall back to streaming
+
+        loadingEl.classList.add('hidden');
+        videoEl.src = playUrl;
+
+        // Auto-advance to next playlist item when video ends
+        videoEl.onended = () => {
+            const pl = JSON.parse(localStorage.getItem('merlot_playlist') || '[]');
+            if (currentPlaylistIndex >= 0 && currentPlaylistIndex < pl.length - 1) {
+                playPlaylistItem(currentPlaylistIndex + 1);
+            }
+        };
+
+        videoEl.onerror = () => {
+            errorEl.innerHTML = `<div>Cannot play this video.</div><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
+            errorEl.classList.remove('hidden');
+        };
+
+        videoEl.play().catch(_ => {});
     }
 
     async function saveToFiles(index) {
         const d = downloadHistory[index];
         if (!d) return;
-
         const blobUrl = await getPlayableUrl(d);
-        if (!blobUrl) {
-            alert('Video not available in storage. Try re-downloading.');
-            return;
-        }
-
+        if (!blobUrl) { alert('Video not in storage. Re-download while on WiFi.'); return; }
         const a = document.createElement('a');
         a.href = blobUrl;
         a.download = d.filename || `${d.title || 'video'}.mp4`;
@@ -2606,33 +2682,48 @@
         const playerEl = document.getElementById('video-player');
         const videoEl = document.getElementById('vp-video');
         videoEl.pause();
+        videoEl.onended = null;
+        videoEl.onerror = null;
         videoEl.src = '';
         playerEl.classList.add('hidden');
         currentPlayerUrl = '';
+        currentPlaylistIndex = -1;
+        document.getElementById('vp-loading').classList.add('hidden');
+        document.getElementById('vp-error').classList.add('hidden');
+    }
+
+    function togglePiP() {
+        const videoEl = document.getElementById('vp-video');
+        if (document.pictureInPictureElement) {
+            document.exitPictureInPicture().catch(_ => {});
+        } else if (videoEl.requestPictureInPicture) {
+            videoEl.requestPictureInPicture().catch(_ => {});
+        } else if (videoEl.webkitSetPresentationMode) {
+            // Safari iOS PiP
+            videoEl.webkitSetPresentationMode(
+                videoEl.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
+            );
+        }
     }
 
     function openInVLC() {
+        // Keep as fallback from player bar, but not primary
         if (!currentPlayerUrl) return;
         const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(currentPlayerUrl)}`;
         window.location.href = vlcUrl;
     }
 
-    function openInVLCByIndex(index) {
+    // ─── Playlist Management ───
+    function addToPlaylist(index) {
         const d = downloadHistory[index];
-        if (!d || !d.url) return;
-        // VLC needs a real HTTP URL (can't use blob://) — pass the stream URL
-        // For true offline VLC playback, user should open the saved file from Files app
-        const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(d.url)}`;
-        window.location.href = vlcUrl;
-    }
-
-    function addToVLCPlaylist(index) {
-        const d = downloadHistory[index];
-        if (!d || !d.url) return;
-        let playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        if (!d) return;
+        let playlist = JSON.parse(localStorage.getItem('merlot_playlist') || '[]');
         if (!playlist.some(item => item.url === d.url)) {
-            playlist.push({ title: d.title || 'Video', url: d.url, quality: d.quality || '', poster: d.poster || '', addedAt: Date.now() });
-            localStorage.setItem('merlot_vlc_playlist', JSON.stringify(playlist));
+            playlist.push({
+                title: d.title || 'Video', url: d.url, quality: d.quality || '',
+                poster: d.poster || '', idbKey: d.idbKey || '', addedAt: Date.now()
+            });
+            localStorage.setItem('merlot_playlist', JSON.stringify(playlist));
         }
         const btn = event.target;
         const orig = btn.textContent;
@@ -2642,24 +2733,16 @@
         setTimeout(() => { btn.textContent = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1500);
     }
 
-    function playVLCPlaylist() {
-        const playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
-        if (!playlist.length) { alert('Playlist is empty. Add items first.'); return; }
-        const first = playlist[0];
-        const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(first.url)}`;
-        window.location.href = vlcUrl;
-    }
-
     function removeFromPlaylist(index) {
-        let playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        let playlist = JSON.parse(localStorage.getItem('merlot_playlist') || '[]');
         playlist.splice(index, 1);
-        localStorage.setItem('merlot_vlc_playlist', JSON.stringify(playlist));
+        localStorage.setItem('merlot_playlist', JSON.stringify(playlist));
         renderDownloads();
     }
 
-    function clearVLCPlaylist() {
+    function clearPlaylist() {
         if (confirm('Clear the MerlotTV playlist?')) {
-            localStorage.removeItem('merlot_vlc_playlist');
+            localStorage.removeItem('merlot_playlist');
             renderDownloads();
         }
     }
