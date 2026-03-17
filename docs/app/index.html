@@ -307,21 +307,31 @@
         .cast-card .cast-char { font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* ─── Stream Picker ─── */
-        .stream-list { max-height: 60vh; overflow-y: auto; }
+        .stream-list { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         .stream-item {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 12px; background: var(--surface2); border-radius: 8px; margin-bottom: 8px;
+            display: flex; align-items: center; gap: 10px;
+            padding: 14px; background: var(--surface2); border-radius: 10px; margin-bottom: 8px;
+            cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s, background 0.15s;
+            -webkit-tap-highlight-color: rgba(0,229,255,0.1);
         }
-        .stream-info { flex: 1; min-width: 0; margin-right: 10px; }
-        .stream-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .stream-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        .stream-item:active, .stream-item.selected { border-color: var(--accent); background: rgba(0,229,255,0.05); }
+        .stream-info { flex: 1; min-width: 0; }
+        .stream-title { font-size: 13px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .stream-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+        .stream-size { font-size: 12px; color: var(--text); font-weight: 600; white-space: nowrap; }
         .stream-quality {
-            font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700;
+            font-size: 11px; padding: 3px 10px; border-radius: 5px; font-weight: 700;
             background: rgba(0,229,255,0.15); color: var(--accent); white-space: nowrap;
         }
         .stream-quality.q1080 { background: rgba(0,214,143,0.2); color: var(--success); }
         .stream-quality.q720 { background: rgba(255,215,64,0.2); color: var(--warn); }
         .stream-quality.q4k { background: rgba(224,64,251,0.2); color: #E040FB; }
+        .stream-dl-btn {
+            min-width: 44px; min-height: 44px; border-radius: 50%; border: none;
+            background: var(--accent); color: #000; font-size: 18px; font-weight: 700;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .stream-dl-btn:active { transform: scale(0.9); }
 
         /* ─── Download Progress ─── */
         .dl-progress-wrap {
@@ -336,20 +346,50 @@
         .dl-cancel { background: none; border: none; color: var(--danger); font-size: 12px; cursor: pointer; padding: 2px 8px; }
 
         /* ─── Episode Picker ─── */
-        .ep-season-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .ep-season-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
         .ep-season-tab {
-            padding: 6px 14px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border);
-            color: var(--text); font-size: 13px; cursor: pointer;
+            padding: 10px 18px; border-radius: 8px; background: var(--surface2); border: 2px solid var(--border);
+            color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer;
+            -webkit-tap-highlight-color: rgba(0,229,255,0.1); transition: all 0.15s;
         }
+        .ep-season-tab:active { transform: scale(0.95); }
         .ep-season-tab.active { background: var(--accent); color: #000; border-color: var(--accent); }
-        .ep-list { max-height: 50vh; overflow-y: auto; }
+        .ep-list { max-height: 50vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         .ep-item {
-            display: flex; align-items: center; padding: 10px 12px; background: var(--surface2);
-            border-radius: 8px; margin-bottom: 6px; cursor: pointer; gap: 10px;
+            display: flex; align-items: center; padding: 14px; background: var(--surface2);
+            border-radius: 10px; margin-bottom: 8px; cursor: pointer; gap: 12px;
+            border: 2px solid transparent; transition: border-color 0.15s, background 0.15s;
+            -webkit-tap-highlight-color: rgba(0,229,255,0.1); min-height: 52px;
         }
-        .ep-item:active { background: var(--border); }
-        .ep-num { font-size: 13px; font-weight: 700; color: var(--accent); min-width: 30px; }
-        .ep-title { font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ep-item:active { border-color: var(--accent); background: rgba(0,229,255,0.05); }
+        .ep-num { font-size: 14px; font-weight: 700; color: var(--accent); min-width: 36px; }
+        .ep-title { font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ep-dl-icon {
+            min-width: 36px; min-height: 36px; border-radius: 50%; background: rgba(0,229,255,0.15);
+            color: var(--accent); display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0;
+        }
+
+        /* ─── Downloads View ─── */
+        .dl-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; margin-bottom: 10px;
+        }
+        .dl-item-poster { width: 50px; height: 75px; border-radius: 6px; object-fit: cover; background: var(--surface2); flex-shrink: 0; }
+        .dl-item-info { flex: 1; min-width: 0; }
+        .dl-item-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dl-item-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+        .dl-item-actions { display: flex; gap: 8px; align-items: center; }
+        .dl-play-btn {
+            min-width: 40px; min-height: 40px; border-radius: 50%; border: none;
+            background: var(--accent); color: #000; font-size: 18px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .dl-remove-btn {
+            background: none; border: none; color: var(--danger); font-size: 20px;
+            cursor: pointer; padding: 8px;
+        }
 
         /* ─── Modal ─── */
         .modal-overlay {
@@ -578,6 +618,18 @@
             <button class="btn btn-secondary" style="margin-top:12px" onclick="openAddProfile()">+ Add Profile</button>
         </div>
 
+        <!-- ─── Downloads ─── -->
+        <div id="view-downloads" class="view">
+            <h2 style="margin-bottom:16px">Downloads</h2>
+            <div id="downloads-active"></div>
+            <div id="downloads-list"></div>
+            <div id="downloads-empty" style="text-align:center;padding:40px;color:var(--muted)">
+                <div style="font-size:40px;margin-bottom:12px">&#x2B07;</div>
+                <div>No downloads yet</div>
+                <div style="font-size:13px;margin-top:6px">Browse movies and TV shows to download for offline viewing</div>
+            </div>
+        </div>
+
         <!-- ─── Bottom Nav ─── -->
         <div id="bottom-nav" class="bottom-nav hidden">
             <button class="nav-item active" onclick="showView('dashboard')" data-view="dashboard">
@@ -586,14 +638,14 @@
             <button class="nav-item" onclick="showView('browse')" data-view="browse">
                 <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Browse
             </button>
+            <button class="nav-item" onclick="showView('downloads')" data-view="downloads">
+                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Downloads
+            </button>
             <button class="nav-item" onclick="showView('favorites')" data-view="favorites">
                 <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Favs
             </button>
             <button class="nav-item" onclick="showView('settings')" data-view="settings">
                 <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></svg>Settings
-            </button>
-            <button class="nav-item" onclick="showView('profiles')" data-view="profiles">
-                <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Profiles
             </button>
         </div>
     </div>
@@ -845,6 +897,7 @@
         if (name === 'favorites') { populateProfileSelector(); loadFavorites(); }
         if (name === 'profiles') loadProfiles();
         if (name === 'browse' && !browseInitialized) initBrowse();
+        if (name === 'downloads') renderDownloads();
     }
 
     // ═══════════════════════════════════════════
@@ -1568,8 +1621,8 @@
                     <div class="detail-actions">
                         <button class="btn btn-sm btn-secondary" id="detail-dl-btn" style="background:rgba(0,229,255,0.1);border:1px solid var(--accent);color:var(--accent)"
                             onclick="${vodType === 'series'
-                                ? `showEpisodePicker(${tmdbId},'${esc(imdbId)}','${esc(title.replace(/'/g, ''))}','${year}')`
-                                : `showStreamPicker('${vodType}','${esc(imdbId)}','${esc(title.replace(/'/g, ''))}','${year}')`
+                                ? `showEpisodePicker(${tmdbId},'${esc(imdbId)}','${esc(title.replace(/'/g, ''))}','${year}','${esc(poster)}')`
+                                : `showStreamPicker('${vodType}','${esc(imdbId)}','${esc(title.replace(/'/g, ''))}','${year}','${esc(poster)}')`
                             }">
                             &#x2B07; Download${vodType === 'series' ? ' Episodes' : ''}
                         </button>
@@ -1789,59 +1842,121 @@
         return '';
     }
 
-    async function showStreamPicker(type, imdbId, title, year) {
-        const overlay = document.getElementById('detail-overlay');
-        const actionsEl = overlay.querySelector('.detail-actions');
+    // ─── Download History (localStorage) ───
+    let downloadHistory = JSON.parse(localStorage.getItem('merlot_downloads') || '[]');
+
+    function saveDownloadHistory() {
+        localStorage.setItem('merlot_downloads', JSON.stringify(downloadHistory));
+    }
+
+    function addToDownloadHistory(entry) {
+        // entry: { title, filename, quality, size, poster, date, url }
+        downloadHistory.unshift(entry);
+        if (downloadHistory.length > 50) downloadHistory = downloadHistory.slice(0, 50);
+        saveDownloadHistory();
+    }
+
+    function removeFromDownloadHistory(index) {
+        downloadHistory.splice(index, 1);
+        saveDownloadHistory();
+        renderDownloads();
+    }
+
+    function renderDownloads() {
+        const list = document.getElementById('downloads-list');
+        const empty = document.getElementById('downloads-empty');
+        const active = document.getElementById('downloads-active');
+        if (!list) return;
+
+        if (downloadHistory.length === 0 && !activeDownloadController) {
+            list.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+        empty.classList.add('hidden');
+
+        let html = '';
+        downloadHistory.forEach((d, i) => {
+            html += `<div class="dl-item">
+                ${d.poster ? `<img class="dl-item-poster" src="${esc(d.poster)}" alt="" onerror="this.style.background='var(--surface2)'">` : '<div class="dl-item-poster"></div>'}
+                <div class="dl-item-info">
+                    <div class="dl-item-title">${esc(d.title)}</div>
+                    <div class="dl-item-meta">
+                        <span class="stream-quality ${qualityClass(d.quality)}" style="display:inline-block;margin-right:6px">${d.quality || ''}</span>
+                        ${d.size ? d.size + ' · ' : ''}${d.date || ''}
+                    </div>
+                </div>
+                <div class="dl-item-actions">
+                    ${d.blobUrl ? `<button class="dl-play-btn" onclick="window.open('${d.blobUrl}','_blank')" title="Play">&#9654;</button>` : ''}
+                    <button class="dl-remove-btn" onclick="removeFromDownloadHistory(${i})" title="Remove">&#10005;</button>
+                </div>
+            </div>`;
+        });
+        list.innerHTML = html;
+    }
+
+    // ─── Stream Picker (redesigned) ───
+    async function showStreamPicker(type, imdbId, title, year, poster) {
         const dlBtn = document.getElementById('detail-dl-btn');
         if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = '<span class="spinner"></span> Finding sources...'; }
 
         try {
             const streams = await resolveStreams(type, imdbId);
             if (streams.length === 0) {
-                openModal('<h3>No Downloads Available</h3><p style="color:var(--muted);font-size:13px;margin-bottom:16px">No direct download links found for this title. Try again later or check your TorBox subscription.</p><button class="btn btn-secondary" onclick="closeModal()">Close</button>');
+                openModal(`<h3>No Downloads Available</h3>
+                    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">No direct download links found. Make sure your TorBox subscription is active.</p>
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
                 return;
             }
 
-            let html = `<h3>Download "${esc(title)}"</h3><div class="stream-list">`;
+            window._resolvedStreams = streams;
+            window._dlMeta = { title, year, poster: poster || '' };
+
+            let html = `<h3 style="margin-bottom:4px">Download</h3>
+                <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(title)}</p>
+                <div class="stream-list">`;
             streams.forEach((s, i) => {
-                html += `<div class="stream-item">
+                html += `<div class="stream-item" onclick="selectStream(this,${i})">
                     <div class="stream-info">
                         <div class="stream-title">${esc(s.title)}</div>
-                        <div class="stream-meta">${esc(s.addon)}${s.size ? ' · ' + s.size : ''}</div>
+                        <div class="stream-meta">${esc(s.addon)}</div>
                     </div>
+                    ${s.size ? `<span class="stream-size">${s.size}</span>` : ''}
                     <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
-                    <button class="btn btn-sm btn-primary" style="margin-left:8px" onclick="startDownload(${i},'${esc(title.replace(/'/g, ''))}','${year}','${s.quality}')">&#x2B07;</button>
+                    <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
                 </div>`;
             });
-            html += '</div><button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>';
-
-            window._resolvedStreams = streams;
+            html += `</div>
+                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>`;
             openModal(html);
         } catch (e) {
-            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div><button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
+            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
+                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
         } finally {
             if (dlBtn) { dlBtn.disabled = false; dlBtn.innerHTML = '&#x2B07; Download'; }
         }
     }
 
-    async function startDownload(streamIndex, title, year, quality) {
+    function selectStream(el, index) {
+        document.querySelectorAll('.stream-item').forEach(s => s.classList.remove('selected'));
+        el.classList.add('selected');
+    }
+
+    async function startDownload(streamIndex) {
         const stream = window._resolvedStreams?.[streamIndex];
         if (!stream) return;
 
+        const meta = window._dlMeta || {};
+        const filename = `${meta.title || 'video'}${meta.year ? ' (' + meta.year + ')' : ''} [${stream.quality}].mp4`;
+
         closeModal();
-        const filename = `${title}${year ? ' (' + year + ')' : ''} [${quality}].mp4`;
 
-        // Show progress in detail overlay
-        const overlay = document.getElementById('detail-overlay');
-        let progressEl = document.getElementById('dl-progress');
-        if (!progressEl) {
-            progressEl = document.createElement('div');
-            progressEl.id = 'dl-progress';
-            const body = overlay.querySelector('.detail-body');
-            if (body) body.appendChild(progressEl);
-        }
+        // Switch to Downloads view and show active progress
+        showView('downloads');
+        const activeEl = document.getElementById('downloads-active');
+        document.getElementById('downloads-empty').classList.add('hidden');
 
-        progressEl.innerHTML = `<div class="dl-progress-wrap">
+        activeEl.innerHTML = `<div class="dl-progress-wrap">
             <div class="dl-progress-header">
                 <span class="dl-progress-title">${esc(filename)}</span>
                 <span class="dl-progress-pct" id="dl-pct">0%</span>
@@ -1856,7 +1971,7 @@
 
         try {
             const resp = await fetch(stream.url, { signal: controller.signal });
-            if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
             const contentLength = parseInt(resp.headers.get('content-length') || '0');
             const reader = resp.body.getReader();
@@ -1886,7 +2001,7 @@
                 if (speedEl) speedEl.textContent = `${speed} MB/s`;
             }
 
-            // Assemble blob and trigger download
+            // Trigger browser download
             const blob = new Blob(chunks, { type: 'video/mp4' });
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1895,21 +2010,37 @@
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
 
-            progressEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
-                <div style="text-align:center;color:var(--success);font-weight:600">
-                    &#x2713; Download complete! Check your Files app.
+            // Save to download history
+            const finalSize = (received / 1048576).toFixed(1) + ' MB';
+            const now = new Date();
+            addToDownloadHistory({
+                title: meta.title || filename,
+                filename,
+                quality: stream.quality,
+                size: finalSize,
+                poster: meta.poster || '',
+                date: now.toLocaleDateString(),
+                blobUrl
+            });
+
+            activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
+                <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">
+                    &#x2713; Download complete!
                 </div>
-                <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">
-                    Open with VLC or your video player for offline viewing.
+                <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:6px">
+                    Saved to Files app. Open with VLC for offline playback.
                 </div>
             </div>`;
+            renderDownloads();
+
+            // Clean up blob URL after 5 min
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 300000);
         } catch (e) {
             if (e.name === 'AbortError') {
-                progressEl.innerHTML = `<div class="dl-progress-wrap"><div style="text-align:center;color:var(--muted)">Download cancelled</div></div>`;
+                activeEl.innerHTML = `<div class="dl-progress-wrap"><div style="text-align:center;color:var(--muted)">Download cancelled</div></div>`;
             } else {
-                progressEl.innerHTML = `<div class="dl-progress-wrap"><div class="error-msg">Download failed: ${esc(e.message)}</div></div>`;
+                activeEl.innerHTML = `<div class="dl-progress-wrap"><div class="error-msg">Download failed: ${esc(e.message)}</div></div>`;
             }
         } finally {
             activeDownloadController = null;
@@ -1923,77 +2054,139 @@
         }
     }
 
-    // ─── Episode Picker for TV Shows ───
-    async function showEpisodePicker(tmdbId, imdbId, title, year) {
-        openModal('<h3>Loading episodes...</h3><div style="text-align:center;padding:20px"><span class="spinner"></span></div>');
+    // ─── Episode Picker for TV Shows (redesigned) ───
+    async function showEpisodePicker(tmdbId, imdbId, title, year, poster) {
+        openModal(`<h3>${esc(title)}</h3><div style="text-align:center;padding:24px"><span class="spinner"></span> Loading episodes...</div>`);
 
         try {
             const show = await tmdbGet(`/tv/${tmdbId}`);
             const seasons = (show.seasons || []).filter(s => s.season_number > 0);
             if (!seasons.length) {
-                openModal('<h3>No Episodes</h3><p style="color:var(--muted)">Could not find episodes for this show.</p><button class="btn btn-secondary" onclick="closeModal()">Close</button>');
+                openModal(`<h3>No Episodes</h3><p style="color:var(--muted);margin-bottom:16px">Could not find episodes for this show.</p>
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
                 return;
             }
 
-            window._epShow = { tmdbId, imdbId, title, year };
-            renderSeasonPicker(seasons, seasons[0].season_number);
+            window._epShow = { tmdbId, imdbId, title, year, poster: poster || '', seasons };
+            renderEpisodePicker(seasons[0].season_number);
         } catch (e) {
-            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div><button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
+            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
+                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
         }
     }
 
-    async function renderSeasonPicker(seasons, activeSeason) {
-        let html = `<h3>${esc(window._epShow.title)}</h3>`;
+    function renderEpisodePicker(activeSeason) {
+        const show = window._epShow;
+        let html = `<h3 style="margin-bottom:4px">${esc(show.title)}</h3>
+            <p style="color:var(--muted);font-size:12px;margin-bottom:14px">Select an episode to download</p>`;
+
         html += '<div class="ep-season-tabs">';
-        seasons.forEach(s => {
-            html += `<div class="ep-season-tab ${s.season_number === activeSeason ? 'active' : ''}" onclick="loadSeason(${window._epShow.tmdbId},${s.season_number})">S${s.season_number}</div>`;
+        show.seasons.forEach(s => {
+            html += `<div class="ep-season-tab ${s.season_number === activeSeason ? 'active' : ''}"
+                onclick="switchSeason(${s.season_number}, this)">Season ${s.season_number}</div>`;
         });
-        html += '</div><div id="ep-list-container"><div style="text-align:center;padding:20px"><span class="spinner"></span></div></div>';
-        html += '<button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>';
+        html += '</div>';
+        html += '<div id="ep-list-container"><div style="text-align:center;padding:24px"><span class="spinner"></span></div></div>';
+        html += '<button class="btn btn-secondary" style="margin-top:14px" onclick="closeModal()">Cancel</button>';
         openModal(html);
 
-        // Load first season episodes
-        await loadSeasonEpisodes(window._epShow.tmdbId, activeSeason);
+        loadEpisodes(activeSeason);
     }
 
-    async function loadSeason(tmdbId, seasonNum) {
+    function switchSeason(num, el) {
         document.querySelectorAll('.ep-season-tab').forEach(t => t.classList.remove('active'));
-        event.target.classList.add('active');
+        el.classList.add('active');
         const container = document.getElementById('ep-list-container');
-        if (container) container.innerHTML = '<div style="text-align:center;padding:20px"><span class="spinner"></span></div>';
-        await loadSeasonEpisodes(tmdbId, seasonNum);
+        if (container) container.innerHTML = '<div style="text-align:center;padding:24px"><span class="spinner"></span></div>';
+        loadEpisodes(num);
     }
 
-    async function loadSeasonEpisodes(tmdbId, seasonNum) {
+    async function loadEpisodes(seasonNum) {
+        const show = window._epShow;
         try {
-            const season = await tmdbGet(`/tv/${tmdbId}/season/${seasonNum}`);
+            const season = await tmdbGet(`/tv/${show.tmdbId}/season/${seasonNum}`);
             const episodes = season.episodes || [];
             const container = document.getElementById('ep-list-container');
             if (!container) return;
 
+            if (episodes.length === 0) {
+                container.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">No episodes found</div>';
+                return;
+            }
+
             let html = '<div class="ep-list">';
             episodes.forEach(ep => {
                 const epTitle = ep.name || `Episode ${ep.episode_number}`;
-                html += `<div class="ep-item" onclick="downloadEpisode(${seasonNum},${ep.episode_number},'${esc(epTitle.replace(/'/g, ''))}')">
-                    <span class="ep-num">E${ep.episode_number}</span>
+                const epNum = ep.episode_number;
+                html += `<div class="ep-item" onclick="pickEpisode(${seasonNum},${epNum},this)">
+                    <span class="ep-num">E${epNum}</span>
                     <span class="ep-title">${esc(epTitle)}</span>
-                    <span style="color:var(--accent);font-size:16px">&#x2B07;</span>
+                    <div class="ep-dl-icon">&#x2B07;</div>
                 </div>`;
             });
             html += '</div>';
             container.innerHTML = html;
         } catch (e) {
             const container = document.getElementById('ep-list-container');
-            if (container) container.innerHTML = `<div class="error-msg">Failed to load episodes: ${esc(e.message)}</div>`;
+            if (container) container.innerHTML = `<div class="error-msg">Failed to load: ${esc(e.message)}</div>`;
         }
     }
 
-    async function downloadEpisode(season, episode, epTitle) {
+    async function pickEpisode(season, episode, el) {
+        // Highlight the tapped episode
+        document.querySelectorAll('.ep-item').forEach(e => { e.style.borderColor = 'transparent'; e.style.background = 'var(--surface2)'; });
+        el.style.borderColor = 'var(--accent)';
+        el.style.background = 'rgba(0,229,255,0.05)';
+
         const show = window._epShow;
         const episodeId = `${show.imdbId}:${season}:${episode}`;
+        const epTitle = el.querySelector('.ep-title')?.textContent || `Episode ${episode}`;
         const fullTitle = `${show.title} S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')} ${epTitle}`;
+
         closeModal();
-        await showStreamPicker('series', episodeId, fullTitle, show.year);
+
+        // Store poster for download history
+        window._dlMeta = { title: fullTitle, year: show.year, poster: show.poster };
+        window._resolvedStreams = null;
+
+        // Go straight to stream picker
+        const dlBtn = document.getElementById('detail-dl-btn');
+        if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = '<span class="spinner"></span> Finding sources...'; }
+
+        try {
+            const streams = await resolveStreams('series', episodeId);
+            if (streams.length === 0) {
+                openModal(`<h3>No Sources Found</h3>
+                    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">No download links for ${esc(fullTitle)}. Check your TorBox subscription.</p>
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
+                return;
+            }
+
+            window._resolvedStreams = streams;
+
+            let html = `<h3 style="margin-bottom:4px">Download</h3>
+                <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(fullTitle)}</p>
+                <div class="stream-list">`;
+            streams.forEach((s, i) => {
+                html += `<div class="stream-item" onclick="selectStream(this,${i})">
+                    <div class="stream-info">
+                        <div class="stream-title">${esc(s.title)}</div>
+                        <div class="stream-meta">${esc(s.addon)}</div>
+                    </div>
+                    ${s.size ? `<span class="stream-size">${s.size}</span>` : ''}
+                    <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
+                    <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
+                </div>`;
+            });
+            html += `</div>
+                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>`;
+            openModal(html);
+        } catch (e) {
+            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
+                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
+        } finally {
+            if (dlBtn) { dlBtn.disabled = false; dlBtn.innerHTML = '&#x2B07; Download Episodes'; }
+        }
     }
 
     // ═══════════════════════════════════════════
