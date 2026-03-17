@@ -438,7 +438,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.3</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.4</div>
             </form>
         </div>
 
@@ -1985,7 +1985,7 @@
         el.classList.add('selected');
     }
 
-    let activeDownload = null; // { controller, stream, meta }
+    let activeDownload = null; // { controller }
 
     async function startDownload(streamIndex) {
         const stream = window._resolvedStreams?.[streamIndex];
@@ -1998,7 +1998,6 @@
         closeDetail();
         showView('downloads');
 
-        // Show progress UI
         const activeEl = document.getElementById('downloads-active');
         activeEl.innerHTML = `<div class="dl-progress-wrap" id="dl-active-progress">
             <div class="dl-progress-header">
@@ -2007,7 +2006,7 @@
             </div>
             <div class="dl-progress-bar"><div class="dl-progress-fill" id="dl-fill"></div></div>
             <div class="dl-progress-sub">
-                <span id="dl-size-info">Starting download...</span>
+                <span id="dl-size-info">Connecting...</span>
                 <button class="dl-cancel" onclick="cancelDownload()">Cancel</button>
             </div>
             <div style="font-size:10px;color:var(--warn);margin-top:8px;text-align:center">
@@ -2019,8 +2018,64 @@
         activeDownload = { controller };
 
         try {
-            const resp = await fetch(stream.url, { signal: controller.signal });
-            if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+            // Step 1: Resolve the final direct URL (follow redirects, get actual file link)
+            let downloadUrl = stream.url;
+            const infoEl = () => document.getElementById('dl-size-info');
+
+            // First try a HEAD to see what we get (follow redirects)
+            try {
+                if (infoEl()) infoEl().textContent = 'Resolving download link...';
+                const headResp = await fetch(downloadUrl, {
+                    method: 'HEAD',
+                    signal: controller.signal,
+                    redirect: 'follow'
+                });
+                // Use the final redirected URL
+                if (headResp.url && headResp.url !== downloadUrl) {
+                    console.log('Redirected to:', headResp.url);
+                    downloadUrl = headResp.url;
+                }
+                // Check if response is HTML (TorBox download page) vs actual file
+                const ct = headResp.headers.get('content-type') || '';
+                if (ct.includes('text/html')) {
+                    console.warn('HEAD returned HTML, trying to extract direct link...');
+                    // TorBox returned an HTML page — try fetching the page and extracting the real URL
+                    const pageResp = await fetch(downloadUrl, { signal: controller.signal });
+                    const pageText = await pageResp.text();
+                    // Look for direct download URL in the HTML
+                    const urlMatch = pageText.match(/https?:\/\/[^"'\s]+\.(?:mp4|mkv|avi|webm)[^"'\s]*/i)
+                        || pageText.match(/"(https?:\/\/(?:relay|dl|cdn|download)[^"]+)"/i)
+                        || pageText.match(/window\.location\s*=\s*["']([^"']+)["']/i)
+                        || pageText.match(/href=["'](https?:\/\/[^"']+\.(?:mp4|mkv|avi|webm)[^"']*)["']/i);
+                    if (urlMatch) {
+                        downloadUrl = urlMatch[1] || urlMatch[0];
+                        console.log('Extracted direct URL from page:', downloadUrl);
+                    } else {
+                        throw new Error('REDIRECT_PAGE');
+                    }
+                }
+            } catch (headErr) {
+                if (headErr.name === 'AbortError') throw headErr;
+                if (headErr.message === 'REDIRECT_PAGE') throw headErr;
+                // HEAD failed (CORS likely) — try GET directly, it may still work
+                console.warn('HEAD probe failed:', headErr.message, '— trying direct GET');
+            }
+
+            // Step 2: Download the file with progress tracking
+            if (infoEl()) infoEl().textContent = 'Starting download...';
+            const resp = await fetch(downloadUrl, {
+                signal: controller.signal,
+                redirect: 'follow',
+                credentials: 'omit'
+            });
+
+            if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+
+            // Verify we got a file, not an HTML page
+            const contentType = resp.headers.get('content-type') || '';
+            if (contentType.includes('text/html')) {
+                throw new Error('REDIRECT_PAGE');
+            }
 
             const totalBytes = parseInt(resp.headers.get('content-length') || '0');
             const reader = resp.body.getReader();
@@ -2035,45 +2090,43 @@
                 chunks.push(value);
                 downloaded += value.length;
 
-                // Update progress UI
                 const pctEl = document.getElementById('dl-pct');
                 const fillEl = document.getElementById('dl-fill');
-                const infoEl = document.getElementById('dl-size-info');
-                if (!pctEl) break; // UI removed, abort
+                const sizeEl = document.getElementById('dl-size-info');
+                if (!pctEl) break;
+
+                const elapsed = (Date.now() - startTime) / 1000;
+                const speed = elapsed > 0 ? downloaded / elapsed : 0;
 
                 if (totalBytes > 0) {
                     const pct = Math.min(100, Math.round((downloaded / totalBytes) * 100));
                     pctEl.textContent = pct + '%';
                     fillEl.style.width = pct + '%';
                     const remaining = totalBytes - downloaded;
-                    const elapsed = (Date.now() - startTime) / 1000;
-                    const speed = elapsed > 0 ? downloaded / elapsed : 0;
                     const eta = speed > 0 ? Math.round(remaining / speed) : 0;
-                    const etaStr = eta > 60 ? `${Math.round(eta/60)}m ${eta%60}s` : `${eta}s`;
-                    infoEl.textContent = `${formatBytes(downloaded)} / ${formatBytes(totalBytes)} · ${formatBytes(Math.round(speed))}/s · ${etaStr} left`;
+                    const etaStr = eta >= 60 ? `${Math.floor(eta/60)}m ${eta%60}s` : `${eta}s`;
+                    sizeEl.textContent = `${formatBytes(downloaded)} / ${formatBytes(totalBytes)} · ${formatBytes(Math.round(speed))}/s · ${etaStr} left`;
                 } else {
+                    fillEl.style.width = '100%';
+                    fillEl.style.opacity = '0.4';
                     pctEl.textContent = '';
-                    fillEl.style.width = '50%';
-                    infoEl.textContent = `${formatBytes(downloaded)} downloaded...`;
+                    sizeEl.textContent = `${formatBytes(downloaded)} downloaded · ${formatBytes(Math.round(speed))}/s`;
                 }
             }
 
-            // Combine chunks into blob
-            const blob = new Blob(chunks);
+            // Combine chunks and save
+            const blob = new Blob(chunks, { type: 'video/mp4' });
             const blobUrl = URL.createObjectURL(blob);
 
-            // Trigger save via <a download>
             const a = document.createElement('a');
             a.href = blobUrl;
             a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
 
-            // Clean up blob after a delay
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-
-            // Save to download history
+            // Save to history with blob URL for replay
             addToDownloadHistory({
                 title: meta.title || filename,
                 filename,
@@ -2081,14 +2134,14 @@
                 size: totalBytes > 0 ? formatBytes(totalBytes) : formatBytes(downloaded),
                 poster: meta.poster || '',
                 date: new Date().toLocaleDateString(),
-                url: stream.url
+                url: stream.url,
+                blobUrl: blobUrl
             });
 
-            // Show success
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
                 <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:6px">
-                    ${formatBytes(downloaded)} saved. Check your Files app — open with VLC for playback.
+                    ${formatBytes(downloaded)} saved to Files app. Open with VLC for playback.
                 </div>
             </div>`;
             setTimeout(() => { activeEl.innerHTML = ''; }, 10000);
@@ -2099,16 +2152,35 @@
                 activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
                     <div style="text-align:center;color:var(--danger);font-weight:600">Download cancelled</div>
                 </div>`;
+                setTimeout(() => { activeEl.innerHTML = ''; }, 5000);
+            } else if (e.message === 'REDIRECT_PAGE') {
+                // CORS or redirect issue — TorBox returned a webpage, not a file
+                // Fall back to opening in an embedded iframe to keep user in the app
+                activeEl.innerHTML = `<div class="dl-progress-wrap">
+                    <div style="font-weight:600;margin-bottom:8px;color:var(--warn)">&#9888; Server returned a download page</div>
+                    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+                        This source requires manual download. Tap below to open the download page, then tap the download button on that page.
+                    </div>
+                    <button class="btn btn-primary" onclick="openDownloadPage('${esc(stream.url)}')">Open Download Page</button>
+                    <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">
+                        Tip: Try a different source — Torrentio links often work better for direct download.
+                    </div>
+                </div>`;
             } else {
+                // Network / CORS error
+                const isCors = e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('CORS') || e.message === 'Load failed';
                 activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
                     <div style="text-align:center;color:var(--danger);font-weight:600">Download failed</div>
                     <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">${esc(e.message)}</div>
-                    <div style="text-align:center;margin-top:10px">
-                        <button class="btn btn-sm btn-secondary" onclick="startDownload(${streamIndex})">Retry</button>
+                    ${isCors ? `<div style="font-size:11px;color:var(--warn);margin-top:6px;text-align:center">
+                        This source doesn't allow direct download from the browser.<br>Try a different source.
+                    </div>` : ''}
+                    <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center">
+                        <button class="btn btn-sm btn-primary" onclick="startDownload(${streamIndex})">Retry</button>
+                        <button class="btn btn-sm btn-secondary" onclick="openDownloadPage('${esc(stream.url)}')">Open Link</button>
                     </div>
                 </div>`;
             }
-            setTimeout(() => { if (activeEl) activeEl.innerHTML = ''; }, 8000);
         } finally {
             activeDownload = null;
         }
@@ -2118,6 +2190,18 @@
         if (activeDownload && activeDownload.controller) {
             activeDownload.controller.abort();
         }
+    }
+
+    function openDownloadPage(url) {
+        // Open in an iframe overlay to keep user in the app
+        const activeEl = document.getElementById('downloads-active');
+        activeEl.innerHTML = `<div style="position:relative;margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface2);border-radius:8px 8px 0 0">
+                <span style="font-size:13px;font-weight:600">Download Page</span>
+                <button style="background:none;border:none;color:var(--danger);font-size:20px;cursor:pointer" onclick="this.closest('div').parentElement.innerHTML=''">&#10005;</button>
+            </div>
+            <iframe src="${esc(url)}" style="width:100%;height:70vh;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;background:#fff"></iframe>
+        </div>`;
     }
 
     // ─── Episode Picker for TV Shows (redesigned) ───
