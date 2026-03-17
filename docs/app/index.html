@@ -407,7 +407,7 @@
                             <button class="btn btn-sm btn-secondary" onclick="openBackupEditor()">Edit</button>
                         </div>
                         <div class="setting-row">
-                            <div class="setting-label">TorBox API Key</div>
+                            <div><div class="setting-label">TorBox API Key</div><div class="setting-sub" id="torbox-status">Not set</div></div>
                             <button class="btn btn-sm btn-secondary" onclick="editTorboxKey()">Edit</button>
                         </div>
                     </div>
@@ -901,17 +901,32 @@
     // ═══════════════════════════════════════════
     //  Settings
     // ═══════════════════════════════════════════
+    const DEFAULT_SETTINGS = {
+        playlists: [], epgSources: [], backupSources: [], torboxKey: '',
+        bufferDurationMs: 1000, frameRateMatching: 'off', nextEpisodeAutoPlay: true,
+        nextEpisodeThresholdPercent: 95, bitrateCheckerEnabled: false,
+        subtitlesEnabled: false, subtitleLanguage: 'eng', subtitleSize: 1.0, subtitleFont: 'default',
+        weatherZipCode: '43616', weatherAlertsEnabled: true,
+        customAddons: '', disabledAddons: [], lastWatchedChannelId: '',
+        homeCategoryOrder: [], homeHiddenCategories: [],
+        vodCategoryOrder: [], vodHiddenCategories: [], categoryOrder: []
+    };
+
     async function loadSettings() {
         const loading = document.getElementById('settings-loading');
         const content = document.getElementById('settings-content');
-        loading.classList.remove('hidden');
-        content.classList.add('hidden');
 
+        // Always show settings with defaults immediately
+        settingsData = { ...DEFAULT_SETTINGS, ...settingsData };
+        renderSettings();
+        content.classList.remove('hidden');
+
+        // Then try to load cloud data on top
+        loading.classList.remove('hidden');
         try {
             const data = await fsGet(`users/${auth.uid}/settings/app`);
-            if (data) settingsData = data;
+            if (data) settingsData = { ...DEFAULT_SETTINGS, ...data };
             renderSettings();
-            content.classList.remove('hidden');
         } catch (e) {
             console.error('Settings load failed:', e);
         } finally {
@@ -921,10 +936,12 @@
 
     function renderSettings() {
         const s = settingsData;
-        // Playlists
+        // General
         document.getElementById('playlists-count').textContent = `${(s.playlists||[]).length} playlists`;
         document.getElementById('epg-count').textContent = `${(s.epgSources||[]).length} sources`;
         document.getElementById('backup-count').textContent = `${(s.backupSources||[]).length} sources`;
+        document.getElementById('torbox-status').textContent = s.torboxKey ? 'Configured' : 'Not set';
+        document.getElementById('torbox-status').style.color = s.torboxKey ? 'var(--success)' : 'var(--muted)';
 
         // Playback
         const buf = s.bufferDurationMs || 1000;
