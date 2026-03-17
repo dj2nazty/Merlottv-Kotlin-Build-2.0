@@ -438,7 +438,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.2</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.3</div>
             </form>
         </div>
 
@@ -1847,7 +1847,34 @@
             return ta - tb;
         });
 
+        // Probe actual file sizes via HEAD requests (best-effort, parallel)
+        const sizeProbes = results.map(async (r) => {
+            if (r.size) return; // already have size from metadata
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 4000);
+                const head = await fetch(r.url, { method: 'HEAD', signal: ctrl.signal });
+                clearTimeout(t);
+                const cl = head.headers.get('content-length');
+                if (cl) {
+                    const bytes = parseInt(cl);
+                    r.sizeBytes = bytes;
+                    if (bytes >= 1073741824) r.size = (bytes / 1073741824).toFixed(2) + ' GB';
+                    else if (bytes >= 1048576) r.size = (bytes / 1048576).toFixed(0) + ' MB';
+                    else r.size = (bytes / 1024).toFixed(0) + ' KB';
+                }
+            } catch (_) {}
+        });
+        await Promise.all(sizeProbes);
+
         return results;
+    }
+
+    function formatBytes(bytes) {
+        if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+        if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+        if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+        return bytes + ' B';
     }
 
     function qualityClass(q) {
@@ -1911,8 +1938,26 @@
     }
 
     // ─── Stream Picker (redesigned) ───
+    function renderStreamList(streams, title) {
+        let html = `<h3 style="margin-bottom:4px">Download</h3>
+            <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(title)}</p>
+            <div class="stream-list">`;
+        streams.forEach((s, i) => {
+            html += `<div class="stream-item" onclick="selectStream(this,${i})">
+                <div class="stream-info">
+                    <div class="stream-title">${esc(s.title)}</div>
+                    <div class="stream-meta">${esc(s.addon)}${s.size ? ' · <strong style="color:var(--text)">' + s.size + '</strong>' : ''}</div>
+                </div>
+                <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
+                <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
+            </div>`;
+        });
+        html += `</div>
+            <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>`;
+        return html;
+    }
+
     async function showStreamPicker(type, imdbId, title, year, poster) {
-        // Show loading spinner inside modal immediately (no delay on detail page)
         openModal(`<h3 style="margin-bottom:4px">Finding Sources...</h3>
             <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(title)}</p>
             <div style="text-align:center;padding:32px"><span class="spinner"></span></div>`);
@@ -1928,24 +1973,7 @@
 
             window._resolvedStreams = streams;
             window._dlMeta = { title, year, poster: poster || '' };
-
-            let html = `<h3 style="margin-bottom:4px">Download</h3>
-                <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(title)}</p>
-                <div class="stream-list">`;
-            streams.forEach((s, i) => {
-                html += `<div class="stream-item" onclick="selectStream(this,${i})">
-                    <div class="stream-info">
-                        <div class="stream-title">${esc(s.title)}</div>
-                        <div class="stream-meta">${esc(s.addon)}</div>
-                    </div>
-                    ${s.size ? `<span class="stream-size">${s.size}</span>` : ''}
-                    <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
-                    <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
-                </div>`;
-            });
-            html += `</div>
-                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>`;
-            openModal(html);
+            openModal(renderStreamList(streams, title));
         } catch (e) {
             openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
                 <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
@@ -1957,6 +1985,8 @@
         el.classList.add('selected');
     }
 
+    let activeDownload = null; // { controller, stream, meta }
+
     async function startDownload(streamIndex) {
         const stream = window._resolvedStreams?.[streamIndex];
         if (!stream) return;
@@ -1965,48 +1995,129 @@
         const filename = `${meta.title || 'video'}${meta.year ? ' (' + meta.year + ')' : ''} [${stream.quality}].mp4`;
 
         closeModal();
-
-        // Use Safari's native download manager — survives background/tab switching
-        // Create a direct link and click it so iOS handles the download natively
-        const a = document.createElement('a');
-        a.href = stream.url;
-        a.download = filename;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        // For iOS Safari: setting download attribute triggers native download manager
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        // Save to download history immediately
-        const now = new Date();
-        addToDownloadHistory({
-            title: meta.title || filename,
-            filename,
-            quality: stream.quality,
-            size: stream.size || '',
-            poster: meta.poster || '',
-            date: now.toLocaleDateString(),
-            url: stream.url
-        });
-
-        // Switch to Downloads view and show confirmation
-        showView('downloads');
         closeDetail();
+        showView('downloads');
+
+        // Show progress UI
         const activeEl = document.getElementById('downloads-active');
-        if (activeEl) {
+        activeEl.innerHTML = `<div class="dl-progress-wrap" id="dl-active-progress">
+            <div class="dl-progress-header">
+                <span class="dl-progress-title">${esc(meta.title || filename)}</span>
+                <span class="dl-progress-pct" id="dl-pct">0%</span>
+            </div>
+            <div class="dl-progress-bar"><div class="dl-progress-fill" id="dl-fill"></div></div>
+            <div class="dl-progress-sub">
+                <span id="dl-size-info">Starting download...</span>
+                <button class="dl-cancel" onclick="cancelDownload()">Cancel</button>
+            </div>
+            <div style="font-size:10px;color:var(--warn);margin-top:8px;text-align:center">
+                &#9888; Keep this page open &amp; screen on until complete
+            </div>
+        </div>`;
+
+        const controller = new AbortController();
+        activeDownload = { controller };
+
+        try {
+            const resp = await fetch(stream.url, { signal: controller.signal });
+            if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+
+            const totalBytes = parseInt(resp.headers.get('content-length') || '0');
+            const reader = resp.body.getReader();
+            const chunks = [];
+            let downloaded = 0;
+            const startTime = Date.now();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                chunks.push(value);
+                downloaded += value.length;
+
+                // Update progress UI
+                const pctEl = document.getElementById('dl-pct');
+                const fillEl = document.getElementById('dl-fill');
+                const infoEl = document.getElementById('dl-size-info');
+                if (!pctEl) break; // UI removed, abort
+
+                if (totalBytes > 0) {
+                    const pct = Math.min(100, Math.round((downloaded / totalBytes) * 100));
+                    pctEl.textContent = pct + '%';
+                    fillEl.style.width = pct + '%';
+                    const remaining = totalBytes - downloaded;
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = elapsed > 0 ? downloaded / elapsed : 0;
+                    const eta = speed > 0 ? Math.round(remaining / speed) : 0;
+                    const etaStr = eta > 60 ? `${Math.round(eta/60)}m ${eta%60}s` : `${eta}s`;
+                    infoEl.textContent = `${formatBytes(downloaded)} / ${formatBytes(totalBytes)} · ${formatBytes(Math.round(speed))}/s · ${etaStr} left`;
+                } else {
+                    pctEl.textContent = '';
+                    fillEl.style.width = '50%';
+                    infoEl.textContent = `${formatBytes(downloaded)} downloaded...`;
+                }
+            }
+
+            // Combine chunks into blob
+            const blob = new Blob(chunks);
+            const blobUrl = URL.createObjectURL(blob);
+
+            // Trigger save via <a download>
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // Clean up blob after a delay
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+
+            // Save to download history
+            addToDownloadHistory({
+                title: meta.title || filename,
+                filename,
+                quality: stream.quality,
+                size: totalBytes > 0 ? formatBytes(totalBytes) : formatBytes(downloaded),
+                poster: meta.poster || '',
+                date: new Date().toLocaleDateString(),
+                url: stream.url
+            });
+
+            // Show success
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
-                <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">
-                    &#x2713; Download started!
-                </div>
+                <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:6px">
-                    Check Safari's download manager (&#8593; arrow in address bar).<br>
-                    File saves to Files app — open with VLC for offline playback.
+                    ${formatBytes(downloaded)} saved. Check your Files app — open with VLC for playback.
                 </div>
             </div>`;
+            setTimeout(() => { activeEl.innerHTML = ''; }, 10000);
+            renderDownloads();
+
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
+                    <div style="text-align:center;color:var(--danger);font-weight:600">Download cancelled</div>
+                </div>`;
+            } else {
+                activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
+                    <div style="text-align:center;color:var(--danger);font-weight:600">Download failed</div>
+                    <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">${esc(e.message)}</div>
+                    <div style="text-align:center;margin-top:10px">
+                        <button class="btn btn-sm btn-secondary" onclick="startDownload(${streamIndex})">Retry</button>
+                    </div>
+                </div>`;
+            }
             setTimeout(() => { if (activeEl) activeEl.innerHTML = ''; }, 8000);
+        } finally {
+            activeDownload = null;
         }
-        renderDownloads();
+    }
+
+    function cancelDownload() {
+        if (activeDownload && activeDownload.controller) {
+            activeDownload.controller.abort();
+        }
     }
 
     // ─── Episode Picker for TV Shows (redesigned) ───
@@ -2117,24 +2228,7 @@
             }
 
             window._resolvedStreams = streams;
-
-            let html = `<h3 style="margin-bottom:4px">Download</h3>
-                <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(fullTitle)}</p>
-                <div class="stream-list">`;
-            streams.forEach((s, i) => {
-                html += `<div class="stream-item" onclick="selectStream(this,${i})">
-                    <div class="stream-info">
-                        <div class="stream-title">${esc(s.title)}</div>
-                        <div class="stream-meta">${esc(s.addon)}</div>
-                    </div>
-                    ${s.size ? `<span class="stream-size">${s.size}</span>` : ''}
-                    <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
-                    <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
-                </div>`;
-            });
-            html += `</div>
-                <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>`;
-            openModal(html);
+            openModal(renderStreamList(streams, fullTitle));
         } catch (e) {
             openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
                 <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
