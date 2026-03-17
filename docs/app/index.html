@@ -459,7 +459,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.9</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.0</div>
             </form>
         </div>
 
@@ -1937,6 +1937,68 @@
         return '';
     }
 
+    // ─── IndexedDB for persistent video blob storage ───
+    const IDB_NAME = 'merlottv_downloads';
+    const IDB_STORE = 'videos';
+    const IDB_VERSION = 1;
+
+    function openIDB() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(IDB_STORE)) {
+                    db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    async function saveVideoBlob(id, blob, filename) {
+        try {
+            const db = await openIDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).put({ id, blob, filename, savedAt: Date.now() });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => { db.close(); reject(tx.error); };
+            });
+        } catch (e) {
+            console.error('Failed to save video to IndexedDB:', e);
+        }
+    }
+
+    async function getVideoBlob(id) {
+        try {
+            const db = await openIDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readonly');
+                const req = tx.objectStore(IDB_STORE).get(id);
+                req.onsuccess = () => { db.close(); resolve(req.result || null); };
+                req.onerror = () => { db.close(); resolve(null); };
+            });
+        } catch (e) {
+            console.error('Failed to read video from IndexedDB:', e);
+            return null;
+        }
+    }
+
+    async function deleteVideoBlob(id) {
+        try {
+            const db = await openIDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).delete(id);
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => { db.close(); resolve(); };
+            });
+        } catch (e) {
+            console.error('Failed to delete video from IndexedDB:', e);
+        }
+    }
+
     // ─── Download History (localStorage) ───
     let downloadHistory = JSON.parse(localStorage.getItem('merlot_downloads') || '[]');
 
@@ -1972,6 +2034,11 @@
     }
 
     function removeFromDownloadHistory(index) {
+        const d = downloadHistory[index];
+        // Also remove the video blob from IndexedDB
+        if (d && d.idbKey) {
+            deleteVideoBlob(d.idbKey).catch(() => {});
+        }
         downloadHistory.splice(index, 1);
         saveDownloadHistory();
         renderDownloads();
@@ -2020,10 +2087,12 @@
             const isBusy = d.status === 'downloading';
             const isFail = d.status === 'failed' || d.status === 'interrupted';
             const isDone = d.status === 'complete';
+            const hasLocal = d.savedLocally && d.idbKey;
             const statusColor = isFail ? 'var(--danger)' : isBusy ? 'var(--warn)' : 'var(--success)';
             const statusLabel = d.status === 'interrupted' ? '&#9888; Interrupted'
                 : isFail ? '&#10005; Failed'
                 : isBusy ? '&#8987; Downloading...'
+                : hasLocal ? '&#x2713; Saved Offline'
                 : '&#x2713; Ready';
             html += `<div class="dl-item" style="border-left:3px solid ${statusColor}">
                 ${d.poster ? `<img class="dl-item-poster" src="${esc(d.poster)}" alt="" onerror="this.style.background='var(--surface2)'">` : '<div class="dl-item-poster"></div>'}
@@ -2035,8 +2104,10 @@
                         <span style="color:${statusColor}">${statusLabel}</span>
                     </div>
                     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-                        <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="openInVLCByIndex(${i})">&#9654; Play in VLC</button>
+                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playOffline(${i})">&#9654; Play Offline</button>` : ''}
+                        <button style="padding:5px 12px;border-radius:6px;border:none;background:${hasLocal ? 'var(--surface2)' : 'var(--accent)'};color:${hasLocal ? 'var(--text)' : '#000'};font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${hasLocal ? 'var(--border)' : 'var(--accent)'}" onclick="openInVLCByIndex(${i})">&#9654; Play in VLC</button>
                         <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="addToVLCPlaylist(${i})">+ Add to Playlist</button>
+                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveToFiles(${i})">Save to Files</button>` : ''}
                         ${isFail ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--warn);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="retryDownload(${i})">Retry</button>` : ''}
                     </div>
                 </div>
@@ -2222,31 +2293,61 @@
                 }
             }
 
-            // Done — create blob and store
+            // Done — create blob and store PERSISTENTLY
             // CRITICAL: Set completedAt FIRST as a safety net before anything else
-            // This ensures page-load recovery knows this download finished even if
-            // the status update doesn't persist (Safari may kill the page)
             updateDownloadHistory(dlIndex, { completedAt: Date.now() });
 
             const blob = new Blob(chunks, { type: 'video/mp4' });
-            const blobUrl = URL.createObjectURL(blob);
-            if (!window._dlBlobs) window._dlBlobs = {};
-            const blobId = 'dl_' + Date.now();
-            window._dlBlobs[blobId] = blobUrl;
+            const idbKey = 'vid_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
 
-            // Update the history entry to complete
+            // 1. Save to IndexedDB for persistent offline playback
+            const pctEl2 = document.getElementById('dl-pct');
+            const sizeEl2 = document.getElementById('dl-size-info');
+            if (pctEl2) pctEl2.textContent = '100%';
+            if (sizeEl2) sizeEl2.textContent = 'Saving to device...';
+
+            try {
+                await saveVideoBlob(idbKey, blob, filename);
+                console.log('Video saved to IndexedDB:', idbKey, formatBytes(blob.size));
+            } catch (e) {
+                console.error('IndexedDB save failed:', e);
+            }
+
+            // 2. Also keep in-memory blob URL for immediate playback
+            if (!window._dlBlobs) window._dlBlobs = {};
+            const blobId = idbKey;
+            window._dlBlobs[blobId] = URL.createObjectURL(blob);
+
+            // 3. Auto-save to Files app (triggers download dialog on Safari)
+            try {
+                const a = document.createElement('a');
+                a.href = window._dlBlobs[blobId];
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => document.body.removeChild(a), 200);
+            } catch (e) {
+                console.warn('Auto-save to Files failed:', e);
+            }
+
+            // Update the history entry to complete with IDB key
             updateDownloadHistory(dlIndex, {
                 status: 'complete',
                 completedAt: Date.now(),
                 size: totalBytes > 0 ? formatBytes(totalBytes) : formatBytes(downloaded),
-                blobId: blobId
+                blobId: blobId,
+                idbKey: idbKey,
+                savedLocally: true
             });
             renderDownloads();
 
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
                 <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:8px">
-                    ${formatBytes(downloaded)} ready. Use Play or VLC buttons below.
+                    ${formatBytes(downloaded)} saved to device. Works offline!
+                </div>
+                <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:4px">
+                    File also saved to Files app — open with VLC for offline playback.
                 </div>
             </div>`;
 
@@ -2428,20 +2529,31 @@
         }
     }
 
-    // ─── In-App Video Player ───
-    let currentPlayerUrl = ''; // the stream URL for VLC
+    // ─── In-App Video Player + Offline Playback ───
+    let currentPlayerUrl = '';
 
-    function getBlobUrl(d) {
-        // Check in-memory blob map first
+    // Get a playable blob URL — first check in-memory, then try IndexedDB
+    async function getPlayableUrl(d) {
+        // 1. In-memory blob (current session downloads)
         if (d.blobId && window._dlBlobs && window._dlBlobs[d.blobId]) {
             return window._dlBlobs[d.blobId];
         }
-        // Legacy: direct blobUrl field
-        if (d.blobUrl) return d.blobUrl;
-        return null;
+        // 2. IndexedDB (persisted across sessions — works offline!)
+        if (d.idbKey) {
+            const record = await getVideoBlob(d.idbKey);
+            if (record && record.blob) {
+                const url = URL.createObjectURL(record.blob);
+                // Cache in memory for subsequent plays
+                if (!window._dlBlobs) window._dlBlobs = {};
+                window._dlBlobs[d.idbKey] = url;
+                return url;
+            }
+        }
+        // 3. Fall back to stream URL (needs internet)
+        return d.url || null;
     }
 
-    function playInApp(index) {
+    async function playOffline(index) {
         const d = downloadHistory[index];
         if (!d) return;
 
@@ -2449,13 +2561,13 @@
         const videoEl = document.getElementById('vp-video');
         const titleEl = document.getElementById('vp-title');
 
-        currentPlayerUrl = d.url || '';
         titleEl.textContent = d.title || 'Video';
+        currentPlayerUrl = d.url || '';
 
-        // Use blob URL if available (downloaded in this session), otherwise stream URL
-        const playUrl = getBlobUrl(d) || d.url;
+        // Try to get the local blob first (works offline)
+        const playUrl = await getPlayableUrl(d);
         if (!playUrl) {
-            alert('No playback URL available. Try re-downloading.');
+            alert('Video not available. Try re-downloading while connected to WiFi.');
             return;
         }
 
@@ -2472,18 +2584,22 @@
         }
     }
 
-    function saveBlobToFiles(blobId, filename) {
-        const blobUrl = window._dlBlobs?.[blobId];
+    async function saveToFiles(index) {
+        const d = downloadHistory[index];
+        if (!d) return;
+
+        const blobUrl = await getPlayableUrl(d);
         if (!blobUrl) {
-            alert('File no longer in memory. Play it directly using the Play button or re-download.');
+            alert('Video not available in storage. Try re-downloading.');
             return;
         }
+
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = filename;
+        a.download = d.filename || `${d.title || 'video'}.mp4`;
         document.body.appendChild(a);
         a.click();
-        setTimeout(() => document.body.removeChild(a), 100);
+        setTimeout(() => document.body.removeChild(a), 200);
     }
 
     function closePlayer() {
@@ -2496,7 +2612,6 @@
     }
 
     function openInVLC() {
-        // vlc-x-callback URL scheme to open a stream in VLC on iOS
         if (!currentPlayerUrl) return;
         const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(currentPlayerUrl)}`;
         window.location.href = vlcUrl;
@@ -2505,7 +2620,8 @@
     function openInVLCByIndex(index) {
         const d = downloadHistory[index];
         if (!d || !d.url) return;
-        // Open and play immediately in VLC
+        // VLC needs a real HTTP URL (can't use blob://) — pass the stream URL
+        // For true offline VLC playback, user should open the saved file from Files app
         const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(d.url)}`;
         window.location.href = vlcUrl;
     }
@@ -2513,17 +2629,14 @@
     function addToVLCPlaylist(index) {
         const d = downloadHistory[index];
         if (!d || !d.url) return;
-        // Store in our "MerlotTV" playlist in localStorage
         let playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
-        // Avoid duplicates
         if (!playlist.some(item => item.url === d.url)) {
             playlist.push({ title: d.title || 'Video', url: d.url, quality: d.quality || '', poster: d.poster || '', addedAt: Date.now() });
             localStorage.setItem('merlot_vlc_playlist', JSON.stringify(playlist));
         }
-        // Show brief confirmation
         const btn = event.target;
         const orig = btn.textContent;
-        btn.textContent = '✓ Added!';
+        btn.textContent = '\u2713 Added!';
         btn.style.color = 'var(--success)';
         btn.style.borderColor = 'var(--success)';
         setTimeout(() => { btn.textContent = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1500);
@@ -2532,9 +2645,6 @@
     function playVLCPlaylist() {
         const playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
         if (!playlist.length) { alert('Playlist is empty. Add items first.'); return; }
-        // Play the first item, then VLC will queue subsequent ones
-        // Unfortunately VLC iOS doesn't support multi-URL queueing via URL scheme,
-        // so we open them one at a time — play the first one
         const first = playlist[0];
         const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(first.url)}`;
         window.location.href = vlcUrl;
