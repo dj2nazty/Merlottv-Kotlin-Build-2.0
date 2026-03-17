@@ -227,6 +227,85 @@
         .profile-selector select { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; }
         .profile-selector select option { background: var(--surface); color: var(--text); }
 
+        /* ─── Browse ─── */
+        .browse-search {
+            position: sticky; top: 49px; z-index: 9; background: var(--bg);
+            padding: 12px 0 8px; display: flex; gap: 8px;
+        }
+        .browse-search input {
+            flex: 1; padding: 10px 14px; background: #111118; border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text); font-size: 15px; outline: none;
+        }
+        .browse-search input:focus { border-color: var(--accent); }
+        .browse-search .clear-btn {
+            background: none; border: none; color: var(--muted); font-size: 20px;
+            cursor: pointer; padding: 0 8px; display: none;
+        }
+        .browse-search .clear-btn.show { display: block; }
+
+        .cat-chips {
+            display: flex; gap: 8px; overflow-x: auto; padding-bottom: 12px;
+            scrollbar-width: none; -ms-overflow-style: none;
+        }
+        .cat-chips::-webkit-scrollbar { display: none; }
+        .cat-chip {
+            padding: 7px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+            background: var(--surface); border: 1px solid var(--border); cursor: pointer;
+            white-space: nowrap; color: var(--text); flex-shrink: 0;
+        }
+        .cat-chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+        .browse-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        @media (max-width: 380px) { .browse-grid { grid-template-columns: repeat(2, 1fr); } }
+        .browse-card {
+            background: var(--surface); border-radius: 8px; overflow: hidden;
+            border: 1px solid var(--border); cursor: pointer; position: relative;
+        }
+        .browse-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: var(--surface2); }
+        .browse-card .bc-info { padding: 8px; }
+        .browse-card .bc-title { font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .browse-card .bc-meta { font-size: 10px; color: var(--muted); margin-top: 2px; display: flex; gap: 4px; align-items: center; }
+        .browse-card .bc-badge {
+            font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+            background: rgba(0,229,255,0.15); color: var(--accent);
+        }
+        .browse-card .bc-rating { color: var(--warn); }
+        .browse-more { text-align: center; padding: 16px; }
+        .browse-empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+
+        /* ─── Detail Modal (full screen on mobile) ─── */
+        .detail-overlay {
+            position: fixed; inset: 0; background: var(--bg); z-index: 300;
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
+        }
+        .detail-backdrop { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: var(--surface2); }
+        .detail-back {
+            position: absolute; top: 12px; left: 12px; z-index: 10;
+            background: rgba(0,0,0,0.6); border: none; color: #fff; font-size: 24px;
+            width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .detail-body { padding: 16px; margin-top: -40px; position: relative; }
+        .detail-header { display: flex; gap: 14px; margin-bottom: 16px; }
+        .detail-poster { width: 100px; border-radius: 8px; flex-shrink: 0; aspect-ratio: 2/3; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .detail-info { flex: 1; min-width: 0; }
+        .detail-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+        .detail-meta { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .detail-meta .rating { color: var(--warn); font-weight: 600; }
+        .detail-genres { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .detail-genres span { font-size: 11px; padding: 3px 10px; border-radius: 12px; background: var(--surface2); color: var(--muted); }
+        .detail-overview { font-size: 14px; line-height: 1.6; color: var(--muted); margin-bottom: 16px; }
+        .detail-actions { display: flex; gap: 10px; margin-bottom: 20px; }
+        .detail-actions .btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .detail-actions .btn.fav-active { background: rgba(255,71,87,0.2); color: var(--danger); border: 1px solid var(--danger); }
+        .detail-cast-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+        .detail-cast { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
+        .detail-cast::-webkit-scrollbar { display: none; }
+        .cast-card { text-align: center; flex-shrink: 0; width: 70px; }
+        .cast-card img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; background: var(--surface2); display: block; margin: 0 auto 4px; }
+        .cast-card .cast-name { font-size: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cast-card .cast-char { font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
         /* ─── Modal ─── */
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200;
@@ -432,6 +511,18 @@
             <div id="fav-content"></div>
         </div>
 
+        <!-- ─── Browse ─── -->
+        <div id="view-browse" class="view">
+            <div class="browse-search">
+                <input type="search" id="browse-input" placeholder="Search movies & TV shows..." autocomplete="off">
+                <button class="clear-btn" id="browse-clear" onclick="clearBrowseSearch()">&times;</button>
+            </div>
+            <div class="cat-chips" id="browse-cats"></div>
+            <div id="browse-loading" class="loading-full hidden"><span class="spinner"></span> Loading...</div>
+            <div class="browse-grid" id="browse-grid"></div>
+            <div class="browse-more" id="browse-more"></div>
+        </div>
+
         <!-- ─── Profiles ─── -->
         <div id="view-profiles" class="view">
             <h2 style="margin-bottom:16px">Profiles</h2>
@@ -445,6 +536,9 @@
             <button class="nav-item active" onclick="showView('dashboard')" data-view="dashboard">
                 <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home
             </button>
+            <button class="nav-item" onclick="showView('browse')" data-view="browse">
+                <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Browse
+            </button>
             <button class="nav-item" onclick="showView('favorites')" data-view="favorites">
                 <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Favs
             </button>
@@ -456,6 +550,9 @@
             </button>
         </div>
     </div>
+
+    <!-- ─── TMDB Detail Overlay ─── -->
+    <div id="detail-overlay" class="detail-overlay hidden"></div>
 
     <!-- ─── Modal Container ─── -->
     <div id="modal" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
@@ -688,6 +785,7 @@
         if (name === 'settings') loadSettings();
         if (name === 'favorites') { populateProfileSelector(); loadFavorites(); }
         if (name === 'profiles') loadProfiles();
+        if (name === 'browse' && !browseInitialized) initBrowse();
     }
 
     // ═══════════════════════════════════════════
@@ -1108,6 +1206,360 @@
             renderProfiles();
             updateDashStats();
         } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    // ═══════════════════════════════════════════
+    //  TMDB Browse & Search
+    // ═══════════════════════════════════════════
+    const TMDB_KEY = '5f35ed9740b3aca008e2b9349f5f6393';
+    const TMDB = 'https://api.themoviedb.org/3';
+    const IMG = 'https://image.tmdb.org/t/p';
+
+    let browseInitialized = false;
+    let browseCategory = 'trending';
+    let browsePage = 1;
+    let browseTotalPages = 1;
+    let browseQuery = '';
+    let browseDebounce = null;
+
+    const BROWSE_CATS = [
+        { id: 'trending', label: 'Trending' },
+        { id: 'movie_popular', label: 'Popular Movies' },
+        { id: 'tv_popular', label: 'Popular TV' },
+        { id: 'movie_top_rated', label: 'Top Rated Movies' },
+        { id: 'tv_top_rated', label: 'Top Rated TV' },
+        { id: 'movie_upcoming', label: 'Upcoming' },
+        { id: 'movie_now_playing', label: 'Now Playing' },
+    ];
+
+    async function tmdbGet(endpoint) {
+        const sep = endpoint.includes('?') ? '&' : '?';
+        const resp = await fetch(`${TMDB}${endpoint}${sep}api_key=${TMDB_KEY}`);
+        if (!resp.ok) throw new Error(`TMDB ${resp.status}`);
+        return resp.json();
+    }
+
+    function tmdbEndpoint(cat, page) {
+        switch (cat) {
+            case 'trending': return `/trending/all/week?page=${page}`;
+            case 'movie_popular': return `/movie/popular?page=${page}`;
+            case 'tv_popular': return `/tv/popular?page=${page}`;
+            case 'movie_top_rated': return `/movie/top_rated?page=${page}`;
+            case 'tv_top_rated': return `/tv/top_rated?page=${page}`;
+            case 'movie_upcoming': return `/movie/upcoming?page=${page}`;
+            case 'movie_now_playing': return `/movie/now_playing?page=${page}`;
+            default: return `/trending/all/week?page=${page}`;
+        }
+    }
+
+    function initBrowse() {
+        browseInitialized = true;
+        const catsEl = document.getElementById('browse-cats');
+        catsEl.innerHTML = BROWSE_CATS.map(c =>
+            `<div class="cat-chip${c.id === browseCategory ? ' active' : ''}" onclick="selectBrowseCat('${c.id}')">${c.label}</div>`
+        ).join('');
+
+        const input = document.getElementById('browse-input');
+        input.addEventListener('input', () => {
+            const val = input.value.trim();
+            document.getElementById('browse-clear').classList.toggle('show', val.length > 0);
+            clearTimeout(browseDebounce);
+            browseDebounce = setTimeout(() => {
+                if (val.length >= 2) {
+                    browseQuery = val;
+                    browsePage = 1;
+                    loadBrowseResults(true);
+                } else if (val.length === 0 && browseQuery) {
+                    browseQuery = '';
+                    browsePage = 1;
+                    loadBrowseResults(true);
+                }
+            }, 500);
+        });
+
+        loadBrowseResults(true);
+    }
+
+    function clearBrowseSearch() {
+        const input = document.getElementById('browse-input');
+        input.value = '';
+        document.getElementById('browse-clear').classList.remove('show');
+        browseQuery = '';
+        browsePage = 1;
+        loadBrowseResults(true);
+    }
+
+    function selectBrowseCat(catId) {
+        browseCategory = catId;
+        browseQuery = '';
+        browsePage = 1;
+        document.getElementById('browse-input').value = '';
+        document.getElementById('browse-clear').classList.remove('show');
+        document.querySelectorAll('.cat-chip').forEach(el => el.classList.remove('active'));
+        event.target.classList.add('active');
+        loadBrowseResults(true);
+    }
+
+    async function loadBrowseResults(reset) {
+        const grid = document.getElementById('browse-grid');
+        const loading = document.getElementById('browse-loading');
+        const more = document.getElementById('browse-more');
+
+        if (reset) { grid.innerHTML = ''; more.innerHTML = ''; }
+        loading.classList.remove('hidden');
+
+        try {
+            let data;
+            if (browseQuery) {
+                data = await tmdbGet(`/search/multi?query=${encodeURIComponent(browseQuery)}&page=${browsePage}`);
+                data.results = data.results.filter(r => r.media_type === 'movie' || r.media_type === 'tv');
+            } else {
+                data = await tmdbGet(tmdbEndpoint(browseCategory, browsePage));
+            }
+
+            browseTotalPages = Math.min(data.total_pages || 1, 20);
+
+            data.results.forEach(item => {
+                const type = item.media_type || (item.first_air_date ? 'tv' : 'movie');
+                const title = item.title || item.name || 'Unknown';
+                const year = (item.release_date || item.first_air_date || '').slice(0, 4);
+                const rating = item.vote_average ? item.vote_average.toFixed(1) : '';
+                const poster = item.poster_path ? `${IMG}/w342${item.poster_path}` : '';
+
+                const card = document.createElement('div');
+                card.className = 'browse-card';
+                card.onclick = () => openDetail(item.id, type);
+                card.innerHTML = `
+                    ${poster ? `<img src="${poster}" alt="" loading="lazy">` : `<div style="aspect-ratio:2/3;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">No Poster</div>`}
+                    <div class="bc-info">
+                        <div class="bc-title">${esc(title)}</div>
+                        <div class="bc-meta">
+                            <span class="bc-badge">${type === 'tv' ? 'TV' : 'Movie'}</span>
+                            ${year ? `<span>${year}</span>` : ''}
+                            ${rating ? `<span class="bc-rating">★ ${rating}</span>` : ''}
+                        </div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+
+            if (browsePage < browseTotalPages) {
+                more.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="loadMoreBrowse()">Load More</button>`;
+            } else {
+                more.innerHTML = data.results.length === 0 && reset
+                    ? '<div class="browse-empty">No results found</div>'
+                    : '';
+            }
+        } catch (e) {
+            if (reset) grid.innerHTML = `<div class="browse-empty">Error loading: ${esc(e.message)}</div>`;
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    function loadMoreBrowse() {
+        browsePage++;
+        loadBrowseResults(false);
+    }
+
+    // ═══════════════════════════════════════════
+    //  TMDB Detail View
+    // ═══════════════════════════════════════════
+    async function openDetail(tmdbId, type) {
+        const overlay = document.getElementById('detail-overlay');
+        overlay.classList.remove('hidden');
+        overlay.innerHTML = '<div class="loading-full" style="min-height:100vh"><span class="spinner"></span> Loading...</div>';
+
+        try {
+            const d = await tmdbGet(`/${type}/${tmdbId}?append_to_response=credits,external_ids`);
+            const title = d.title || d.name || 'Unknown';
+            const year = (d.release_date || d.first_air_date || '').slice(0, 4);
+            const rating = d.vote_average ? d.vote_average.toFixed(1) : '';
+            const runtime = type === 'movie' ? (d.runtime ? `${d.runtime} min` : '') : (d.number_of_seasons ? `${d.number_of_seasons} season${d.number_of_seasons > 1 ? 's' : ''}` : '');
+            const genres = (d.genres || []).map(g => g.name);
+            const overview = d.overview || '';
+            const backdrop = d.backdrop_path ? `${IMG}/w780${d.backdrop_path}` : '';
+            const poster = d.poster_path ? `${IMG}/w342${d.poster_path}` : '';
+            const imdbId = d.external_ids?.imdb_id || `tmdb:${tmdbId}`;
+            const cast = (d.credits?.cast || []).slice(0, 20);
+            const vodType = type === 'tv' ? 'series' : 'movie';
+
+            // Check if already in favorites
+            const profileId = getActiveProfileId();
+            let isFav = false;
+            try {
+                const favDoc = await fsGet(`users/${auth.uid}/favorites/${profileId}`);
+                if (favDoc && favDoc.vod && Array.isArray(favDoc.vod)) {
+                    isFav = favDoc.vod.includes(imdbId);
+                }
+            } catch (_) {}
+
+            // Get custom lists
+            let customLists = {};
+            try {
+                const favDoc = await fsGet(`users/${auth.uid}/favorites/${profileId}`);
+                if (favDoc && favDoc.customLists) customLists = favDoc.customLists;
+            } catch (_) {}
+            const listNames = Object.keys(customLists);
+
+            overlay.innerHTML = `
+                <div style="position:relative">
+                    ${backdrop ? `<img class="detail-backdrop" src="${backdrop}" alt="">` : `<div style="aspect-ratio:16/9;background:var(--surface2)"></div>`}
+                    <button class="detail-back" onclick="closeDetail()">&#8592;</button>
+                    <div style="position:absolute;bottom:0;left:0;right:0;height:80px;background:linear-gradient(transparent,var(--bg))"></div>
+                </div>
+                <div class="detail-body">
+                    <div class="detail-header">
+                        ${poster ? `<img class="detail-poster" src="${poster}" alt="">` : ''}
+                        <div class="detail-info">
+                            <div class="detail-title">${esc(title)}</div>
+                            <div class="detail-meta">
+                                ${rating ? `<span class="rating">★ ${rating}</span>` : ''}
+                                ${year ? `<span>${year}</span>` : ''}
+                                ${runtime ? `<span>${runtime}</span>` : ''}
+                                <span>${type === 'tv' ? 'TV Show' : 'Movie'}</span>
+                            </div>
+                            <div class="detail-genres">
+                                ${genres.map(g => `<span>${esc(g)}</span>`).join('')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-actions">
+                        <button class="btn btn-sm ${isFav ? 'fav-active' : 'btn-primary'}" id="detail-fav-btn"
+                            onclick="toggleDetailFav('${esc(imdbId)}','${esc(title.replace(/'/g, "\\'"))}','${esc(poster)}','${vodType}','${rating}',\`${esc(overview.replace(/`/g, ''))}\`)">
+                            ${isFav ? '♥ In Favorites' : '♡ Add to Favorites'}
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="openListPicker('${esc(imdbId)}')">
+                            + Add to List
+                        </button>
+                    </div>
+
+                    ${overview ? `<div class="detail-overview">${esc(overview)}</div>` : ''}
+
+                    ${cast.length > 0 ? `
+                        <div class="detail-cast-title">Cast</div>
+                        <div class="detail-cast">
+                            ${cast.map(c => `
+                                <div class="cast-card">
+                                    <img src="${c.profile_path ? `${IMG}/w185${c.profile_path}` : ''}" alt="" onerror="this.style.background='var(--surface2)'">
+                                    <div class="cast-name">${esc(c.name)}</div>
+                                    <div class="cast-char">${esc(c.character)}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            // Store detail data for favorites
+            overlay.dataset.tmdbId = tmdbId;
+            overlay.dataset.imdbId = imdbId;
+            overlay.dataset.type = vodType;
+
+        } catch (e) {
+            overlay.innerHTML = `<div style="padding:20px;text-align:center"><p>Error loading details</p><button class="btn btn-sm btn-secondary" onclick="closeDetail()">Back</button></div>`;
+        }
+    }
+
+    function closeDetail() {
+        document.getElementById('detail-overlay').classList.add('hidden');
+    }
+
+    function getActiveProfileId() {
+        return profilesData.activeProfileId || 'default';
+    }
+
+    async function toggleDetailFav(imdbId, title, poster, vodType, rating, description) {
+        const btn = document.getElementById('detail-fav-btn');
+        const profileId = getActiveProfileId();
+        btn.disabled = true;
+
+        try {
+            let favDoc = await fsGet(`users/${auth.uid}/favorites/${profileId}`) || {};
+            let vod = Array.isArray(favDoc.vod) ? [...favDoc.vod] : [];
+            let vodMeta = (favDoc.vodMeta && typeof favDoc.vodMeta === 'object') ? { ...favDoc.vodMeta } : {};
+
+            const idx = vod.indexOf(imdbId);
+            if (idx >= 0) {
+                // Remove
+                vod.splice(idx, 1);
+                delete vodMeta[imdbId];
+                btn.className = 'btn btn-sm btn-primary';
+                btn.innerHTML = '♡ Add to Favorites';
+            } else {
+                // Add
+                vod.push(imdbId);
+                vodMeta[imdbId] = { name: title, poster: poster, type: vodType, imdbRating: rating, description: description };
+                btn.className = 'btn btn-sm fav-active';
+                btn.innerHTML = '♥ In Favorites';
+            }
+
+            await fsSet(`users/${auth.uid}/favorites/${profileId}`, { ...favDoc, vod, vodMeta });
+        } catch (e) {
+            alert('Error saving: ' + e.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function openListPicker(imdbId) {
+        const profileId = getActiveProfileId();
+        let favDoc;
+        try {
+            favDoc = await fsGet(`users/${auth.uid}/favorites/${profileId}`) || {};
+        } catch (_) { favDoc = {}; }
+
+        const customLists = (favDoc.customLists && typeof favDoc.customLists === 'object') ? favDoc.customLists : {};
+        const listNames = Object.keys(customLists);
+
+        let html = `<h3>Add to List</h3>`;
+        if (listNames.length > 0) {
+            html += listNames.map(name => {
+                const inList = (customLists[name] || []).includes(imdbId);
+                return `<div class="list-item" style="cursor:pointer" onclick="addToList('${esc(imdbId)}','${esc(name.replace(/'/g, "\\'"))}')">
+                    <span class="name">${esc(name)}</span>
+                    <span style="color:${inList ? 'var(--success)' : 'var(--muted)'};font-size:12px">${inList ? '✓ Added' : 'Add'}</span>
+                </div>`;
+            }).join('');
+        } else {
+            html += `<p style="color:var(--muted);font-size:13px;margin-bottom:12px">No custom lists yet</p>`;
+        }
+
+        html += `
+            <div class="form-group" style="margin-top:12px">
+                <input type="text" class="form-input" id="new-list-name" placeholder="New list name...">
+            </div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-sm btn-primary" onclick="createListAndAdd('${esc(imdbId)}')">Create & Add</button>
+                <button class="btn btn-sm btn-secondary" onclick="closeModal()">Cancel</button>
+            </div>
+        `;
+        openModal(html);
+    }
+
+    async function addToList(imdbId, listName) {
+        const profileId = getActiveProfileId();
+        try {
+            let favDoc = await fsGet(`users/${auth.uid}/favorites/${profileId}`) || {};
+            let customLists = (favDoc.customLists && typeof favDoc.customLists === 'object') ? { ...favDoc.customLists } : {};
+            let list = Array.isArray(customLists[listName]) ? [...customLists[listName]] : [];
+
+            if (!list.includes(imdbId)) {
+                list.push(imdbId);
+                customLists[listName] = list;
+                await fsSet(`users/${auth.uid}/favorites/${profileId}`, { ...favDoc, customLists });
+            }
+            closeModal();
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    async function createListAndAdd(imdbId) {
+        const name = document.getElementById('new-list-name').value.trim();
+        if (!name) return;
+        await addToList(imdbId, name);
     }
 
     // ═══════════════════════════════════════════
