@@ -52,6 +52,16 @@ class AddonRepositoryImpl @Inject constructor(
                 disabledUrls = urls
             }
         }
+        // Pre-warm: fetch all addon manifests eagerly on app startup
+        // so they're cached before HomeViewModel requests them
+        scope.launch {
+            _addons.value.map { addon ->
+                async {
+                    try { fetchManifest(addon.url) } catch (_: Exception) {}
+                }
+            }.awaitAll()
+            Log.d("AddonRepo", "Pre-warmed ${manifestCache.size} addon manifests")
+        }
     }
 
     private fun enabledAddons(): List<Addon> = _addons.value.filter { it.url !in disabledUrls }
@@ -68,12 +78,12 @@ class AddonRepositoryImpl @Inject constructor(
     private val metaCache = ConcurrentHashMap<String, Pair<Meta, Long>>()
     private val META_CACHE_TTL = TimeUnit.MINUTES.toMillis(15)
 
-    // Per-request client with shorter timeout for catalog/meta fetches
+    // Per-request client with aggressive timeouts — fail fast on slow addons
     private val fastClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
-            .callTimeout(8, TimeUnit.SECONDS)
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(6, TimeUnit.SECONDS)
+            .callTimeout(5, TimeUnit.SECONDS)
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
             .build()
     }
 

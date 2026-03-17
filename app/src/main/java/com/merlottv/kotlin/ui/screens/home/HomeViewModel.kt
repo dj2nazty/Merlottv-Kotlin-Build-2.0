@@ -49,8 +49,8 @@ class HomeViewModel @Inject constructor(
     val favoriteVodIds: StateFlow<Set<String>> = favoritesRepository.getFavoriteVodIds()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
-    // Limit concurrent catalog HTTP requests — max 6 instead of 30+ simultaneous
-    private val catalogDispatcher = Dispatchers.IO.limitedParallelism(6)
+    // Limit concurrent catalog HTTP requests — max 12 for faster startup
+    private val catalogDispatcher = Dispatchers.IO.limitedParallelism(12)
 
     init {
         loadCatalogs()

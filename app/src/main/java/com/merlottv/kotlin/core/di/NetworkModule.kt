@@ -42,11 +42,11 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .cache(cache)
             // Keep more connections alive for faster subsequent requests to same hosts
-            .connectionPool(ConnectionPool(12, 5, TimeUnit.MINUTES))
+            .connectionPool(ConnectionPool(20, 5, TimeUnit.MINUTES))
             // Tighter timeouts — fail fast on dead hosts instead of blocking UI
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
             // Prefer HTTP/2 for multiplexed requests (multiple M3U downloads over one connection)
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
             // HTTP logging disabled — even BASIC level adds logcat I/O overhead per request.

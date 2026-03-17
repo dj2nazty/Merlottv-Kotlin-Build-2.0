@@ -118,14 +118,7 @@ fun HomeScreen(
     ) {
         when {
             uiState.isLoading && uiState.catalogRows.isEmpty() -> {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(color = MerlotColors.Accent)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Loading catalogs...", color = MerlotColors.TextMuted, fontSize = 12.sp)
-                }
+                // Silent loading — splash video covers this, no visible loading indicator
             }
             uiState.catalogRows.isEmpty() && !uiState.isLoading -> {
                 // No data loaded — show error or empty state
