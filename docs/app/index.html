@@ -6,6 +6,11 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MerlotTV">
+    <meta name="theme-color" content="#0D0D0D">
     <title>MerlotTV</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -454,7 +459,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.8</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.9</div>
             </form>
         </div>
 
@@ -1935,10 +1940,17 @@
     // ─── Download History (localStorage) ───
     let downloadHistory = JSON.parse(localStorage.getItem('merlot_downloads') || '[]');
 
-    // On page load: any entries stuck at 'downloading' means the page was
-    // closed/suspended mid-download — mark them as interrupted so they show Retry
+    // On page load: entries stuck at 'downloading' that do NOT have a completedAt
+    // timestamp were genuinely interrupted (page closed/suspended mid-download).
+    // Entries WITH completedAt were completed but status didn't save — fix those.
     downloadHistory.forEach(d => {
-        if (d.status === 'downloading') d.status = 'interrupted';
+        if (d.status === 'downloading') {
+            if (d.completedAt) {
+                d.status = 'complete'; // download actually finished
+            } else {
+                d.status = 'interrupted';
+            }
+        }
     });
     localStorage.setItem('merlot_downloads', JSON.stringify(downloadHistory));
 
@@ -1970,6 +1982,32 @@
         const empty = document.getElementById('downloads-empty');
         if (!list) return;
 
+        // Render VLC playlist section
+        const playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        const playlistEl = document.getElementById('downloads-active');
+        if (playlistEl && playlist.length > 0 && !activeDownload) {
+            let plHtml = `<div class="card" style="margin-bottom:16px;border-color:rgba(0,229,255,0.3)">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                    <h3 style="margin:0;font-size:15px;color:var(--accent)">&#9654; MerlotTV Playlist (${playlist.length})</h3>
+                    <div style="display:flex;gap:6px">
+                        <button style="padding:4px 10px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:11px;font-weight:600;cursor:pointer" onclick="playVLCPlaylist()">Play All</button>
+                        <button style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:11px;cursor:pointer" onclick="clearVLCPlaylist()">Clear</button>
+                    </div>
+                </div>`;
+            playlist.forEach((item, pi) => {
+                plHtml += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,42,58,0.3);font-size:12px">
+                    <span style="color:var(--accent);font-weight:700;min-width:20px">${pi+1}</span>
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.title)}</span>
+                    <span class="stream-quality ${qualityClass(item.quality)}" style="font-size:10px;padding:2px 6px">${item.quality || ''}</span>
+                    <button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:2px 4px" onclick="removeFromPlaylist(${pi})">&#10005;</button>
+                </div>`;
+            });
+            plHtml += '</div>';
+            playlistEl.innerHTML = plHtml;
+        } else if (playlistEl && !activeDownload) {
+            playlistEl.innerHTML = '';
+        }
+
         if (downloadHistory.length === 0) {
             list.innerHTML = '';
             empty.classList.remove('hidden');
@@ -1997,10 +2035,9 @@
                         <span style="color:${statusColor}">${statusLabel}</span>
                     </div>
                     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-                        <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playInApp(${i})">&#9654; Play</button>
-                        <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="openInVLCByIndex(${i})">VLC</button>
+                        <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="openInVLCByIndex(${i})">&#9654; Play in VLC</button>
+                        <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="addToVLCPlaylist(${i})">+ Add to Playlist</button>
                         ${isFail ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--warn);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="retryDownload(${i})">Retry</button>` : ''}
-                        ${isDone && d.blobId ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveBlobToFiles('${d.blobId}','${esc((d.filename||'video.mp4').replace(/'/g,''))}')">Save</button>` : ''}
                     </div>
                 </div>
                 <button class="dl-remove-btn" onclick="removeFromDownloadHistory(${i})" title="Remove">&#10005;</button>
@@ -2186,6 +2223,11 @@
             }
 
             // Done — create blob and store
+            // CRITICAL: Set completedAt FIRST as a safety net before anything else
+            // This ensures page-load recovery knows this download finished even if
+            // the status update doesn't persist (Safari may kill the page)
+            updateDownloadHistory(dlIndex, { completedAt: Date.now() });
+
             const blob = new Blob(chunks, { type: 'video/mp4' });
             const blobUrl = URL.createObjectURL(blob);
             if (!window._dlBlobs) window._dlBlobs = {};
@@ -2195,6 +2237,7 @@
             // Update the history entry to complete
             updateDownloadHistory(dlIndex, {
                 status: 'complete',
+                completedAt: Date.now(),
                 size: totalBytes > 0 ? formatBytes(totalBytes) : formatBytes(downloaded),
                 blobId: blobId
             });
@@ -2462,8 +2505,53 @@
     function openInVLCByIndex(index) {
         const d = downloadHistory[index];
         if (!d || !d.url) return;
+        // Open and play immediately in VLC
         const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(d.url)}`;
         window.location.href = vlcUrl;
+    }
+
+    function addToVLCPlaylist(index) {
+        const d = downloadHistory[index];
+        if (!d || !d.url) return;
+        // Store in our "MerlotTV" playlist in localStorage
+        let playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        // Avoid duplicates
+        if (!playlist.some(item => item.url === d.url)) {
+            playlist.push({ title: d.title || 'Video', url: d.url, quality: d.quality || '', poster: d.poster || '', addedAt: Date.now() });
+            localStorage.setItem('merlot_vlc_playlist', JSON.stringify(playlist));
+        }
+        // Show brief confirmation
+        const btn = event.target;
+        const orig = btn.textContent;
+        btn.textContent = '✓ Added!';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
+        setTimeout(() => { btn.textContent = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1500);
+    }
+
+    function playVLCPlaylist() {
+        const playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        if (!playlist.length) { alert('Playlist is empty. Add items first.'); return; }
+        // Play the first item, then VLC will queue subsequent ones
+        // Unfortunately VLC iOS doesn't support multi-URL queueing via URL scheme,
+        // so we open them one at a time — play the first one
+        const first = playlist[0];
+        const vlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(first.url)}`;
+        window.location.href = vlcUrl;
+    }
+
+    function removeFromPlaylist(index) {
+        let playlist = JSON.parse(localStorage.getItem('merlot_vlc_playlist') || '[]');
+        playlist.splice(index, 1);
+        localStorage.setItem('merlot_vlc_playlist', JSON.stringify(playlist));
+        renderDownloads();
+    }
+
+    function clearVLCPlaylist() {
+        if (confirm('Clear the MerlotTV playlist?')) {
+            localStorage.removeItem('merlot_vlc_playlist');
+            renderDownloads();
+        }
     }
 
     // ═══════════════════════════════════════════
@@ -2483,6 +2571,15 @@
     function esc(s) {
         if (!s) return '';
         return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    // ═══════════════════════════════════════════
+    //  PWA Service Worker (offline support)
+    // ═══════════════════════════════════════════
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').then(reg => {
+            console.log('SW registered:', reg.scope);
+        }).catch(err => console.warn('SW registration failed:', err));
     }
 
     // ═══════════════════════════════════════════
