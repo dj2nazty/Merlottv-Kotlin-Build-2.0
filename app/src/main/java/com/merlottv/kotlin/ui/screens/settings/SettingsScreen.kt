@@ -580,6 +580,54 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ Bitrate Checker ═══ [Playback]
+        if (selectedTab == "Playback") {
+            SettingsSection(
+                title = "Bitrate Checker",
+                icon = { Text("📊", fontSize = 18.sp) }
+            ) {
+                Text(
+                    "Show real-time video/audio bitrate, codec, and network throughput in the Live TV Quick Menu.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                        .dpadFocusable(onClick = { viewModel.toggleBitrateChecker(!uiState.bitrateCheckerEnabled) })
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            "Bitrate Checker",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (uiState.bitrateCheckerEnabled) "Enabled — showing in Quick Menu"
+                            else "Disabled",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = uiState.bitrateCheckerEnabled,
+                        onCheckedChange = null,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MerlotColors.Accent,
+                            checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.height(24.dp).focusable(false)
+                    )
+                }
+            }
+        }
+
         // ═══ Player Settings ═══ [Playback]
         if (selectedTab == "Playback") {
             SettingsSection(
@@ -661,36 +709,45 @@ fun SettingsScreen(
                     }
                     Switch(
                         checked = uiState.nextEpisodeAutoPlay,
-                        onCheckedChange = { viewModel.toggleNextEpisodeAutoPlay(it) },
+                        onCheckedChange = null,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = MerlotColors.Accent,
                             checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
                         ),
-                        modifier = Modifier.height(24.dp)
+                        modifier = Modifier.height(24.dp).focusable(false)
                     )
                 }
 
                 // Threshold control (only when auto-play is enabled)
                 if (uiState.nextEpisodeAutoPlay) {
                     Spacer(modifier = Modifier.height(8.dp))
+                    val thresholdPercent = uiState.nextEpisodeThresholdPercent
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown) {
+                                    when (event.key) {
+                                        Key.DirectionLeft -> {
+                                            if (thresholdPercent > 85) viewModel.setNextEpisodeThreshold(thresholdPercent - 1)
+                                            true // consume — don't open sidebar
+                                        }
+                                        Key.DirectionRight -> {
+                                            if (thresholdPercent < 99) viewModel.setNextEpisodeThreshold(thresholdPercent + 1)
+                                            true // consume
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
+                            .dpadFocusable(onClick = {})
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Trigger at:", color = MerlotColors.TextMuted, fontSize = 11.sp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        val thresholdPercent = uiState.nextEpisodeThresholdPercent
-                        Text(
-                            "◀",
-                            color = MerlotColors.Accent,
-                            fontSize = 14.sp,
-                            modifier = Modifier.dpadFocusable(onClick = {
-                                if (thresholdPercent > 85) viewModel.setNextEpisodeThreshold(thresholdPercent - 1)
-                            })
-                        )
+                        Text("◀", color = MerlotColors.Accent, fontSize = 14.sp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             "${thresholdPercent}%",
@@ -699,16 +756,10 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "▶",
-                            color = MerlotColors.Accent,
-                            fontSize = 14.sp,
-                            modifier = Modifier.dpadFocusable(onClick = {
-                                if (thresholdPercent < 99) viewModel.setNextEpisodeThreshold(thresholdPercent + 1)
-                            })
-                        )
+                        Text("▶", color = MerlotColors.Accent, fontSize = 14.sp)
                     }
                 }
+
             }
         }
 
@@ -749,12 +800,12 @@ fun SettingsScreen(
                     }
                     Switch(
                         checked = uiState.weatherAlertsEnabled,
-                        onCheckedChange = { viewModel.toggleWeatherAlerts(it) },
+                        onCheckedChange = null,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = MerlotColors.Accent,
                             checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
                         ),
-                        modifier = Modifier.height(24.dp)
+                        modifier = Modifier.height(24.dp).focusable(false)
                     )
                 }
             }

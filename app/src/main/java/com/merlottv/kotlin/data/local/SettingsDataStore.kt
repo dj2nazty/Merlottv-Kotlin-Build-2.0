@@ -72,6 +72,9 @@ class SettingsDataStore(private val context: Context) {
 
         // Next episode auto-play
         val NEXT_EPISODE_AUTOPLAY = booleanPreferencesKey("next_episode_autoplay")
+
+        // Bitrate checker — show video/audio bitrate info in Live TV Quick Menu
+        val BITRATE_CHECKER_ENABLED = booleanPreferencesKey("bitrate_checker_enabled")
         val NEXT_EPISODE_THRESHOLD_PERCENT = intPreferencesKey("next_episode_threshold_percent") // 90-99
 
         const val DEFAULT_PLAYLIST = "https://x-api.uk/get.php?username=MetrlotBackup&password=2813308004&type=m3u_plus"
@@ -295,6 +298,15 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setNextEpisodeThresholdPercent(percent: Int) {
         context.settingsDataStore.edit { it[NEXT_EPISODE_THRESHOLD_PERCENT] = percent.coerceIn(85, 99) }
+    }
+
+    // ─── Bitrate Checker Toggle ───
+    val bitrateCheckerEnabled: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[BITRATE_CHECKER_ENABLED] ?: false // Disabled by default
+    }
+
+    suspend fun setBitrateCheckerEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[BITRATE_CHECKER_ENABLED] = enabled }
     }
 
     // ─── Live TV Buffer Duration ───

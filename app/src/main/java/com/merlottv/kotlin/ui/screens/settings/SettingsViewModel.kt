@@ -67,6 +67,8 @@ data class SettingsUiState(
     // Next episode auto-play
     val nextEpisodeAutoPlay: Boolean = true,
     val nextEpisodeThresholdPercent: Int = 95,
+    // Bitrate checker in Live TV Quick Menu
+    val bitrateCheckerEnabled: Boolean = false,
     // Release notes
     val releaseNotes: String = "",
     val isFetchingReleaseNotes: Boolean = false,
@@ -104,6 +106,7 @@ class SettingsViewModel @Inject constructor(
             val frameRateMode = settingsDataStore.frameRateMatching.first()
             val nextEpAutoPlay = settingsDataStore.nextEpisodeAutoPlay.first()
             val nextEpThreshold = settingsDataStore.nextEpisodeThresholdPercent.first()
+            val bitrateCheckerOn = settingsDataStore.bitrateCheckerEnabled.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -119,7 +122,8 @@ class SettingsViewModel @Inject constructor(
                 weatherAlertsEnabled = weatherAlertsOn,
                 frameRateMatching = frameRateMode,
                 nextEpisodeAutoPlay = nextEpAutoPlay,
-                nextEpisodeThresholdPercent = nextEpThreshold
+                nextEpisodeThresholdPercent = nextEpThreshold,
+                bitrateCheckerEnabled = bitrateCheckerOn
             )
         }
     }
@@ -502,6 +506,14 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(frameRateMatching = mode)
         viewModelScope.launch {
             settingsDataStore.setFrameRateMatching(mode)
+        }
+    }
+
+    // ─── Bitrate Checker ───
+    fun toggleBitrateChecker(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(bitrateCheckerEnabled = enabled)
+        viewModelScope.launch {
+            settingsDataStore.setBitrateCheckerEnabled(enabled)
         }
     }
 

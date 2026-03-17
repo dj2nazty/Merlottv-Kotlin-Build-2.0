@@ -42,6 +42,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -95,7 +96,12 @@ data class LiveTvUiState(
     val lastRebufferDurationMs: Long = 0L,
     val totalRebufferMs: Long = 0L,
     // Bitrate info
+    val bitrateCheckerEnabled: Boolean = false,
     val videoBitrateKbps: Int = 0,
+    val audioBitrateKbps: Int = 0,
+    val videoCodec: String = "",
+    val audioCodec: String = "",
+    val measuredBitrateKbps: Int = 0,  // actual network throughput from BandwidthMeter
     // Player engine: "exo" or "vlc"
     val activePlayerEngine: String = "exo",
     val isUsingVlc: Boolean = false,
@@ -146,6 +152,12 @@ class LiveTvViewModel @Inject constructor(
 
     // Track playlist names for source display
     private var playlistNames: Map<String, String> = emptyMap() // url → name
+
+    // BandwidthMeter reference for real-time measured bitrate
+    private var bandwidthMeterRef: DefaultBandwidthMeter? = null
+
+    // Periodic bitrate refresh job (active while Quick Menu is open)
+    private var bitrateRefreshJob: Job? = null
 
     // Rebuffer tracking state
     private var rebufferStartTime = 0L
@@ -215,6 +227,7 @@ class LiveTvViewModel @Inject constructor(
         val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
             .setResetOnNetworkTypeChange(true)
             .build()
+        bandwidthMeterRef = bandwidthMeter
 
         val httpFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(5_000)
@@ -462,6 +475,7 @@ class LiveTvViewModel @Inject constructor(
         val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
             .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
             .build()
+        bandwidthMeterRef = bandwidthMeter
 
         // === Apollo-grade buffer configuration ===
         //
@@ -685,19 +699,61 @@ class LiveTvViewModel @Inject constructor(
         }
     }
 
-    /** Extract video bitrate from the currently playing track */
+    /** Extract video/audio bitrate, codecs, and measured throughput from the currently playing track */
     private fun updateBitrate() {
         try {
-            val format = player.videoFormat
-            if (format != null && format.bitrate > 0) {
-                _uiState.value = _uiState.value.copy(
-                    videoBitrateKbps = format.bitrate / 1000
-                )
-            }
+            val vFormat = player.videoFormat
+            val aFormat = player.audioFormat
+            val measuredBps = bandwidthMeterRef?.bitrateEstimate ?: 0L
+            _uiState.value = _uiState.value.copy(
+                videoBitrateKbps = if (vFormat != null && vFormat.bitrate > 0) vFormat.bitrate / 1000 else _uiState.value.videoBitrateKbps,
+                audioBitrateKbps = if (aFormat != null && aFormat.bitrate > 0) aFormat.bitrate / 1000 else _uiState.value.audioBitrateKbps,
+                videoCodec = vFormat?.sampleMimeType?.toCodecLabel() ?: _uiState.value.videoCodec,
+                audioCodec = aFormat?.sampleMimeType?.toCodecLabel() ?: _uiState.value.audioCodec,
+                measuredBitrateKbps = if (measuredBps > 0) (measuredBps / 1000).toInt() else _uiState.value.measuredBitrateKbps
+            )
         } catch (_: Exception) {}
     }
 
+    /** Convert MIME type to human-readable codec label */
+    private fun String.toCodecLabel(): String = when {
+        contains("avc") -> "H.264"
+        contains("hevc") || contains("hev1") -> "H.265"
+        contains("vp9") -> "VP9"
+        contains("av01") -> "AV1"
+        contains("mp4a") -> "AAC"
+        contains("ac3") -> "AC3"
+        contains("eac3") -> "EAC3"
+        contains("opus") -> "Opus"
+        contains("vorbis") -> "Vorbis"
+        contains("mp3") || contains("mpeg-L3") -> "MP3"
+        else -> substringAfterLast("/").uppercase()
+    }
+
+    /** Called when Quick Menu visibility changes — starts/stops periodic bitrate refresh */
+    fun onQuickMenuVisibilityChanged(visible: Boolean) {
+        if (visible) {
+            updateBitrate() // immediate refresh
+            bitrateRefreshJob = viewModelScope.launch {
+                while (isActive) {
+                    delay(2000)
+                    updateBitrate()
+                }
+            }
+        } else {
+            bitrateRefreshJob?.cancel()
+            bitrateRefreshJob = null
+        }
+    }
+
     init {
+        // Observe bitrate checker setting reactively
+        viewModelScope.launch {
+            settingsDataStore.bitrateCheckerEnabled.collect { enabled ->
+                _uiState.value = _uiState.value.copy(bitrateCheckerEnabled = enabled)
+            }
+        }
+
         // Global exception handler — prevents app crash if ExoPlayer throws OOM or unexpected error
         viewModelScope.launch {
             val handler = Thread.UncaughtExceptionHandler { thread, throwable ->

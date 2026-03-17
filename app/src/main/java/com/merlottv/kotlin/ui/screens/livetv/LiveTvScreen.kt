@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -152,6 +153,8 @@ private fun FullscreenPlayer(
             delay(100)
             try { focusRequester.requestFocus() } catch (_: Exception) {}
         }
+        // Start/stop periodic bitrate refresh when Quick Menu opens/closes
+        viewModel.onQuickMenuVisibilityChanged(uiState.showQuickMenu)
     }
     LaunchedEffect(uiState.showEpgGuide) {
         if (!uiState.showEpgGuide) {
@@ -457,6 +460,7 @@ private fun QuickMenuOverlay(
             modifier = Modifier
                 .weight(0.4f)
                 .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
                 .padding(vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
@@ -498,36 +502,100 @@ private fun QuickMenuOverlay(
                 modifier = Modifier.padding(bottom = 6.dp)
             )
 
-            // Frame rate + resolution + bitrate info
-            val infoLine = buildString {
+            // Video info line: resolution + quality + codec + framerate
+            val videoLine = buildString {
                 if (uiState.videoResolution.isNotEmpty()) {
                     append(uiState.videoResolution)
                     val qualityLabel = getQualityLabel(uiState.videoResolution)
                     if (qualityLabel.isNotEmpty()) append(" • $qualityLabel")
                 }
+                if (uiState.bitrateCheckerEnabled && uiState.videoCodec.isNotEmpty()) {
+                    if (isNotEmpty()) append(" • ")
+                    append(uiState.videoCodec)
+                }
                 if (uiState.videoFrameRate.isNotEmpty()) {
                     if (isNotEmpty()) append(" • ")
                     append(uiState.videoFrameRate)
                 }
-                if (uiState.videoBitrateKbps > 0) {
-                    if (isNotEmpty()) append(" • ")
-                    if (uiState.videoBitrateKbps >= 1000) {
-                        append(String.format("%.1f Mbps", uiState.videoBitrateKbps / 1000f))
-                    } else {
-                        append("${uiState.videoBitrateKbps} Kbps")
-                    }
-                }
             }
-            if (infoLine.isNotEmpty()) {
+            if (videoLine.isNotEmpty()) {
                 Text(
-                    text = infoLine,
+                    text = videoLine,
                     color = MerlotColors.Accent.copy(alpha = 0.8f),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = 4.dp)
+                    modifier = Modifier.padding(bottom = if (uiState.bitrateCheckerEnabled) 2.dp else 4.dp)
                 )
+            }
+
+            // Bitrate checker details (only when enabled in Settings > Playback)
+            if (uiState.bitrateCheckerEnabled) {
+                // Video bitrate line
+                if (uiState.videoBitrateKbps > 0) {
+                    val videoBitrateText = if (uiState.videoBitrateKbps >= 1000)
+                        String.format("Video: %.1f Mbps", uiState.videoBitrateKbps / 1000f)
+                    else "Video: ${uiState.videoBitrateKbps} Kbps"
+                    Text(
+                        text = videoBitrateText,
+                        color = Color(0xFF4CAF50),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                }
+
+                // Audio bitrate + codec line
+                val audioLine = buildString {
+                    if (uiState.audioBitrateKbps > 0) {
+                        append("Audio: ${uiState.audioBitrateKbps} Kbps")
+                    }
+                    if (uiState.audioCodec.isNotEmpty()) {
+                        if (isNotEmpty()) append(" • ")
+                        else append("Audio: ")
+                        append(uiState.audioCodec)
+                    }
+                }
+                if (audioLine.isNotEmpty()) {
+                    Text(
+                        text = audioLine,
+                        color = Color(0xFF2196F3),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                }
+
+                // Measured network throughput
+                if (uiState.measuredBitrateKbps > 0) {
+                    val throughputText = if (uiState.measuredBitrateKbps >= 1000)
+                        String.format("Throughput: %.1f Mbps", uiState.measuredBitrateKbps / 1000f)
+                    else "Throughput: ${uiState.measuredBitrateKbps} Kbps"
+                    Text(
+                        text = throughputText,
+                        color = Color(0xFFFF9800),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
             } else {
-                Spacer(modifier = Modifier.height(4.dp))
+                // When bitrate checker is off, show simple bitrate if available (original behavior)
+                if (uiState.videoBitrateKbps > 0) {
+                    val simpleBitrate = if (uiState.videoBitrateKbps >= 1000)
+                        String.format("%.1f Mbps", uiState.videoBitrateKbps / 1000f)
+                    else "${uiState.videoBitrateKbps} Kbps"
+                    Text(
+                        text = simpleBitrate,
+                        color = MerlotColors.Accent.copy(alpha = 0.8f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
             }
 
             // Rebuffer stats
