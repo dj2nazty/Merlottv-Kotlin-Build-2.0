@@ -288,31 +288,50 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isCheckingUpdate = true)
             try {
-                val result = withContext(Dispatchers.IO) {
+                val (latestVersion, downloadUrl) = withContext(Dispatchers.IO) {
                     val client = OkHttpClient.Builder()
                         .connectTimeout(15, TimeUnit.SECONDS)
                         .readTimeout(15, TimeUnit.SECONDS)
                         .build()
+
+                    // Fetch recent releases (not just latest) so we can skip web-only releases
                     val request = Request.Builder()
-                        .url("https://api.github.com/repos/dj2nazty/Merlottv-Kotlin-Build-2.0/releases/latest")
+                        .url("https://api.github.com/repos/dj2nazty/Merlottv-Kotlin-Build-2.0/releases?per_page=10")
                         .header("Accept", "application/vnd.github.v3+json")
                         .build()
                     val response = client.newCall(request).execute()
-                    val body = response.body?.string() ?: "{}"
-                    JSONObject(body)
+                    val body = response.body?.string() ?: "[]"
+                    val releases = org.json.JSONArray(body)
+
+                    // Find the newest release that has an APK asset (skip web-only releases)
+                    var foundVersion = ""
+                    var foundUrl = ""
+                    for (i in 0 until releases.length()) {
+                        val release = releases.getJSONObject(i)
+                        val assets = release.optJSONArray("assets")
+                        if (assets != null && assets.length() > 0) {
+                            // Check if any asset is an APK
+                            var apkUrl = ""
+                            for (j in 0 until assets.length()) {
+                                val asset = assets.getJSONObject(j)
+                                val name = asset.optString("name", "")
+                                if (name.endsWith(".apk")) {
+                                    apkUrl = asset.optString("browser_download_url", "")
+                                    break
+                                }
+                            }
+                            if (apkUrl.isNotEmpty()) {
+                                foundVersion = release.optString("tag_name", "").removePrefix("v")
+                                foundUrl = apkUrl
+                                break // newest release with APK found
+                            }
+                        }
+                    }
+
+                    Pair(foundVersion, foundUrl)
                 }
 
-                val tagName = result.optString("tag_name", "")
-                val latestVersion = tagName.removePrefix("v")
-                val assets = result.optJSONArray("assets")
-                val downloadUrl = if (assets != null && assets.length() > 0) {
-                    assets.getJSONObject(0).optString("browser_download_url", "")
-                } else {
-                    // No APK asset — fall back to release page URL
-                    result.optString("html_url", "")
-                }
-
-                val isNewer = isVersionNewer(latestVersion, BuildConfig.VERSION_NAME)
+                val isNewer = latestVersion.isNotEmpty() && isVersionNewer(latestVersion, BuildConfig.VERSION_NAME)
 
                 _uiState.value = _uiState.value.copy(
                     isCheckingUpdate = false,
