@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>MerlotTV</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -428,6 +431,10 @@
                     <span id="login-toggle-text">Don't have an account? </span>
                     <a href="#" id="login-toggle">Sign Up</a>
                 </div>
+                <div style="text-align:center;margin-top:18px">
+                    <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
+                </div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.1</div>
             </form>
         </div>
 
@@ -2152,7 +2159,12 @@
     //  Init
     // ═══════════════════════════════════════════
     if (auth && auth.uid) {
-        onLoggedIn();
+        onLoggedIn().catch(e => {
+            console.error('Auto-login failed:', e);
+            auth = null;
+            localStorage.removeItem('merlot_auth');
+            showView('login');
+        });
     }
     </script>
 </body>
