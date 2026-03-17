@@ -358,6 +358,7 @@
                 <div class="dash-avatar" id="dash-avatar">U</div>
                 <div class="dash-email" id="dash-email"></div>
                 <div class="dash-badge">Sync Active</div>
+                <div id="dash-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
             </div>
             <div class="dash-stats">
                 <div class="dash-stat"><div class="num" id="stat-favs">0</div><div class="lbl">Favorites</div></div>
@@ -627,10 +628,18 @@
 
     async function fsGet(path) {
         await ensureToken();
-        const resp = await fetch(`${FS}/${path}`, { headers: { Authorization: `Bearer ${auth.idToken}` } });
-        if (resp.status === 404) return null;
-        if (!resp.ok) throw new Error(`Firestore GET ${path}: ${resp.status}`);
-        return fromFsDoc(await resp.json());
+        const url = `${FS}/${path}`;
+        console.log('fsGet:', url);
+        const resp = await fetch(url, { headers: { Authorization: `Bearer ${auth.idToken}` } });
+        if (resp.status === 404) { console.log('fsGet 404:', path); return null; }
+        if (!resp.ok) {
+            const errText = await resp.text();
+            console.error('fsGet error:', resp.status, errText);
+            throw new Error(`Firestore GET ${path}: ${resp.status}`);
+        }
+        const json = await resp.json();
+        console.log('fsGet result:', path, JSON.stringify(json).substring(0, 300));
+        return fromFsDoc(json);
     }
 
     async function fsSet(path, data) {
@@ -693,11 +702,13 @@
 
         try {
             const endpoint = isSignUp ? `${AUTH}/accounts:signUp?key=${API_KEY}` : `${AUTH}/accounts:signInWithPassword?key=${API_KEY}`;
+            console.log('Auth request to:', endpoint);
             const resp = await fetch(endpoint, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password, returnSecureToken: true })
             });
             const data = await resp.json();
+            console.log('Auth response status:', resp.status, 'data:', JSON.stringify(data).substring(0, 200));
             if (!resp.ok) {
                 const code = data.error?.message || '';
                 let msg = 'Authentication failed';
@@ -705,6 +716,8 @@
                 else if (code.includes('EMAIL_EXISTS')) msg = 'Account already exists — try signing in';
                 else if (code.includes('WEAK_PASSWORD')) msg = 'Password too weak (min 6 chars)';
                 else if (code.includes('TOO_MANY')) msg = 'Too many attempts — try later';
+                else if (code.includes('API_KEY_HTTP_REFERRER_BLOCKED') || code.includes('API key not valid')) msg = 'API key blocked — this domain needs to be authorized in Firebase Console';
+                else if (code.includes('ADMIN_ONLY_OPERATION')) msg = 'Email/Password sign-in is not enabled in Firebase Console';
                 else msg = 'Auth error: ' + code;
                 throw new Error(msg);
             }
@@ -796,25 +809,36 @@
         document.getElementById('dash-avatar').textContent = (auth.email[0] || 'U').toUpperCase();
         document.getElementById('dash-email').textContent = auth.email;
 
+        const statusEl = document.getElementById('dash-status');
+        if (statusEl) statusEl.textContent = 'Loading data...';
+
         try {
+            console.log('onLoggedIn: uid=' + auth.uid);
             const [profiles, settings] = await Promise.all([
                 fsGet(`users/${auth.uid}/profiles/data`),
                 fsGet(`users/${auth.uid}/settings/app`)
             ]);
+            console.log('Loaded profiles:', JSON.stringify(profiles)?.substring(0, 200));
+            console.log('Loaded settings:', JSON.stringify(settings)?.substring(0, 200));
             if (profiles) profilesData = profiles;
             if (settings) settingsData = settings;
 
             // Load favorites count for active profile
             const pid = profilesData.activeProfileId || 'default';
+            console.log('Loading favorites for profile:', pid);
             const favs = await fsGet(`users/${auth.uid}/favorites/${pid}`);
             if (favs) favoritesData = favs;
+            console.log('Favorites:', JSON.stringify(favs)?.substring(0, 200));
 
             const wp = await fsGet(`users/${auth.uid}/watchProgress/${pid}`);
             if (wp) watchProgressData = wp;
+            console.log('Watch progress:', Object.keys(wp?.items || {}).length, 'items');
 
             updateDashStats();
+            if (statusEl) statusEl.textContent = '';
         } catch (e) {
             console.error('Load failed:', e);
+            if (statusEl) statusEl.innerHTML = `<div class="error-msg">Failed to load data: ${esc(e.message)}</div>`;
         }
     }
 
