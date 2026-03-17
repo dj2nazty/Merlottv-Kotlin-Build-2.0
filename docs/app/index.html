@@ -306,6 +306,51 @@
         .cast-card .cast-name { font-size: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .cast-card .cast-char { font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+        /* ─── Stream Picker ─── */
+        .stream-list { max-height: 60vh; overflow-y: auto; }
+        .stream-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px; background: var(--surface2); border-radius: 8px; margin-bottom: 8px;
+        }
+        .stream-info { flex: 1; min-width: 0; margin-right: 10px; }
+        .stream-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .stream-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        .stream-quality {
+            font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700;
+            background: rgba(0,229,255,0.15); color: var(--accent); white-space: nowrap;
+        }
+        .stream-quality.q1080 { background: rgba(0,214,143,0.2); color: var(--success); }
+        .stream-quality.q720 { background: rgba(255,215,64,0.2); color: var(--warn); }
+        .stream-quality.q4k { background: rgba(224,64,251,0.2); color: #E040FB; }
+
+        /* ─── Download Progress ─── */
+        .dl-progress-wrap {
+            margin-top: 16px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+        }
+        .dl-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .dl-progress-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+        .dl-progress-pct { font-size: 13px; color: var(--accent); font-weight: 700; margin-left: 8px; }
+        .dl-progress-bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+        .dl-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; width: 0%; }
+        .dl-progress-sub { font-size: 11px; color: var(--muted); margin-top: 6px; display: flex; justify-content: space-between; }
+        .dl-cancel { background: none; border: none; color: var(--danger); font-size: 12px; cursor: pointer; padding: 2px 8px; }
+
+        /* ─── Episode Picker ─── */
+        .ep-season-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .ep-season-tab {
+            padding: 6px 14px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border);
+            color: var(--text); font-size: 13px; cursor: pointer;
+        }
+        .ep-season-tab.active { background: var(--accent); color: #000; border-color: var(--accent); }
+        .ep-list { max-height: 50vh; overflow-y: auto; }
+        .ep-item {
+            display: flex; align-items: center; padding: 10px 12px; background: var(--surface2);
+            border-radius: 8px; margin-bottom: 6px; cursor: pointer; gap: 10px;
+        }
+        .ep-item:active { background: var(--border); }
+        .ep-num { font-size: 13px; font-weight: 700; color: var(--accent); min-width: 30px; }
+        .ep-title { font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
         /* ─── Modal ─── */
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200;
@@ -1520,6 +1565,15 @@
                             + Add to List
                         </button>
                     </div>
+                    <div class="detail-actions">
+                        <button class="btn btn-sm btn-secondary" id="detail-dl-btn" style="background:rgba(0,229,255,0.1);border:1px solid var(--accent);color:var(--accent)"
+                            onclick="${vodType === 'series'
+                                ? `showEpisodePicker(${tmdbId},'${esc(imdbId)}','${esc(title.replace(/'/g, ''))}','${year}')`
+                                : `showStreamPicker('${vodType}','${esc(imdbId)}','${esc(title.replace(/'/g, ''))}','${year}')`
+                            }">
+                            &#x2B07; Download${vodType === 'series' ? ' Episodes' : ''}
+                        </button>
+                    </div>
 
                     ${overview ? `<div class="detail-overview">${esc(overview)}</div>` : ''}
 
@@ -1646,6 +1700,300 @@
         const name = document.getElementById('new-list-name').value.trim();
         if (!name) return;
         await addToList(imdbId, name);
+    }
+
+    // ═══════════════════════════════════════════
+    //  Stream Resolution & Download
+    // ═══════════════════════════════════════════
+    const DEFAULT_TORBOX_KEY = '50c74a49-a6bc-40e9-931e-1cee1943e87b';
+    const DEFAULT_STREAM_ADDONS = [
+        { name: 'Torbox Stremio', baseUrl: 'https://stremio.torbox.app/{TORBOX_KEY}' },
+        { name: 'Torrentio', baseUrl: 'https://torrentio.strem.fun' },
+    ];
+
+    let activeDownloadController = null;
+
+    function getStreamAddons() {
+        const torboxKey = (settingsData.torboxKey || DEFAULT_TORBOX_KEY).trim();
+        return DEFAULT_STREAM_ADDONS.map(a => ({
+            name: a.name,
+            url: a.baseUrl.replace('{TORBOX_KEY}', torboxKey)
+        }));
+    }
+
+    async function resolveStreams(type, imdbId) {
+        const addons = getStreamAddons();
+        const results = [];
+
+        const fetches = addons.map(async (addon) => {
+            try {
+                const url = `${addon.url}/stream/${type}/${imdbId}.json`;
+                console.log('Resolving streams from:', addon.name, url);
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 7000);
+                const resp = await fetch(url, { signal: controller.signal });
+                clearTimeout(timer);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const streams = data.streams || [];
+                streams.forEach(s => {
+                    const streamUrl = s.url || '';
+                    const externalUrl = s.externalUrl || '';
+                    const finalUrl = streamUrl || externalUrl;
+                    // Only direct HTTP(S) links — skip magnet:, .torrent, empty
+                    if (!finalUrl || !finalUrl.startsWith('http')) return;
+                    // Skip HLS/M3U8 streams (can't download as single file)
+                    if (finalUrl.includes('.m3u8') || finalUrl.includes('/hls/')) return;
+
+                    const title = s.title || s.name || '';
+                    const name = s.name || '';
+                    const text = (title + ' ' + name).toLowerCase();
+                    let quality = 'SD';
+                    if (text.includes('4k') || text.includes('2160')) quality = '4K';
+                    else if (text.includes('1080') || text.includes('bluray') || text.includes('remux')) quality = '1080p';
+                    else if (text.includes('720') || text.includes('hd')) quality = '720p';
+                    else if (text.includes('480')) quality = '480p';
+
+                    // Extract size if available
+                    const sizeMatch = (title + ' ' + name).match(/(\d+\.?\d*)\s*(GB|MB|gb|mb)/);
+                    const size = sizeMatch ? `${sizeMatch[1]} ${sizeMatch[2].toUpperCase()}` : '';
+
+                    results.push({ url: finalUrl, title: title || name || finalUrl.split('/').pop(), name, quality, size, addon: addon.name });
+                });
+            } catch (e) {
+                console.warn('Stream addon failed:', addon.name, e.message);
+            }
+        });
+
+        await Promise.all(fetches);
+
+        // Sort: 4K > 1080p > 720p > 480p > SD, prefer TorBox
+        const qOrder = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3, 'SD': 4 };
+        results.sort((a, b) => {
+            const qa = qOrder[a.quality] ?? 5;
+            const qb = qOrder[b.quality] ?? 5;
+            if (qa !== qb) return qa - qb;
+            // Prefer torbox
+            const ta = a.addon.toLowerCase().includes('torbox') ? 0 : 1;
+            const tb = b.addon.toLowerCase().includes('torbox') ? 0 : 1;
+            return ta - tb;
+        });
+
+        return results;
+    }
+
+    function qualityClass(q) {
+        if (q === '4K') return 'q4k';
+        if (q === '1080p') return 'q1080';
+        if (q === '720p') return 'q720';
+        return '';
+    }
+
+    async function showStreamPicker(type, imdbId, title, year) {
+        const overlay = document.getElementById('detail-overlay');
+        const actionsEl = overlay.querySelector('.detail-actions');
+        const dlBtn = document.getElementById('detail-dl-btn');
+        if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = '<span class="spinner"></span> Finding sources...'; }
+
+        try {
+            const streams = await resolveStreams(type, imdbId);
+            if (streams.length === 0) {
+                openModal('<h3>No Downloads Available</h3><p style="color:var(--muted);font-size:13px;margin-bottom:16px">No direct download links found for this title. Try again later or check your TorBox subscription.</p><button class="btn btn-secondary" onclick="closeModal()">Close</button>');
+                return;
+            }
+
+            let html = `<h3>Download "${esc(title)}"</h3><div class="stream-list">`;
+            streams.forEach((s, i) => {
+                html += `<div class="stream-item">
+                    <div class="stream-info">
+                        <div class="stream-title">${esc(s.title)}</div>
+                        <div class="stream-meta">${esc(s.addon)}${s.size ? ' · ' + s.size : ''}</div>
+                    </div>
+                    <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
+                    <button class="btn btn-sm btn-primary" style="margin-left:8px" onclick="startDownload(${i},'${esc(title.replace(/'/g, ''))}','${year}','${s.quality}')">&#x2B07;</button>
+                </div>`;
+            });
+            html += '</div><button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>';
+
+            window._resolvedStreams = streams;
+            openModal(html);
+        } catch (e) {
+            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div><button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
+        } finally {
+            if (dlBtn) { dlBtn.disabled = false; dlBtn.innerHTML = '&#x2B07; Download'; }
+        }
+    }
+
+    async function startDownload(streamIndex, title, year, quality) {
+        const stream = window._resolvedStreams?.[streamIndex];
+        if (!stream) return;
+
+        closeModal();
+        const filename = `${title}${year ? ' (' + year + ')' : ''} [${quality}].mp4`;
+
+        // Show progress in detail overlay
+        const overlay = document.getElementById('detail-overlay');
+        let progressEl = document.getElementById('dl-progress');
+        if (!progressEl) {
+            progressEl = document.createElement('div');
+            progressEl.id = 'dl-progress';
+            const body = overlay.querySelector('.detail-body');
+            if (body) body.appendChild(progressEl);
+        }
+
+        progressEl.innerHTML = `<div class="dl-progress-wrap">
+            <div class="dl-progress-header">
+                <span class="dl-progress-title">${esc(filename)}</span>
+                <span class="dl-progress-pct" id="dl-pct">0%</span>
+                <button class="dl-cancel" onclick="cancelDownload()">Cancel</button>
+            </div>
+            <div class="dl-progress-bar"><div class="dl-progress-fill" id="dl-fill"></div></div>
+            <div class="dl-progress-sub"><span id="dl-size">0 MB</span><span id="dl-speed"></span></div>
+        </div>`;
+
+        const controller = new AbortController();
+        activeDownloadController = controller;
+
+        try {
+            const resp = await fetch(stream.url, { signal: controller.signal });
+            if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+
+            const contentLength = parseInt(resp.headers.get('content-length') || '0');
+            const reader = resp.body.getReader();
+            const chunks = [];
+            let received = 0;
+            const startTime = Date.now();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                received += value.length;
+
+                const pct = contentLength ? Math.round((received / contentLength) * 100) : 0;
+                const mb = (received / 1048576).toFixed(1);
+                const totalMb = contentLength ? (contentLength / 1048576).toFixed(1) : '?';
+                const elapsed = (Date.now() - startTime) / 1000;
+                const speed = elapsed > 0 ? ((received / 1048576) / elapsed).toFixed(1) : '0';
+
+                const pctEl = document.getElementById('dl-pct');
+                const fillEl = document.getElementById('dl-fill');
+                const sizeEl = document.getElementById('dl-size');
+                const speedEl = document.getElementById('dl-speed');
+                if (pctEl) pctEl.textContent = contentLength ? `${pct}%` : `${mb} MB`;
+                if (fillEl) fillEl.style.width = contentLength ? `${pct}%` : '50%';
+                if (sizeEl) sizeEl.textContent = `${mb} / ${totalMb} MB`;
+                if (speedEl) speedEl.textContent = `${speed} MB/s`;
+            }
+
+            // Assemble blob and trigger download
+            const blob = new Blob(chunks, { type: 'video/mp4' });
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+
+            progressEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
+                <div style="text-align:center;color:var(--success);font-weight:600">
+                    &#x2713; Download complete! Check your Files app.
+                </div>
+                <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">
+                    Open with VLC or your video player for offline viewing.
+                </div>
+            </div>`;
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                progressEl.innerHTML = `<div class="dl-progress-wrap"><div style="text-align:center;color:var(--muted)">Download cancelled</div></div>`;
+            } else {
+                progressEl.innerHTML = `<div class="dl-progress-wrap"><div class="error-msg">Download failed: ${esc(e.message)}</div></div>`;
+            }
+        } finally {
+            activeDownloadController = null;
+        }
+    }
+
+    function cancelDownload() {
+        if (activeDownloadController) {
+            activeDownloadController.abort();
+            activeDownloadController = null;
+        }
+    }
+
+    // ─── Episode Picker for TV Shows ───
+    async function showEpisodePicker(tmdbId, imdbId, title, year) {
+        openModal('<h3>Loading episodes...</h3><div style="text-align:center;padding:20px"><span class="spinner"></span></div>');
+
+        try {
+            const show = await tmdbGet(`/tv/${tmdbId}`);
+            const seasons = (show.seasons || []).filter(s => s.season_number > 0);
+            if (!seasons.length) {
+                openModal('<h3>No Episodes</h3><p style="color:var(--muted)">Could not find episodes for this show.</p><button class="btn btn-secondary" onclick="closeModal()">Close</button>');
+                return;
+            }
+
+            window._epShow = { tmdbId, imdbId, title, year };
+            renderSeasonPicker(seasons, seasons[0].season_number);
+        } catch (e) {
+            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div><button class="btn btn-secondary" onclick="closeModal()">Close</button>`);
+        }
+    }
+
+    async function renderSeasonPicker(seasons, activeSeason) {
+        let html = `<h3>${esc(window._epShow.title)}</h3>`;
+        html += '<div class="ep-season-tabs">';
+        seasons.forEach(s => {
+            html += `<div class="ep-season-tab ${s.season_number === activeSeason ? 'active' : ''}" onclick="loadSeason(${window._epShow.tmdbId},${s.season_number})">S${s.season_number}</div>`;
+        });
+        html += '</div><div id="ep-list-container"><div style="text-align:center;padding:20px"><span class="spinner"></span></div></div>';
+        html += '<button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Cancel</button>';
+        openModal(html);
+
+        // Load first season episodes
+        await loadSeasonEpisodes(window._epShow.tmdbId, activeSeason);
+    }
+
+    async function loadSeason(tmdbId, seasonNum) {
+        document.querySelectorAll('.ep-season-tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        const container = document.getElementById('ep-list-container');
+        if (container) container.innerHTML = '<div style="text-align:center;padding:20px"><span class="spinner"></span></div>';
+        await loadSeasonEpisodes(tmdbId, seasonNum);
+    }
+
+    async function loadSeasonEpisodes(tmdbId, seasonNum) {
+        try {
+            const season = await tmdbGet(`/tv/${tmdbId}/season/${seasonNum}`);
+            const episodes = season.episodes || [];
+            const container = document.getElementById('ep-list-container');
+            if (!container) return;
+
+            let html = '<div class="ep-list">';
+            episodes.forEach(ep => {
+                const epTitle = ep.name || `Episode ${ep.episode_number}`;
+                html += `<div class="ep-item" onclick="downloadEpisode(${seasonNum},${ep.episode_number},'${esc(epTitle.replace(/'/g, ''))}')">
+                    <span class="ep-num">E${ep.episode_number}</span>
+                    <span class="ep-title">${esc(epTitle)}</span>
+                    <span style="color:var(--accent);font-size:16px">&#x2B07;</span>
+                </div>`;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (e) {
+            const container = document.getElementById('ep-list-container');
+            if (container) container.innerHTML = `<div class="error-msg">Failed to load episodes: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function downloadEpisode(season, episode, epTitle) {
+        const show = window._epShow;
+        const episodeId = `${show.imdbId}:${season}:${episode}`;
+        const fullTitle = `${show.title} S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')} ${epTitle}`;
+        closeModal();
+        await showStreamPicker('series', episodeId, fullTitle, show.year);
     }
 
     // ═══════════════════════════════════════════
