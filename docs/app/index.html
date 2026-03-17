@@ -454,7 +454,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.6</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.7</div>
             </form>
         </div>
 
@@ -1940,10 +1940,16 @@
     }
 
     function addToDownloadHistory(entry) {
-        // entry: { title, filename, quality, size, poster, date, url }
         downloadHistory.unshift(entry);
         if (downloadHistory.length > 50) downloadHistory = downloadHistory.slice(0, 50);
         saveDownloadHistory();
+    }
+
+    function updateDownloadHistory(index, updates) {
+        if (downloadHistory[index]) {
+            Object.assign(downloadHistory[index], updates);
+            saveDownloadHistory();
+        }
     }
 
     function removeFromDownloadHistory(index) {
@@ -1955,7 +1961,6 @@
     function renderDownloads() {
         const list = document.getElementById('downloads-list');
         const empty = document.getElementById('downloads-empty');
-        const active = document.getElementById('downloads-active');
         if (!list) return;
 
         if (downloadHistory.length === 0) {
@@ -1967,17 +1972,22 @@
 
         let html = '';
         downloadHistory.forEach((d, i) => {
-            html += `<div class="dl-item">
+            const statusColor = d.status === 'failed' ? 'var(--danger)' : d.status === 'downloading' ? 'var(--warn)' : 'var(--success)';
+            const statusText = d.status === 'failed' ? '&#10005; Failed' : d.status === 'downloading' ? '&#8987; Downloading...' : '&#x2713; Ready';
+            html += `<div class="dl-item" style="border-left:3px solid ${statusColor}">
                 ${d.poster ? `<img class="dl-item-poster" src="${esc(d.poster)}" alt="" onerror="this.style.background='var(--surface2)'">` : '<div class="dl-item-poster"></div>'}
                 <div class="dl-item-info">
                     <div class="dl-item-title">${esc(d.title)}</div>
                     <div class="dl-item-meta">
                         <span class="stream-quality ${qualityClass(d.quality)}" style="display:inline-block;margin-right:6px">${d.quality || ''}</span>
-                        ${d.size ? d.size + ' · ' : ''}${d.date || ''}
+                        ${d.size ? d.size + ' · ' : ''}
+                        <span style="color:${statusColor}">${statusText}</span>
                     </div>
-                    <div style="display:flex;gap:6px;margin-top:6px">
-                        <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playInApp(${i})">&#9654; Play</button>
-                        <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="openInVLCByIndex(${i})">VLC</button>
+                    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+                        ${d.status !== 'downloading' ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playInApp(${i})">&#9654; Play</button>` : ''}
+                        ${d.status !== 'downloading' ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="openInVLCByIndex(${i})">VLC</button>` : ''}
+                        ${d.status === 'complete' && d.blobId ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveBlobToFiles('${d.blobId}','${esc((d.filename||'video.mp4').replace(/'/g,''))}')">Save</button>` : ''}
+                        ${d.status === 'failed' ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--warn);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="retryDownload(${i})">Retry</button>` : ''}
                     </div>
                 </div>
                 <button class="dl-remove-btn" onclick="removeFromDownloadHistory(${i})" title="Remove">&#10005;</button>
@@ -2034,7 +2044,7 @@
         el.classList.add('selected');
     }
 
-    let activeDownload = null; // { controller }
+    let activeDownload = null;
 
     async function startDownload(streamIndex) {
         const stream = window._resolvedStreams?.[streamIndex];
@@ -2043,9 +2053,23 @@
         const meta = window._dlMeta || {};
         const filename = `${meta.title || 'video'}${meta.year ? ' (' + meta.year + ')' : ''} [${stream.quality}].mp4`;
 
+        // IMMEDIATELY save to download history so it never disappears
+        addToDownloadHistory({
+            title: meta.title || filename,
+            filename,
+            quality: stream.quality,
+            size: stream.size || '',
+            poster: meta.poster || '',
+            date: new Date().toLocaleDateString(),
+            url: stream.url,
+            status: 'downloading'
+        });
+        const dlIndex = 0; // we just unshifted, so it's at index 0
+
         closeModal();
         closeDetail();
         showView('downloads');
+        renderDownloads();
 
         const activeEl = document.getElementById('downloads-active');
         activeEl.innerHTML = `<div class="dl-progress-wrap" id="dl-active-progress">
@@ -2064,41 +2088,34 @@
         </div>`;
 
         const controller = new AbortController();
-        activeDownload = { controller };
+        activeDownload = { controller, streamIndex };
 
         try {
-            // Step 1: Resolve the final direct URL (follow redirects, get actual file link)
             let downloadUrl = stream.url;
             const infoEl = () => document.getElementById('dl-size-info');
 
-            // First try a HEAD to see what we get (follow redirects)
+            // Try HEAD to follow redirects and check content type
             try {
                 if (infoEl()) infoEl().textContent = 'Resolving download link...';
                 const headResp = await fetch(downloadUrl, {
-                    method: 'HEAD',
-                    signal: controller.signal,
-                    redirect: 'follow'
+                    method: 'HEAD', signal: controller.signal, redirect: 'follow'
                 });
-                // Use the final redirected URL
                 if (headResp.url && headResp.url !== downloadUrl) {
                     console.log('Redirected to:', headResp.url);
                     downloadUrl = headResp.url;
                 }
-                // Check if response is HTML (TorBox download page) vs actual file
                 const ct = headResp.headers.get('content-type') || '';
                 if (ct.includes('text/html')) {
                     console.warn('HEAD returned HTML, trying to extract direct link...');
-                    // TorBox returned an HTML page — try fetching the page and extracting the real URL
                     const pageResp = await fetch(downloadUrl, { signal: controller.signal });
                     const pageText = await pageResp.text();
-                    // Look for direct download URL in the HTML
                     const urlMatch = pageText.match(/https?:\/\/[^"'\s]+\.(?:mp4|mkv|avi|webm)[^"'\s]*/i)
                         || pageText.match(/"(https?:\/\/(?:relay|dl|cdn|download)[^"]+)"/i)
                         || pageText.match(/window\.location\s*=\s*["']([^"']+)["']/i)
                         || pageText.match(/href=["'](https?:\/\/[^"']+\.(?:mp4|mkv|avi|webm)[^"']*)["']/i);
                     if (urlMatch) {
                         downloadUrl = urlMatch[1] || urlMatch[0];
-                        console.log('Extracted direct URL from page:', downloadUrl);
+                        console.log('Extracted direct URL:', downloadUrl);
                     } else {
                         throw new Error('REDIRECT_PAGE');
                     }
@@ -2106,25 +2123,18 @@
             } catch (headErr) {
                 if (headErr.name === 'AbortError') throw headErr;
                 if (headErr.message === 'REDIRECT_PAGE') throw headErr;
-                // HEAD failed (CORS likely) — try GET directly, it may still work
                 console.warn('HEAD probe failed:', headErr.message, '— trying direct GET');
             }
 
-            // Step 2: Download the file with progress tracking
             if (infoEl()) infoEl().textContent = 'Starting download...';
             const resp = await fetch(downloadUrl, {
-                signal: controller.signal,
-                redirect: 'follow',
-                credentials: 'omit'
+                signal: controller.signal, redirect: 'follow', credentials: 'omit'
             });
 
             if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
 
-            // Verify we got a file, not an HTML page
             const contentType = resp.headers.get('content-type') || '';
-            if (contentType.includes('text/html')) {
-                throw new Error('REDIRECT_PAGE');
-            }
+            if (contentType.includes('text/html')) throw new Error('REDIRECT_PAGE');
 
             const totalBytes = parseInt(resp.headers.get('content-length') || '0');
             const reader = resp.body.getReader();
@@ -2135,7 +2145,6 @@
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
                 chunks.push(value);
                 downloaded += value.length;
 
@@ -2163,71 +2172,52 @@
                 }
             }
 
-            // Combine chunks into blob — keep in memory for playback
+            // Done — create blob and store
             const blob = new Blob(chunks, { type: 'video/mp4' });
             const blobUrl = URL.createObjectURL(blob);
-
-            // Store blob in memory map (survives as long as page is open)
             if (!window._dlBlobs) window._dlBlobs = {};
             const blobId = 'dl_' + Date.now();
             window._dlBlobs[blobId] = blobUrl;
 
-            // Save to history FIRST (before any navigation risk)
-            addToDownloadHistory({
-                title: meta.title || filename,
-                filename,
-                quality: stream.quality,
+            // Update the history entry to complete
+            updateDownloadHistory(dlIndex, {
+                status: 'complete',
                 size: totalBytes > 0 ? formatBytes(totalBytes) : formatBytes(downloaded),
-                poster: meta.poster || '',
-                date: new Date().toLocaleDateString(),
-                url: stream.url,
                 blobId: blobId
             });
-
             renderDownloads();
 
-            // Show success with save + play buttons
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
                 <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:8px">
-                    ${formatBytes(downloaded)} ready. Play below or save to Files.
-                </div>
-                <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
-                    <button class="btn btn-sm btn-primary" onclick="playInApp(0)">&#9654; Play Now</button>
-                    <button class="btn btn-sm btn-secondary" onclick="saveBlobToFiles('${blobId}','${esc(filename.replace(/'/g,''))}')">Save to Files</button>
+                    ${formatBytes(downloaded)} ready. Use Play or VLC buttons below.
                 </div>
             </div>`;
 
         } catch (e) {
+            // Update history entry to failed (it still stays in the list!)
+            updateDownloadHistory(dlIndex, { status: 'failed', error: e.message });
+            renderDownloads();
+
             if (e.name === 'AbortError') {
                 activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
                     <div style="text-align:center;color:var(--danger);font-weight:600">Download cancelled</div>
                 </div>`;
-                setTimeout(() => { activeEl.innerHTML = ''; }, 5000);
             } else if (e.message === 'REDIRECT_PAGE') {
-                // CORS or redirect issue — TorBox returned a webpage, not a file
-                // Fall back to opening in an embedded iframe to keep user in the app
                 activeEl.innerHTML = `<div class="dl-progress-wrap">
                     <div style="font-weight:600;margin-bottom:8px;color:var(--warn)">&#9888; Server returned a download page</div>
                     <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
-                        This source requires manual download. Tap below to open the download page, then tap the download button on that page.
+                        This source requires manual download. Tap below to open it, or try a different source (Torrentio links often work better).
                     </div>
                     <button class="btn btn-primary" onclick="openDownloadPage('${esc(stream.url)}')">Open Download Page</button>
-                    <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">
-                        Tip: Try a different source — Torrentio links often work better for direct download.
-                    </div>
                 </div>`;
             } else {
-                // Network / CORS error
                 const isCors = e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('CORS') || e.message === 'Load failed';
                 activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
                     <div style="text-align:center;color:var(--danger);font-weight:600">Download failed</div>
                     <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">${esc(e.message)}</div>
-                    ${isCors ? `<div style="font-size:11px;color:var(--warn);margin-top:6px;text-align:center">
-                        This source doesn't allow direct download from the browser.<br>Try a different source.
-                    </div>` : ''}
+                    ${isCors ? `<div style="font-size:11px;color:var(--warn);margin-top:6px;text-align:center">This source blocks direct browser downloads. Try a different source.</div>` : ''}
                     <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center">
-                        <button class="btn btn-sm btn-primary" onclick="startDownload(${streamIndex})">Retry</button>
                         <button class="btn btn-sm btn-secondary" onclick="openDownloadPage('${esc(stream.url)}')">Open Link</button>
                     </div>
                 </div>`;
@@ -2241,6 +2231,18 @@
         if (activeDownload && activeDownload.controller) {
             activeDownload.controller.abort();
         }
+    }
+
+    function retryDownload(historyIndex) {
+        const d = downloadHistory[historyIndex];
+        if (!d || !d.url) return;
+        // Remove the failed entry and re-download
+        downloadHistory.splice(historyIndex, 1);
+        saveDownloadHistory();
+        // Set up the stream data for startDownload
+        window._resolvedStreams = [{ url: d.url, title: d.title, quality: d.quality, size: d.size, addon: '' }];
+        window._dlMeta = { title: d.title, year: '', poster: d.poster || '' };
+        startDownload(0);
     }
 
     function openDownloadPage(url) {
