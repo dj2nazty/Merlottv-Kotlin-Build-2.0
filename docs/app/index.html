@@ -53,7 +53,7 @@
         .nav-item svg { width: 24px; height: 24px; fill: currentColor; }
 
         /* ─── Login ─── */
-        #view-login { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding-bottom: 0; }
+        #view-login.active { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding-bottom: 0; }
         .login-logo { text-align: center; margin-bottom: 32px; }
         .login-logo h1 { color: var(--accent); font-size: 32px; font-weight: 800; letter-spacing: 3px; }
         .login-logo p { color: var(--muted); font-size: 14px; margin-top: 8px; }
@@ -244,27 +244,27 @@
                 <h1>MERLOT TV</h1>
                 <p>Manage your account</p>
             </div>
-            <div class="card" style="width: 100%; max-width: 360px;">
+            <form id="login-form" class="card" style="width: 100%; max-width: 360px;" autocomplete="on">
                 <h3 id="login-title" style="text-align:center">Sign In</h3>
                 <div id="login-error" class="error-msg hidden"></div>
                 <div class="form-group">
                     <label>Email</label>
-                    <input type="email" id="login-email" class="form-input" placeholder="your@email.com" autocomplete="email">
+                    <input type="email" id="login-email" class="form-input" placeholder="your@email.com" autocomplete="email" inputmode="email" required>
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" id="login-password" class="form-input" placeholder="Password" autocomplete="current-password">
+                    <input type="password" id="login-password" class="form-input" placeholder="Password" autocomplete="current-password" required>
                 </div>
                 <div id="login-confirm-group" class="form-group hidden">
                     <label>Confirm Password</label>
                     <input type="password" id="login-confirm" class="form-input" placeholder="Confirm password">
                 </div>
-                <button class="btn btn-primary" id="btn-login">Sign In</button>
+                <button type="submit" class="btn btn-primary" id="btn-login">Sign In</button>
                 <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--muted)">
                     <span id="login-toggle-text">Don't have an account? </span>
                     <a href="#" id="login-toggle">Sign Up</a>
                 </div>
-            </div>
+            </form>
         </div>
 
         <!-- ─── Header (shown when logged in) ─── -->
@@ -573,8 +573,10 @@
         document.getElementById('login-error').classList.add('hidden');
     });
 
-    document.getElementById('btn-login').addEventListener('click', doLogin);
-    document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter' && !isSignUp) doLogin(); });
+    document.getElementById('login-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        doLogin();
+    });
 
     async function doLogin() {
         const email = document.getElementById('login-email').value.trim();
@@ -606,6 +608,7 @@
                 else if (code.includes('EMAIL_EXISTS')) msg = 'Account already exists — try signing in';
                 else if (code.includes('WEAK_PASSWORD')) msg = 'Password too weak (min 6 chars)';
                 else if (code.includes('TOO_MANY')) msg = 'Too many attempts — try later';
+                else msg = 'Auth error: ' + code;
                 throw new Error(msg);
             }
 
