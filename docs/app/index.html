@@ -396,10 +396,14 @@
 
         /* ─── Modal ─── */
         .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200;
-            display: flex; align-items: center; justify-content: center; padding: 24px;
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500;
+            display: flex; align-items: flex-end; justify-content: center; padding: 0;
         }
-        .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 400px; }
+        .modal {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 16px 16px 0 0; padding: 24px; padding-bottom: calc(24px + env(safe-area-inset-bottom));
+            width: 100%; max-width: 500px; max-height: 85vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+        }
         .modal h3 { margin-bottom: 16px; }
     </style>
 </head>
@@ -434,7 +438,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.1</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v3.2</div>
             </form>
         </div>
 
@@ -824,9 +828,10 @@
                 else if (code.includes('EMAIL_EXISTS')) msg = 'Account already exists — try signing in';
                 else if (code.includes('WEAK_PASSWORD')) msg = 'Password too weak (min 6 chars)';
                 else if (code.includes('TOO_MANY')) msg = 'Too many attempts — try later';
-                else if (code.includes('API_KEY_HTTP_REFERRER_BLOCKED') || code.includes('API key not valid')) msg = 'API key blocked — this domain needs to be authorized in Firebase Console';
-                else if (code.includes('ADMIN_ONLY_OPERATION')) msg = 'Email/Password sign-in is not enabled in Firebase Console';
-                else msg = 'Auth error: ' + code;
+                else if (code.includes('API_KEY_HTTP_REFERRER_BLOCKED') || code.includes('API key not valid') || code.includes('API_KEY_INVALID')) msg = 'API key blocked for this domain. Go to Firebase Console → Project Settings → API Keys → Browser key → add "dj2nazty.github.io/*" to HTTP referrer restrictions (or remove restrictions).';
+                else if (code.includes('ADMIN_ONLY_OPERATION')) msg = 'Email/Password sign-in is not enabled. Go to Firebase Console → Authentication → Sign-in method → enable Email/Password.';
+                else if (code.includes('INVALID_EMAIL')) msg = 'Invalid email address';
+                else msg = 'Auth error: ' + code + '. Check browser console for details.';
                 throw new Error(msg);
             }
 
@@ -1897,7 +1902,7 @@
                     </div>
                 </div>
                 <div class="dl-item-actions">
-                    ${d.url ? `<button class="dl-play-btn" onclick="window.open('${esc(d.url)}','_blank')" title="Re-download">&#x2B07;</button>` : ''}
+                    ${d.url ? `<button class="dl-play-btn" onclick="playDownload(${i})" title="Play / Open">&#9654;</button>` : ''}
                     <button class="dl-remove-btn" onclick="removeFromDownloadHistory(${i})" title="Remove">&#10005;</button>
                 </div>
             </div>`;
@@ -2134,6 +2139,21 @@
             openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
                 <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
         }
+    }
+
+    // ─── Play downloaded item ───
+    function playDownload(index) {
+        const d = downloadHistory[index];
+        if (!d || !d.url) return;
+        // On iOS Safari, opening the URL in a new tab will either stream it or re-download
+        // Use a link click so Safari handles it natively
+        const a = document.createElement('a');
+        a.href = d.url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 
     // ═══════════════════════════════════════════
