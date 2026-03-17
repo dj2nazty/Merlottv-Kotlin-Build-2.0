@@ -281,7 +281,11 @@ class CloudSyncManager @Inject constructor(
             val doc = firestore.collection(USERS).document(uid)
                 .collection("favorites").document(profileId).get().await()
 
-            if (!doc.exists()) return
+            if (!doc.exists()) {
+                Log.d(TAG, "No cloud favorites for $profileId, uploading local")
+                uploadFavorites(profileId)
+                return
+            }
 
             @Suppress("UNCHECKED_CAST")
             val channels = (doc.get("channels") as? List<String>)?.toSet() ?: emptySet()
@@ -329,7 +333,11 @@ class CloudSyncManager @Inject constructor(
             val doc = firestore.collection(USERS).document(uid)
                 .collection("watchProgress").document(profileId).get().await()
 
-            if (!doc.exists()) return
+            if (!doc.exists()) {
+                Log.d(TAG, "No cloud watch progress for $profileId, uploading local")
+                uploadWatchProgress(profileId)
+                return
+            }
 
             @Suppress("UNCHECKED_CAST")
             val itemsRaw = doc.get("items") as? Map<String, Map<String, Any>> ?: return

@@ -465,6 +465,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 profileDataStore.addProfile(name, colorIndex)
+                cloudSyncManager.notifyProfilesChanged()
             } catch (_: Exception) {}
         }
     }
@@ -472,6 +473,7 @@ class SettingsViewModel @Inject constructor(
     fun removeProfile(profileId: String) {
         viewModelScope.launch {
             profileDataStore.removeProfile(profileId)
+            cloudSyncManager.notifyProfilesChanged()
         }
     }
 

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.UserProfile
+import com.merlottv.kotlin.data.sync.CloudSyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -15,7 +16,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ProfilePickerViewModel @Inject constructor(
-    private val profileDataStore: ProfileDataStore
+    private val profileDataStore: ProfileDataStore,
+    private val cloudSyncManager: CloudSyncManager
 ) : ViewModel() {
 
     val profiles: StateFlow<List<UserProfile>> = profileDataStore.profiles
@@ -37,6 +39,7 @@ class ProfilePickerViewModel @Inject constructor(
     fun selectProfile(profileId: String) {
         viewModelScope.launch {
             profileDataStore.setActiveProfile(profileId)
+            cloudSyncManager.notifyProfilesChanged()
         }
     }
 
@@ -45,6 +48,7 @@ class ProfilePickerViewModel @Inject constructor(
             try {
                 val profile = profileDataStore.addProfile(name, colorIndex, avatarUrl)
                 profileDataStore.setActiveProfile(profile.id)
+                cloudSyncManager.notifyProfilesChanged()
                 onCreated(profile.id)
             } catch (_: Exception) {}
         }

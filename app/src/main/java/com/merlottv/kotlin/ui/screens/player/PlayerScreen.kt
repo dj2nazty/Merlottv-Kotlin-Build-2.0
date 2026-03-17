@@ -74,11 +74,17 @@ import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import com.merlottv.kotlin.data.repository.SkipIntroRepository
 import com.merlottv.kotlin.data.repository.SubtitleRepository
+import com.merlottv.kotlin.data.sync.CloudSyncManager
+import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.Stream
 import com.merlottv.kotlin.domain.model.Subtitle
 import com.merlottv.kotlin.ui.theme.MerlotColors
 import com.merlottv.kotlin.core.player.FrameRateUtils
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +92,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface PlayerSyncEntryPoint {
+    fun cloudSyncManager(): CloudSyncManager
+    fun profileDataStore(): ProfileDataStore
+}
 
 private val FocusedGrey = Color(0xFF666666)
 
@@ -148,6 +161,9 @@ fun PlayerScreen(
     }
     val settingsStore = remember {
         try { SettingsDataStore(context.applicationContext) } catch (_: Exception) { null }
+    }
+    val syncEntryPoint = remember {
+        try { EntryPointAccessors.fromApplication(context.applicationContext, PlayerSyncEntryPoint::class.java) } catch (_: Exception) { null }
     }
     val subtitleRepo = remember { SubtitleRepository(
         okhttp3.OkHttpClient.Builder().build(),
@@ -347,6 +363,11 @@ fun PlayerScreen(
                         watchProgressStore?.saveProgress(
                             id, currentPosition, totalDuration, title, poster, contentType
                         )
+                        // Sync watch progress to cloud
+                        try {
+                            val pid = syncEntryPoint?.profileDataStore()?.getActiveProfileId() ?: "default"
+                            syncEntryPoint?.cloudSyncManager()?.notifyWatchProgressChanged(pid)
+                        } catch (_: Exception) {}
                     }
                 }
             } catch (_: Exception) {}
@@ -366,6 +387,8 @@ fun PlayerScreen(
             kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
                 try {
                     watchProgressStore?.saveProgress(id, pos, dur, title, poster, contentType)
+                    val pid = syncEntryPoint?.profileDataStore()?.getActiveProfileId() ?: "default"
+                    syncEntryPoint?.cloudSyncManager()?.notifyWatchProgressChanged(pid)
                 } catch (_: Exception) {}
             }
         }
