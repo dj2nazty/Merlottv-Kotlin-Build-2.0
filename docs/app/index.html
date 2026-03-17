@@ -377,7 +377,8 @@
                 <div class="icon">&#128100;</div>
                 <div><div class="label">Profiles</div><div class="sublabel">Manage user profiles</div></div>
             </div>
-            <div style="margin-top:20px">
+            <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+                <button class="btn btn-primary" id="btn-sync-now" onclick="syncNow()">&#x21bb; Sync Now</button>
                 <button class="btn btn-danger" id="btn-signout">Sign Out</button>
             </div>
         </div>
@@ -852,6 +853,50 @@
     }
 
     document.getElementById('btn-refresh').addEventListener('click', () => onLoggedIn());
+
+    async function syncNow() {
+        const btn = document.getElementById('btn-sync-now');
+        const statusEl = document.getElementById('dash-status');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Syncing...';
+        statusEl.textContent = '';
+
+        try {
+            // Upload all local web app state to Firestore
+            await fsSet(`users/${auth.uid}/profiles/data`, profilesData);
+            await fsSet(`users/${auth.uid}/settings/app`, settingsData);
+
+            const pid = profilesData.activeProfileId || 'default';
+            if (Object.keys(favoritesData).length > 0) {
+                await fsSet(`users/${auth.uid}/favorites/${pid}`, favoritesData);
+            }
+
+            // Re-download everything fresh from cloud
+            const [profiles, settings] = await Promise.all([
+                fsGet(`users/${auth.uid}/profiles/data`),
+                fsGet(`users/${auth.uid}/settings/app`)
+            ]);
+            if (profiles) profilesData = profiles;
+            if (settings) settingsData = settings;
+
+            const activePid = profilesData.activeProfileId || 'default';
+            const favs = await fsGet(`users/${auth.uid}/favorites/${activePid}`);
+            if (favs) favoritesData = favs;
+
+            const wp = await fsGet(`users/${auth.uid}/watchProgress/${activePid}`);
+            if (wp) watchProgressData = wp;
+
+            updateDashStats();
+            statusEl.innerHTML = '<div class="success-msg">Sync complete</div>';
+            setTimeout(() => statusEl.textContent = '', 3000);
+        } catch (e) {
+            console.error('Sync failed:', e);
+            statusEl.innerHTML = `<div class="error-msg">Sync failed: ${esc(e.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '&#x21bb; Sync Now';
+        }
+    }
 
     // ═══════════════════════════════════════════
     //  Settings
