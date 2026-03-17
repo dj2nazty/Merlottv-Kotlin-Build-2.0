@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface AddonRepository {
     fun getAllAddons(): Flow<List<Addon>>
+    fun getEnabledAddons(): Flow<List<Addon>>
     suspend fun fetchManifest(url: String): Addon?
     suspend fun getCatalog(addon: Addon, type: String, catalogId: String, skip: Int = 0, genre: String? = null): List<MetaPreview>
     suspend fun getMeta(type: String, id: String): Meta?

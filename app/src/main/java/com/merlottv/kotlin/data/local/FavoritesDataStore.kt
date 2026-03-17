@@ -43,6 +43,10 @@ class FavoritesDataStore(private val context: Context) {
 
         // Custom named favorites lists: JSON object { "listName": ["vodId1", "vodId2", ...], ... }
         val CUSTOM_LISTS = stringPreferencesKey("custom_favorites_lists")
+
+        // Watched VOD tracking (profile-aware)
+        fun watchedKey(profileId: String) = stringSetPreferencesKey("watched_vod_$profileId")
+        val LEGACY_WATCHED = stringSetPreferencesKey("watched_vod")
     }
 
     // =============== Profile-aware favorites ===============
@@ -200,6 +204,37 @@ class FavoritesDataStore(private val context: Context) {
                 json.put(listName, newArr)
                 prefs[CUSTOM_LISTS] = json.toString()
             }
+        }
+    }
+
+    // =============== Rename Custom List ===============
+
+    suspend fun renameCustomList(oldName: String, newName: String) {
+        if (oldName == newName || newName.isBlank()) return
+        context.favoritesDataStore.edit { prefs ->
+            val raw = prefs[CUSTOM_LISTS] ?: "{}"
+            val json = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
+            if (json.has(oldName)) {
+                val arr = json.getJSONArray(oldName)
+                json.remove(oldName)
+                json.put(newName.trim(), arr)
+                prefs[CUSTOM_LISTS] = json.toString()
+            }
+        }
+    }
+
+    // =============== Watched VOD Tracking ===============
+
+    fun watchedVodIds(profileId: String): Flow<Set<String>> = context.favoritesDataStore.data.map { prefs ->
+        prefs[watchedKey(profileId)] ?: prefs[LEGACY_WATCHED] ?: emptySet()
+    }
+
+    suspend fun toggleWatched(vodId: String, profileId: String) {
+        context.favoritesDataStore.edit { prefs ->
+            val key = watchedKey(profileId)
+            val current = prefs[key]?.toMutableSet() ?: mutableSetOf()
+            if (current.contains(vodId)) current.remove(vodId) else current.add(vodId)
+            prefs[key] = current
         }
     }
 

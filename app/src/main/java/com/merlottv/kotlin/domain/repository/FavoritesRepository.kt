@@ -20,4 +20,9 @@ interface FavoritesRepository {
     suspend fun deleteCustomList(name: String)
     suspend fun addToCustomList(listName: String, vodId: String)
     suspend fun removeFromCustomList(listName: String, vodId: String)
+    suspend fun renameCustomList(oldName: String, newName: String)
+
+    // Watched tracking
+    fun getWatchedVodIds(): Flow<Set<String>>
+    suspend fun toggleWatched(vodId: String)
 }

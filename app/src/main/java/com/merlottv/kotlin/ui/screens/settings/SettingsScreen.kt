@@ -1079,16 +1079,33 @@ fun SettingsScreen(
                 Text("Addons extend Merlot TV with additional streaming sources. Default addons are built-in and cannot be removed.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
                 uiState.addons.forEach { addon ->
+                    val isEnabled = !uiState.disabledAddons.contains(addon.url)
                     Row(
-                        modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).padding(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isEnabled) MerlotColors.Surface2 else MerlotColors.Surface2.copy(alpha = 0.4f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .dpadFocusable(onClick = { viewModel.toggleAddonEnabled(addon.url, isEnabled) })
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(addon.name, color = MerlotColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    addon.name,
+                                    color = if (isEnabled) MerlotColors.TextPrimary else MerlotColors.TextMuted,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                                 if (addon.version.isNotEmpty()) {
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("v${addon.version}", color = MerlotColors.TextMuted, fontSize = 9.sp)
+                                }
+                                if (addon.isDefault) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                             if (addon.description.isNotEmpty()) {
@@ -1097,13 +1114,20 @@ fun SettingsScreen(
                             Text(addon.url, color = MerlotColors.TextMuted.copy(alpha = 0.6f), fontSize = 9.sp, maxLines = 1)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        if (addon.isDefault) {
-                            Text("built-in", color = MerlotColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        } else {
+                        if (!addon.isDefault) {
                             IconButton(onClick = { viewModel.removeAddon(addon.url) }) {
                                 Icon(Icons.Default.Delete, "Remove addon", tint = MerlotColors.TextMuted, modifier = Modifier.size(18.dp))
                             }
                         }
+                        Switch(
+                            checked = isEnabled,
+                            onCheckedChange = null,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MerlotColors.Accent,
+                                checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier.height(24.dp).focusable(false)
+                        )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                 }

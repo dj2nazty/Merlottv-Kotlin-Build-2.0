@@ -189,7 +189,7 @@ class VodViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val addons = addonRepository.getAllAddons().first()
+                val addons = addonRepository.getEnabledAddons().first()
 
                 // Step 1: Fetch all manifests in parallel
                 val manifests = supervisorScope {

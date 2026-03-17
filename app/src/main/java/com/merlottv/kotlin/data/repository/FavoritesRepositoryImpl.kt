@@ -92,4 +92,20 @@ class FavoritesRepositoryImpl @Inject constructor(
     override suspend fun removeFromCustomList(listName: String, vodId: String) {
         favoritesDataStore.removeFromCustomList(listName, vodId)
     }
+
+    override suspend fun renameCustomList(oldName: String, newName: String) {
+        favoritesDataStore.renameCustomList(oldName, newName)
+    }
+
+    // Watched tracking
+
+    override fun getWatchedVodIds(): Flow<Set<String>> =
+        profileDataStore.activeProfileId.flatMapLatest { profileId ->
+            favoritesDataStore.watchedVodIds(profileId)
+        }
+
+    override suspend fun toggleWatched(vodId: String) {
+        val profileId = profileDataStore.getActiveProfileId()
+        favoritesDataStore.toggleWatched(vodId, profileId)
+    }
 }

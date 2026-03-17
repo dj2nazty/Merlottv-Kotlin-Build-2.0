@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -46,6 +47,7 @@ class SettingsDataStore(private val context: Context) {
         val LAST_WATCHED_CHANNEL_ID = stringPreferencesKey("last_watched_channel_id")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
+        val DISABLED_ADDONS = stringSetPreferencesKey("disabled_addons")
 
         // Live TV category order
         val CATEGORY_ORDER = stringPreferencesKey("live_tv_category_order")
@@ -230,6 +232,23 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setCustomAddons(json: String) {
         context.settingsDataStore.edit { it[CUSTOM_ADDONS] = json }
+    }
+
+    // ─── Disabled Addons ───
+    val disabledAddons: Flow<Set<String>> = context.settingsDataStore.data.map { prefs ->
+        prefs[DISABLED_ADDONS] ?: emptySet()
+    }
+
+    suspend fun setAddonEnabled(url: String, enabled: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[DISABLED_ADDONS]?.toMutableSet() ?: mutableSetOf()
+            if (enabled) {
+                current.remove(url)
+            } else {
+                current.add(url)
+            }
+            prefs[DISABLED_ADDONS] = current
+        }
     }
 
     // ─── Weather Alerts Toggle ───

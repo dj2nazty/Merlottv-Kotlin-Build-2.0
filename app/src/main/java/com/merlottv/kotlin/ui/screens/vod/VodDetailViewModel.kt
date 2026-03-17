@@ -34,6 +34,7 @@ data class VodDetailUiState(
     val streams: List<Stream> = emptyList(),
     val isLoadingStreams: Boolean = false,
     val isFavorite: Boolean = false,
+    val isWatched: Boolean = false,
     val selectedStreamUrl: String? = null,
     val selectedStreamTitle: String? = null,
     val autoPlayTriggered: Boolean = false,
@@ -79,6 +80,7 @@ class VodDetailViewModel @Inject constructor(
     init {
         loadMeta()
         checkFavorite()
+        checkWatched()
         loadWatchProgress()
     }
 
@@ -285,6 +287,20 @@ class VodDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val isFav = favoritesRepository.isFavoriteVod(id)
             _uiState.value = _uiState.value.copy(isFavorite = isFav)
+        }
+    }
+
+    private fun checkWatched() {
+        viewModelScope.launch {
+            favoritesRepository.getWatchedVodIds().collect { watchedIds ->
+                _uiState.value = _uiState.value.copy(isWatched = watchedIds.contains(id))
+            }
+        }
+    }
+
+    fun toggleWatched() {
+        viewModelScope.launch {
+            favoritesRepository.toggleWatched(id)
         }
     }
 

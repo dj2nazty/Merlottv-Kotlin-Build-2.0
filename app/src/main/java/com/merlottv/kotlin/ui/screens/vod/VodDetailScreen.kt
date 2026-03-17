@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -115,6 +117,8 @@ fun VodDetailScreen(
     // Default focus on Play button when meta loads
     LaunchedEffect(uiState.meta) {
         if (uiState.meta != null) {
+            // Small delay to ensure the Play button composable is laid out
+            kotlinx.coroutines.delay(150)
             try { playButtonFocusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
@@ -150,7 +154,7 @@ fun VodDetailScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(300.dp)
+                            .height(220.dp)
                     ) {
                         AsyncImage(
                             model = meta.background.ifEmpty { meta.poster },
@@ -259,271 +263,315 @@ fun VodDetailScreen(
                                     color = MerlotColors.TextMuted,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 8.dp),
-                                    lineHeight = 18.sp
+                                    lineHeight = 18.sp,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
-                            // Cast — show TMDB cast with photos if available, fallback to text
-                            if (uiState.castMembers.isNotEmpty()) {
-                                Text(
-                                    text = "Cast",
-                                    color = MerlotColors.TextMuted,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 6.dp)
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    items(uiState.castMembers.take(10), key = { it.id }) { castMember ->
-                                        CastMemberCard(
-                                            castMember = castMember,
-                                            onClick = {
-                                                onNavigateToActor?.invoke(castMember.id, castMember.name)
-                                            }
-                                        )
+                        }
+                    }
+
+                    // Cast — moved outside poster row so buttons are always visible
+                    if (uiState.castMembers.isNotEmpty()) {
+                        Text(
+                            text = "Cast",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 16.dp, top = 6.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp)
+                        ) {
+                            items(uiState.castMembers.take(10), key = { it.id }) { castMember ->
+                                CastMemberCard(
+                                    castMember = castMember,
+                                    onClick = {
+                                        onNavigateToActor?.invoke(castMember.id, castMember.name)
                                     }
-                                }
-                            } else if (meta.cast.isNotEmpty()) {
-                                Text(
-                                    text = "Cast: ${meta.cast.take(5).joinToString(", ")}",
-                                    color = MerlotColors.TextMuted,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
+                        }
+                    } else if (meta.cast.isNotEmpty()) {
+                        Text(
+                            text = "Cast: ${meta.cast.take(5).joinToString(", ")}",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(start = 16.dp, top = 6.dp)
+                        )
+                    }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                            // Watch progress bar (if previously watched)
-                            if (uiState.watchProgressPercent > 0f && !isSeries) {
-                                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(4.dp)
-                                            .clip(RoundedCornerShape(2.dp))
-                                            .background(MerlotColors.Surface2)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth(uiState.watchProgressPercent)
-                                                .height(4.dp)
-                                                .background(MerlotColors.Accent)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    val remainMs = (uiState.watchDuration - uiState.watchPosition).coerceAtLeast(0)
-                                    val remainMin = remainMs / 60_000
-                                    val remainText = if (remainMin >= 60) {
-                                        "${remainMin / 60}h ${remainMin % 60}m remaining"
-                                    } else {
-                                        "${remainMin}m remaining"
-                                    }
-                                    Text(
-                                        text = "${(uiState.watchProgressPercent * 100).toInt()}% watched \u2022 $remainText",
-                                        color = MerlotColors.TextMuted,
-                                        fontSize = 10.sp
-                                    )
-                                }
+                    // Watch progress bar (if previously watched) — outside poster row so always visible
+                    if (uiState.watchProgressPercent > 0f && !isSeries) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(MerlotColors.Surface2)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(uiState.watchProgressPercent)
+                                        .height(4.dp)
+                                        .background(MerlotColors.Accent)
+                                )
                             }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val remainMs = (uiState.watchDuration - uiState.watchPosition).coerceAtLeast(0)
+                            val remainMin = remainMs / 60_000
+                            val remainText = if (remainMin >= 60) {
+                                "${remainMin / 60}h ${remainMin % 60}m remaining"
+                            } else {
+                                "${remainMin}m remaining"
+                            }
+                            Text(
+                                text = "${(uiState.watchProgressPercent * 100).toInt()}% watched \u2022 $remainText",
+                                color = MerlotColors.TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
 
-                            // Action buttons — Play/Resume/Restart for movies (series uses episode play)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (!isSeries) {
-                                    val hasProgress = uiState.watchProgressPercent > 0f
+                    // Action buttons — always visible below poster row
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
+                        if (!isSeries) {
+                            val hasProgress = uiState.watchProgressPercent > 0f
 
-                                    if (hasProgress) {
-                                        // Resume button — primary action
-                                        var resumeFocused by remember { mutableStateOf(false) }
-                                        Button(
-                                            onClick = { viewModel.playBestStream() },
-                                            enabled = !uiState.isLoadingStreams,
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (resumeFocused) FocusedButtonGrey else MerlotColors.Accent,
-                                                contentColor = if (resumeFocused) MerlotColors.White else MerlotColors.Black
-                                            ),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier
-                                                .focusRequester(playButtonFocusRequester)
-                                                .onFocusChanged { resumeFocused = it.isFocused }
-                                                .focusable()
-                                                .onPreviewKeyEvent { event ->
-                                                    if (event.type == KeyEventType.KeyDown &&
-                                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                                    ) {
-                                                        viewModel.playBestStream()
-                                                        true
-                                                    } else false
-                                                }
-                                        ) {
-                                            if (uiState.isLoadingStreams) {
-                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MerlotColors.Black, strokeWidth = 2.dp)
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            } else {
-                                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("RESUME", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            }
-                                        }
-
-                                        // Restart button
-                                        var restartFocused by remember { mutableStateOf(false) }
-                                        Button(
-                                            onClick = { viewModel.playFromStart() },
-                                            enabled = !uiState.isLoadingStreams,
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (restartFocused) FocusedButtonGrey else MerlotColors.Surface2,
-                                                contentColor = if (restartFocused) MerlotColors.White else MerlotColors.TextPrimary
-                                            ),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier
-                                                .onFocusChanged { restartFocused = it.isFocused }
-                                                .focusable()
-                                                .onPreviewKeyEvent { event ->
-                                                    if (event.type == KeyEventType.KeyDown &&
-                                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                                    ) {
-                                                        viewModel.playFromStart()
-                                                        true
-                                                    } else false
-                                                }
-                                        ) {
-                                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("RESTART", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                        }
-                                    } else {
-                                        // Play button — no previous progress
-                                        var playFocused by remember { mutableStateOf(false) }
-                                        Button(
-                                            onClick = { viewModel.playBestStream() },
-                                            enabled = !uiState.isLoadingStreams,
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (playFocused) FocusedButtonGrey else MerlotColors.Accent,
-                                                contentColor = if (playFocused) MerlotColors.White else MerlotColors.Black
-                                            ),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier
-                                                .focusRequester(playButtonFocusRequester)
-                                                .onFocusChanged { playFocused = it.isFocused }
-                                                .focusable()
-                                                .onPreviewKeyEvent { event ->
-                                                    if (event.type == KeyEventType.KeyDown &&
-                                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                                    ) {
-                                                        viewModel.playBestStream()
-                                                        true
-                                                    } else false
-                                                }
-                                        ) {
-                                            if (uiState.isLoadingStreams) {
-                                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MerlotColors.Black, strokeWidth = 2.dp)
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            } else {
-                                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("PLAY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Like This button
-                                var likeFocused by remember { mutableStateOf(false) }
+                            if (hasProgress) {
+                                // Resume button — primary action
+                                var resumeFocused by remember { mutableStateOf(false) }
                                 Button(
-                                    onClick = { viewModel.loadSimilarContent() },
+                                    onClick = { viewModel.playBestStream() },
+                                    enabled = !uiState.isLoadingStreams,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (likeFocused) FocusedButtonGrey else MerlotColors.Surface2,
-                                        contentColor = if (likeFocused) MerlotColors.White else MerlotColors.TextPrimary
+                                        containerColor = if (resumeFocused) FocusedButtonGrey else MerlotColors.Accent,
+                                        contentColor = if (resumeFocused) MerlotColors.White else MerlotColors.Black
                                     ),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
-                                        .then(if (isSeries) Modifier.focusRequester(playButtonFocusRequester) else Modifier)
-                                        .onFocusChanged { likeFocused = it.isFocused }
+                                        .focusRequester(playButtonFocusRequester)
+                                        .onFocusChanged { resumeFocused = it.isFocused }
                                         .focusable()
                                         .onPreviewKeyEvent { event ->
                                             if (event.type == KeyEventType.KeyDown &&
                                                 (event.key == Key.DirectionCenter || event.key == Key.Enter)
                                             ) {
-                                                viewModel.loadSimilarContent()
+                                                viewModel.playBestStream()
                                                 true
                                             } else false
                                         }
                                 ) {
-                                    Icon(Icons.Default.ThumbUp, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("LIKE THIS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-
-                                // Trailer button — ALWAYS shown (direct YouTube ID or search fallback)
-                                if (uiState.trailerYtId != null || uiState.trailerSearchQuery != null) {
-                                    var trailerFocused by remember { mutableStateOf(false) }
-
-                                    // Helper: open trailer — native player for ytId, WebView for search fallback
-                                    val launchTrailer = {
-                                        val ytId = uiState.trailerYtId
-                                        val searchQuery = uiState.trailerSearchQuery
-                                        if (ytId != null) {
-                                            showingTrailerYtId = ytId
-                                        } else if (searchQuery != null) {
-                                            val encoded = java.net.URLEncoder.encode(searchQuery, "UTF-8")
-                                            showingTrailerSearchUrl = "https://www.youtube.com/results?search_query=$encoded"
-                                        }
-                                    }
-
-                                    Button(
-                                        onClick = { launchTrailer() },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (trailerFocused) FocusedButtonGrey else MerlotColors.Surface2,
-                                            contentColor = if (trailerFocused) MerlotColors.White else MerlotColors.TextPrimary
-                                        ),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier
-                                            .onFocusChanged { trailerFocused = it.isFocused }
-                                            .focusable()
-                                            .onPreviewKeyEvent { event ->
-                                                if (event.type == KeyEventType.KeyDown &&
-                                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                                                ) {
-                                                    launchTrailer()
-                                                    true
-                                                } else false
-                                            }
-                                    ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    if (uiState.isLoadingStreams) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MerlotColors.Black, strokeWidth = 2.dp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    } else {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("TRAILER", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("RESUME", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     }
                                 }
 
-                                // Favorite button — grey on focus
-                                var favFocused by remember { mutableStateOf(false) }
-                                IconButton(
-                                    onClick = { viewModel.toggleFavorite() },
+                                // Restart button
+                                var restartFocused by remember { mutableStateOf(false) }
+                                Button(
+                                    onClick = { viewModel.playFromStart() },
+                                    enabled = !uiState.isLoadingStreams,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (restartFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                        contentColor = if (restartFocused) MerlotColors.White else MerlotColors.TextPrimary
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
-                                        .onFocusChanged { favFocused = it.isFocused }
-                                        .then(
-                                            if (favFocused) Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(FocusedButtonGrey)
-                                            else Modifier
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = if (uiState.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Favorite",
-                                        tint = when {
-                                            favFocused -> MerlotColors.White
-                                            uiState.isFavorite -> MerlotColors.Accent
-                                            else -> MerlotColors.TextMuted
+                                        .onFocusChanged { restartFocused = it.isFocused }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                viewModel.playFromStart()
+                                                true
+                                            } else false
                                         }
-                                    )
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("RESTART", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            } else {
+                                // Play button — no previous progress
+                                var playFocused by remember { mutableStateOf(false) }
+                                Button(
+                                    onClick = { viewModel.playBestStream() },
+                                    enabled = !uiState.isLoadingStreams,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (playFocused) FocusedButtonGrey else MerlotColors.Accent,
+                                        contentColor = if (playFocused) MerlotColors.White else MerlotColors.Black
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .focusRequester(playButtonFocusRequester)
+                                        .onFocusChanged { playFocused = it.isFocused }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                viewModel.playBestStream()
+                                                true
+                                            } else false
+                                        }
+                                ) {
+                                    if (uiState.isLoadingStreams) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MerlotColors.Black, strokeWidth = 2.dp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Finding stream...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    } else {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("PLAY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
                                 }
                             }
+                        }
+
+                        // Trailer button — ALWAYS shown (direct YouTube ID or search fallback)
+                        if (uiState.trailerYtId != null || uiState.trailerSearchQuery != null) {
+                            var trailerFocused by remember { mutableStateOf(false) }
+
+                            // Helper: open trailer — native player for ytId, WebView for search fallback
+                            val launchTrailer = {
+                                val ytId = uiState.trailerYtId
+                                val searchQuery = uiState.trailerSearchQuery
+                                if (ytId != null) {
+                                    showingTrailerYtId = ytId
+                                } else if (searchQuery != null) {
+                                    val encoded = java.net.URLEncoder.encode(searchQuery, "UTF-8")
+                                    showingTrailerSearchUrl = "https://www.youtube.com/results?search_query=$encoded"
+                                }
+                            }
+
+                            Button(
+                                onClick = { launchTrailer() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (trailerFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                    contentColor = if (trailerFocused) MerlotColors.White else MerlotColors.TextPrimary
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .onFocusChanged { trailerFocused = it.isFocused }
+                                    .focusable()
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown &&
+                                            (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                        ) {
+                                            launchTrailer()
+                                            true
+                                        } else false
+                                    }
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("TRAILER", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        // Mark as Watched / Unwatched button
+                        var watchedFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = { viewModel.toggleWatched() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (watchedFocused) FocusedButtonGrey
+                                    else if (uiState.isWatched) Color(0xFF2E7D32)
+                                    else MerlotColors.Surface2,
+                                contentColor = if (watchedFocused || uiState.isWatched) MerlotColors.White
+                                    else MerlotColors.TextPrimary
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .onFocusChanged { watchedFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                    ) {
+                                        viewModel.toggleWatched()
+                                        true
+                                    } else false
+                                }
+                        ) {
+                            Icon(
+                                if (uiState.isWatched) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                if (uiState.isWatched) "WATCHED" else "UNWATCHED",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        // Like This button
+                        var likeFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = { viewModel.loadSimilarContent() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (likeFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                contentColor = if (likeFocused) MerlotColors.White else MerlotColors.TextPrimary
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .then(if (isSeries) Modifier.focusRequester(playButtonFocusRequester) else Modifier)
+                                .onFocusChanged { likeFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                    ) {
+                                        viewModel.loadSimilarContent()
+                                        true
+                                    } else false
+                                }
+                        ) {
+                            Icon(Icons.Default.ThumbUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("LIKE THIS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        // Favorite heart button — last
+                        var favFocused by remember { mutableStateOf(false) }
+                        IconButton(
+                            onClick = { viewModel.toggleFavorite() },
+                            modifier = Modifier
+                                .onFocusChanged { favFocused = it.isFocused }
+                                .then(
+                                    if (favFocused) Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(FocusedButtonGrey)
+                                    else Modifier
+                                )
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Favorite",
+                                tint = when {
+                                    favFocused -> MerlotColors.White
+                                    uiState.isFavorite -> MerlotColors.Accent
+                                    else -> MerlotColors.TextMuted
+                                }
+                            )
                         }
                     }
 

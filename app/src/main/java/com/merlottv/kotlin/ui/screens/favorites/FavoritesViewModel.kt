@@ -21,7 +21,18 @@ data class FavoritesUiState(
     val selectedTab: String = "All", // "All", "Movies", "Series", "Channels", or custom list name
     val customLists: Map<String, List<String>> = emptyMap(),
     val showCreateListDialog: Boolean = false,
-    val newListName: String = ""
+    val newListName: String = "",
+    // Watched tracking
+    val watchedVodIds: Set<String> = emptySet(),
+    // Rename dialog
+    val showRenameDialog: Boolean = false,
+    val renameListTarget: String = "",
+    val renameListName: String = "",
+    // Item context menu (triggered by Menu button on poster card)
+    val showItemMenu: Boolean = false,
+    val itemMenuTarget: FavoriteVodMeta? = null,
+    // "Add to list" submenu inside item menu
+    val showAddToListMenu: Boolean = false
 ) {
     val filteredVodMetas: List<FavoriteVodMeta>
         get() {
@@ -99,6 +110,11 @@ class FavoritesViewModel @Inject constructor(
         viewModelScope.launch {
             favoritesRepository.getCustomLists().collect { lists ->
                 _uiState.value = _uiState.value.copy(customLists = lists)
+            }
+        }
+        viewModelScope.launch {
+            favoritesRepository.getWatchedVodIds().collect { ids ->
+                _uiState.value = _uiState.value.copy(watchedVodIds = ids)
             }
         }
     }
@@ -189,5 +205,92 @@ class FavoritesViewModel @Inject constructor(
 
     fun updateNewListName(name: String) {
         _uiState.value = _uiState.value.copy(newListName = name)
+    }
+
+    // ─── Rename list ───
+
+    fun showRenameDialog(listName: String) {
+        _uiState.value = _uiState.value.copy(
+            showRenameDialog = true,
+            renameListTarget = listName,
+            renameListName = listName
+        )
+    }
+
+    fun hideRenameDialog() {
+        _uiState.value = _uiState.value.copy(
+            showRenameDialog = false,
+            renameListTarget = "",
+            renameListName = ""
+        )
+    }
+
+    fun updateRenameListName(name: String) {
+        _uiState.value = _uiState.value.copy(renameListName = name)
+    }
+
+    fun confirmRename() {
+        val oldName = _uiState.value.renameListTarget
+        val newName = _uiState.value.renameListName.trim()
+        if (newName.isBlank() || newName == oldName) {
+            hideRenameDialog()
+            return
+        }
+        viewModelScope.launch {
+            favoritesRepository.renameCustomList(oldName, newName)
+            // If the renamed list was the active tab, update selectedTab
+            if (_uiState.value.selectedTab == oldName) {
+                _uiState.value = _uiState.value.copy(selectedTab = newName)
+            }
+            hideRenameDialog()
+        }
+    }
+
+    // ─── Item context menu ───
+
+    fun showItemMenu(meta: FavoriteVodMeta) {
+        _uiState.value = _uiState.value.copy(
+            showItemMenu = true,
+            itemMenuTarget = meta,
+            showAddToListMenu = false
+        )
+    }
+
+    fun hideItemMenu() {
+        _uiState.value = _uiState.value.copy(
+            showItemMenu = false,
+            itemMenuTarget = null,
+            showAddToListMenu = false
+        )
+    }
+
+    fun showAddToListSubmenu() {
+        _uiState.value = _uiState.value.copy(showAddToListMenu = true)
+    }
+
+    fun hideAddToListSubmenu() {
+        _uiState.value = _uiState.value.copy(showAddToListMenu = false)
+    }
+
+    // ─── Watched tracking ───
+
+    fun toggleWatched(vodId: String) {
+        viewModelScope.launch {
+            favoritesRepository.toggleWatched(vodId)
+        }
+    }
+
+    // ─── Remove from favorites ───
+
+    fun removeFavorite(vodId: String) {
+        viewModelScope.launch {
+            favoritesRepository.toggleFavoriteVod(vodId)
+            // Also remove from all custom lists
+            _uiState.value.customLists.forEach { (listName, ids) ->
+                if (ids.contains(vodId)) {
+                    favoritesRepository.removeFromCustomList(listName, vodId)
+                }
+            }
+        }
     }
 }

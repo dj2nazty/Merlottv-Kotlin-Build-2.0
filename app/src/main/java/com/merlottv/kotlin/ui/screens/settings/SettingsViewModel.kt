@@ -69,6 +69,8 @@ data class SettingsUiState(
     val nextEpisodeThresholdPercent: Int = 95,
     // Bitrate checker in Live TV Quick Menu
     val bitrateCheckerEnabled: Boolean = false,
+    // Disabled addons (URLs)
+    val disabledAddons: Set<String> = emptySet(),
     // Release notes
     val releaseNotes: String = "",
     val isFetchingReleaseNotes: Boolean = false,
@@ -107,6 +109,7 @@ class SettingsViewModel @Inject constructor(
             val nextEpAutoPlay = settingsDataStore.nextEpisodeAutoPlay.first()
             val nextEpThreshold = settingsDataStore.nextEpisodeThresholdPercent.first()
             val bitrateCheckerOn = settingsDataStore.bitrateCheckerEnabled.first()
+            val disabledAddonUrls = settingsDataStore.disabledAddons.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -123,7 +126,8 @@ class SettingsViewModel @Inject constructor(
                 frameRateMatching = frameRateMode,
                 nextEpisodeAutoPlay = nextEpAutoPlay,
                 nextEpisodeThresholdPercent = nextEpThreshold,
-                bitrateCheckerEnabled = bitrateCheckerOn
+                bitrateCheckerEnabled = bitrateCheckerOn,
+                disabledAddons = disabledAddonUrls
             )
         }
     }
@@ -481,6 +485,14 @@ class SettingsViewModel @Inject constructor(
             addonRepository.removeAddon(url)
             val addons = addonRepository.getAllAddons().first()
             _uiState.value = _uiState.value.copy(addons = addons)
+        }
+    }
+
+    fun toggleAddonEnabled(url: String, currentlyEnabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setAddonEnabled(url, !currentlyEnabled)
+            val updated = settingsDataStore.disabledAddons.first()
+            _uiState.value = _uiState.value.copy(disabledAddons = updated)
         }
     }
 

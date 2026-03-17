@@ -1,5 +1,6 @@
 package com.merlottv.kotlin.data.repository
 
+import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.Addon
 import com.merlottv.kotlin.domain.model.AddonCatalog
 import com.merlottv.kotlin.domain.model.CatalogExtra
@@ -11,11 +12,15 @@ import com.merlottv.kotlin.domain.model.Video
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.squareup.moshi.Moshi
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -29,10 +34,27 @@ import javax.inject.Singleton
 @Singleton
 class AddonRepositoryImpl @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val settingsDataStore: SettingsDataStore
 ) : AddonRepository {
 
     private val _addons = MutableStateFlow(DefaultData.DEFAULT_ADDONS)
+
+    // Track disabled addon URLs for filtering
+    @Volatile
+    private var disabledUrls: Set<String> = emptySet()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        scope.launch {
+            settingsDataStore.disabledAddons.collect { urls ->
+                disabledUrls = urls
+            }
+        }
+    }
+
+    private fun enabledAddons(): List<Addon> = _addons.value.filter { it.url !in disabledUrls }
 
     // Manifest cache: URL -> (Addon, timestamp)
     private val manifestCache = ConcurrentHashMap<String, Pair<Addon, Long>>()
@@ -56,6 +78,11 @@ class AddonRepositoryImpl @Inject constructor(
     }
 
     override fun getAllAddons(): Flow<List<Addon>> = _addons
+
+    override fun getEnabledAddons(): Flow<List<Addon>> =
+        combine(_addons, settingsDataStore.disabledAddons) { addons, disabled ->
+            addons.filter { it.url !in disabled }
+        }
 
     override suspend fun fetchManifest(url: String): Addon? {
         // Check cache first
@@ -140,9 +167,9 @@ class AddonRepositoryImpl @Inject constructor(
 
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
-            // Query ALL addons in parallel for massive speed improvement
+            // Query enabled addons in parallel for massive speed improvement
             val results = supervisorScope {
-                _addons.value.map { addon ->
+                enabledAddons().map { addon ->
                     async(Dispatchers.IO) {
                         withTimeoutOrNull(5000L) { // Reduced from 7s to 5s
                             try {
@@ -203,9 +230,9 @@ class AddonRepositoryImpl @Inject constructor(
     override suspend fun getStreams(type: String, id: String): List<Stream> {
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
-            // Query ALL addons in parallel for faster stream discovery
+            // Query enabled addons in parallel for faster stream discovery
             val results = supervisorScope {
-                _addons.value.map { addon ->
+                enabledAddons().map { addon ->
                     async(Dispatchers.IO) {
                         withTimeoutOrNull(7000L) {
                             try {

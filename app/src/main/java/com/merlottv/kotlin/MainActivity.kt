@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +51,7 @@ import com.merlottv.kotlin.ui.components.WeatherAlertTicker
 import com.merlottv.kotlin.ui.navigation.MerlotNavHost
 import com.merlottv.kotlin.ui.navigation.Screen
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import com.merlottv.kotlin.ui.components.VideoSplashScreen
 import com.merlottv.kotlin.ui.theme.MerlotTVTheme
 import com.merlottv.kotlin.ui.viewmodels.AlertsViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -67,9 +70,25 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MerlotApp() {
+    var showSplash by remember { mutableStateOf(true) }
+    var splashTimerDone by remember { mutableStateOf(false) }
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    // Minimum 6 seconds for the splash video
+    LaunchedEffect(Unit) {
+        delay(6000)
+        splashTimerDone = true
+    }
+
+    // Dismiss splash when timer is done AND we've navigated past ProfilePicker to Home
+    LaunchedEffect(splashTimerDone, currentRoute) {
+        if (splashTimerDone && currentRoute == Screen.Home.route) {
+            showSplash = false
+        }
+    }
     var isLiveTvFullscreen by remember { mutableStateOf(false) }
     var sidebarVisible by remember { mutableStateOf(false) }
     val sidebarFocusRequester = remember { FocusRequester() }
@@ -166,6 +185,11 @@ fun MerlotApp() {
             visible = showAlertBanner && showTickerOnScreen && alertsEnabled,
             modifier = Modifier.align(Alignment.TopCenter)
         )
+
+        // Video splash overlay — covers everything while app loads underneath
+        if (showSplash) {
+            VideoSplashScreen(onFinished = { /* controlled by MerlotApp LaunchedEffects */ })
+        }
     }
 }
 

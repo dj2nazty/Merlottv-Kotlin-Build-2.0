@@ -55,7 +55,7 @@ class SearchViewModel @Inject constructor(
 
     private suspend fun resolveAddons(): List<Addon> {
         resolvedAddons?.let { return it }
-        val base = addonRepository.getAllAddons().first()
+        val base = addonRepository.getEnabledAddons().first()
         val resolved = supervisorScope {
             base.map { addon ->
                 async(Dispatchers.IO) {
