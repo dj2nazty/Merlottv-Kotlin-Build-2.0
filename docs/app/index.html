@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>MerlotTV</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0D0D0D; color: #E8E8F0; min-height: 100vh;
+            overflow-x: hidden;
+        }
+        :root {
+            --accent: #00E5FF; --bg: #0D0D0D; --surface: #161620; --surface2: #1E1E2A;
+            --border: #2A2A3A; --text: #E8E8F0; --muted: #6B6B80; --danger: #FF4757;
+            --success: #00D68F; --warn: #FFD740;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        .hidden { display: none !important; }
+
+        /* ─── App Shell ─── */
+        #app { min-height: 100vh; padding-bottom: 72px; }
+        .view { display: none; padding: 16px; max-width: 600px; margin: 0 auto; }
+        .view.active { display: block; }
+
+        /* ─── Header ─── */
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px; border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg); z-index: 10;
+            max-width: 600px; margin: 0 auto;
+        }
+        .header h1 { color: var(--accent); font-size: 20px; font-weight: 800; letter-spacing: 2px; }
+        .header-btn {
+            background: none; border: none; color: var(--muted); font-size: 14px;
+            cursor: pointer; padding: 8px;
+        }
+        .header-btn:hover { color: var(--text); }
+
+        /* ─── Bottom Nav ─── */
+        .bottom-nav {
+            position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface);
+            border-top: 1px solid var(--border); display: flex; z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .nav-item {
+            flex: 1; display: flex; flex-direction: column; align-items: center;
+            padding: 8px 0; font-size: 11px; color: var(--muted);
+            cursor: pointer; border: none; background: none; gap: 4px;
+        }
+        .nav-item.active { color: var(--accent); }
+        .nav-item svg { width: 24px; height: 24px; fill: currentColor; }
+
+        /* ─── Login ─── */
+        #view-login { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding-bottom: 0; }
+        .login-logo { text-align: center; margin-bottom: 32px; }
+        .login-logo h1 { color: var(--accent); font-size: 32px; font-weight: 800; letter-spacing: 3px; }
+        .login-logo p { color: var(--muted); font-size: 14px; margin-top: 8px; }
+
+        /* ─── Cards ─── */
+        .card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; padding: 20px; margin-bottom: 12px;
+        }
+        .card h3 { font-size: 16px; margin-bottom: 12px; color: var(--text); }
+
+        /* ─── Forms ─── */
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+        .form-input {
+            width: 100%; padding: 12px 14px; background: #111118; border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text); font-size: 16px; outline: none;
+        }
+        .form-input:focus { border-color: var(--accent); }
+        select.form-input { -webkit-appearance: none; appearance: none; }
+
+        /* ─── Buttons ─── */
+        .btn {
+            width: 100%; padding: 14px; border: none; border-radius: 8px;
+            font-size: 16px; font-weight: 600; cursor: pointer;
+        }
+        .btn:disabled { opacity: 0.5; }
+        .btn-primary { background: var(--accent); color: #000; }
+        .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+        .btn-danger { background: rgba(255,71,87,0.15); color: var(--danger); border: 1px solid rgba(255,71,87,0.3); }
+        .btn-sm { padding: 8px 16px; font-size: 13px; width: auto; border-radius: 6px; }
+
+        .error-msg {
+            background: rgba(255,71,87,0.15); color: var(--danger);
+            padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px;
+        }
+        .success-msg {
+            background: rgba(0,214,143,0.15); color: var(--success);
+            padding: 8px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; text-align: center;
+        }
+
+        /* ─── Toggle Switch ─── */
+        .toggle { position: relative; display: inline-block; width: 48px; height: 28px; flex-shrink: 0; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle .slider {
+            position: absolute; cursor: pointer; inset: 0; background: var(--border);
+            border-radius: 28px; transition: 0.3s;
+        }
+        .toggle .slider::before {
+            content: ''; position: absolute; width: 22px; height: 22px; left: 3px; bottom: 3px;
+            background: #fff; border-radius: 50%; transition: 0.3s;
+        }
+        .toggle input:checked + .slider { background: var(--accent); }
+        .toggle input:checked + .slider::before { transform: translateX(20px); }
+
+        /* ─── Setting Row ─── */
+        .setting-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 0; border-bottom: 1px solid rgba(42,42,58,0.5);
+        }
+        .setting-row:last-child { border-bottom: none; }
+        .setting-label { font-size: 14px; }
+        .setting-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+        /* ─── Section Header (collapsible) ─── */
+        .section-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 0; cursor: pointer; font-weight: 600; font-size: 15px;
+            color: var(--accent);
+        }
+        .section-header .arrow { transition: transform 0.2s; font-size: 12px; }
+        .section-header.open .arrow { transform: rotate(90deg); }
+        .section-body { overflow: hidden; transition: max-height 0.3s; }
+
+        /* ─── List Items ─── */
+        .list-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px; background: var(--surface2); border-radius: 8px; margin-bottom: 8px;
+        }
+        .list-item .name { font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .list-item .url { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .list-item .remove-btn {
+            background: none; border: none; color: var(--danger); font-size: 18px;
+            cursor: pointer; padding: 4px 8px; margin-left: 8px;
+        }
+
+        /* ─── Dashboard ─── */
+        .dash-avatar {
+            width: 64px; height: 64px; border-radius: 50%;
+            background: rgba(0,229,255,0.15); border: 2px solid var(--accent);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px; font-weight: 700; color: var(--accent); margin: 0 auto 12px;
+        }
+        .dash-email { text-align: center; font-size: 16px; color: var(--accent); margin-bottom: 8px; }
+        .dash-badge {
+            display: inline-block; background: rgba(0,214,143,0.15); color: var(--success);
+            padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+        }
+        .dash-stats { display: flex; gap: 12px; margin: 20px 0; }
+        .dash-stat {
+            flex: 1; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 16px; text-align: center;
+        }
+        .dash-stat .num { font-size: 28px; font-weight: 700; color: var(--accent); }
+        .dash-stat .lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+        .nav-card {
+            display: flex; align-items: center; gap: 14px;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 16px; margin-bottom: 10px; cursor: pointer;
+        }
+        .nav-card:hover { border-color: var(--accent); }
+        .nav-card .icon { font-size: 24px; width: 40px; text-align: center; }
+        .nav-card .label { font-size: 15px; font-weight: 600; }
+        .nav-card .sublabel { font-size: 12px; color: var(--muted); }
+
+        /* ─── Favorites ─── */
+        .tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; }
+        .tab {
+            padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+            background: var(--surface); border: 1px solid var(--border); cursor: pointer;
+            white-space: nowrap; color: var(--text);
+        }
+        .tab.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+        .vod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+        .vod-card {
+            background: var(--surface); border-radius: 8px; overflow: hidden;
+            border: 1px solid var(--border); cursor: pointer;
+        }
+        .vod-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: var(--surface2); }
+        .vod-card .info { padding: 8px; }
+        .vod-card .title { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .vod-card .meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+        /* ─── Profiles ─── */
+        .profile-item {
+            display: flex; align-items: center; gap: 14px;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px; margin-bottom: 10px;
+        }
+        .profile-item.active-profile { border-color: var(--accent); }
+        .profile-avatar {
+            width: 44px; height: 44px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; font-weight: 700; color: #000; flex-shrink: 0;
+        }
+        .profile-name { font-size: 15px; font-weight: 600; flex: 1; }
+        .profile-active-badge { font-size: 11px; color: var(--accent); }
+
+        /* ─── Spinner ─── */
+        .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-full { display: flex; align-items: center; justify-content: center; min-height: 200px; color: var(--muted); }
+
+        /* ─── Slider ─── */
+        input[type="range"] {
+            width: 100%; height: 6px; -webkit-appearance: none; background: var(--border);
+            border-radius: 3px; outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 20px; height: 20px; background: var(--accent);
+            border-radius: 50%; cursor: pointer;
+        }
+
+        /* ─── Profile Selector ─── */
+        .profile-selector {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+            padding: 10px 14px; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .profile-selector select { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; outline: none; }
+        .profile-selector select option { background: var(--surface); color: var(--text); }
+
+        /* ─── Modal ─── */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200;
+            display: flex; align-items: center; justify-content: center; padding: 24px;
+        }
+        .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 400px; }
+        .modal h3 { margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- ─── Login View ─── -->
+        <div id="view-login" class="view active">
+            <div class="login-logo">
+                <h1>MERLOT TV</h1>
+                <p>Manage your account</p>
+            </div>
+            <div class="card" style="width: 100%; max-width: 360px;">
+                <h3 id="login-title" style="text-align:center">Sign In</h3>
+                <div id="login-error" class="error-msg hidden"></div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="login-email" class="form-input" placeholder="your@email.com" autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="login-password" class="form-input" placeholder="Password" autocomplete="current-password">
+                </div>
+                <div id="login-confirm-group" class="form-group hidden">
+                    <label>Confirm Password</label>
+                    <input type="password" id="login-confirm" class="form-input" placeholder="Confirm password">
+                </div>
+                <button class="btn btn-primary" id="btn-login">Sign In</button>
+                <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--muted)">
+                    <span id="login-toggle-text">Don't have an account? </span>
+                    <a href="#" id="login-toggle">Sign Up</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── Header (shown when logged in) ─── -->
+        <div id="app-header" class="header hidden">
+            <h1>MERLOT TV</h1>
+            <button class="header-btn" id="btn-refresh" title="Refresh">&#x21bb;</button>
+        </div>
+
+        <!-- ─── Dashboard ─── -->
+        <div id="view-dashboard" class="view">
+            <div style="text-align:center;padding-top:12px">
+                <div class="dash-avatar" id="dash-avatar">U</div>
+                <div class="dash-email" id="dash-email"></div>
+                <div class="dash-badge">Sync Active</div>
+            </div>
+            <div class="dash-stats">
+                <div class="dash-stat"><div class="num" id="stat-favs">0</div><div class="lbl">Favorites</div></div>
+                <div class="dash-stat"><div class="num" id="stat-watching">0</div><div class="lbl">Watching</div></div>
+                <div class="dash-stat"><div class="num" id="stat-profiles">0</div><div class="lbl">Profiles</div></div>
+            </div>
+            <div class="nav-card" onclick="showView('favorites')">
+                <div class="icon">&#9829;</div>
+                <div><div class="label">Favorites</div><div class="sublabel">Manage your favorite channels and VOD</div></div>
+            </div>
+            <div class="nav-card" onclick="showView('settings')">
+                <div class="icon">&#9881;</div>
+                <div><div class="label">Settings</div><div class="sublabel">Playlists, playback, subtitles, and more</div></div>
+            </div>
+            <div class="nav-card" onclick="showView('profiles')">
+                <div class="icon">&#128100;</div>
+                <div><div class="label">Profiles</div><div class="sublabel">Manage user profiles</div></div>
+            </div>
+            <div style="margin-top:20px">
+                <button class="btn btn-danger" id="btn-signout">Sign Out</button>
+            </div>
+        </div>
+
+        <!-- ─── Settings ─── -->
+        <div id="view-settings" class="view">
+            <h2 style="margin-bottom:16px">Settings</h2>
+            <div id="settings-status"></div>
+            <div id="settings-loading" class="loading-full"><span class="spinner"></span> Loading settings...</div>
+            <div id="settings-content" class="hidden">
+
+                <!-- General -->
+                <div class="card">
+                    <div class="section-header open" onclick="toggleSection(this)">General <span class="arrow">&#9654;</span></div>
+                    <div class="section-body" id="sec-general">
+                        <div class="setting-row">
+                            <div><div class="setting-label">Playlists</div><div class="setting-sub" id="playlists-count">0 playlists</div></div>
+                            <button class="btn btn-sm btn-secondary" onclick="openPlaylistEditor()">Edit</button>
+                        </div>
+                        <div class="setting-row">
+                            <div><div class="setting-label">EPG Sources</div><div class="setting-sub" id="epg-count">0 sources</div></div>
+                            <button class="btn btn-sm btn-secondary" onclick="openEpgEditor()">Edit</button>
+                        </div>
+                        <div class="setting-row">
+                            <div><div class="setting-label">Backup Sources</div><div class="setting-sub" id="backup-count">0 sources</div></div>
+                            <button class="btn btn-sm btn-secondary" onclick="openBackupEditor()">Edit</button>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">TorBox API Key</div>
+                            <button class="btn btn-sm btn-secondary" onclick="editTorboxKey()">Edit</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Playback -->
+                <div class="card">
+                    <div class="section-header open" onclick="toggleSection(this)">Playback <span class="arrow">&#9654;</span></div>
+                    <div class="section-body" id="sec-playback">
+                        <div class="setting-row">
+                            <div><div class="setting-label">Buffer Duration</div><div class="setting-sub" id="buffer-val">1000ms</div></div>
+                        </div>
+                        <div style="padding:0 0 14px">
+                            <input type="range" id="slider-buffer" min="300" max="3000" step="100" value="1000" oninput="onBufferChange(this.value)">
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">Frame Rate Matching</div>
+                            <select class="form-input" id="sel-framerate" style="width:auto;padding:8px" onchange="saveSetting('frameRateMatching',this.value)">
+                                <option value="off">Off</option>
+                                <option value="start">On Start</option>
+                                <option value="start_stop">Start + Stop</option>
+                            </select>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">Next Episode Auto-Play</div>
+                            <label class="toggle"><input type="checkbox" id="chk-autoplay" onchange="saveSetting('nextEpisodeAutoPlay',this.checked)"><span class="slider"></span></label>
+                        </div>
+                        <div class="setting-row">
+                            <div><div class="setting-label">Auto-Play Threshold</div><div class="setting-sub" id="threshold-val">95%</div></div>
+                        </div>
+                        <div style="padding:0 0 14px">
+                            <input type="range" id="slider-threshold" min="85" max="99" step="1" value="95" oninput="onThresholdChange(this.value)">
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">Bitrate Checker</div>
+                            <label class="toggle"><input type="checkbox" id="chk-bitrate" onchange="saveSetting('bitrateCheckerEnabled',this.checked)"><span class="slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subtitles -->
+                <div class="card">
+                    <div class="section-header open" onclick="toggleSection(this)">Subtitles <span class="arrow">&#9654;</span></div>
+                    <div class="section-body">
+                        <div class="setting-row">
+                            <div class="setting-label">Subtitles Enabled</div>
+                            <label class="toggle"><input type="checkbox" id="chk-subs" onchange="saveSetting('subtitlesEnabled',this.checked)"><span class="slider"></span></label>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">Language</div>
+                            <select class="form-input" id="sel-sublang" style="width:auto;padding:8px" onchange="saveSetting('subtitleLanguage',this.value)">
+                                <option value="eng">English</option><option value="spa">Spanish</option><option value="fre">French</option>
+                                <option value="ger">German</option><option value="ita">Italian</option><option value="por">Portuguese</option>
+                                <option value="jpn">Japanese</option><option value="kor">Korean</option><option value="chi">Chinese</option>
+                                <option value="ara">Arabic</option><option value="hin">Hindi</option><option value="rus">Russian</option>
+                            </select>
+                        </div>
+                        <div class="setting-row">
+                            <div><div class="setting-label">Subtitle Size</div><div class="setting-sub" id="subsize-val">1.0x</div></div>
+                        </div>
+                        <div style="padding:0 0 14px">
+                            <input type="range" id="slider-subsize" min="0.5" max="2.0" step="0.1" value="1.0" oninput="onSubSizeChange(this.value)">
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">Font</div>
+                            <select class="form-input" id="sel-subfont" style="width:auto;padding:8px" onchange="saveSetting('subtitleFont',this.value)">
+                                <option value="default">Default</option><option value="monospace">Monospace</option><option value="serif">Serif</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weather -->
+                <div class="card">
+                    <div class="section-header open" onclick="toggleSection(this)">Weather <span class="arrow">&#9654;</span></div>
+                    <div class="section-body">
+                        <div class="setting-row">
+                            <div class="setting-label">ZIP Code</div>
+                            <input type="text" id="inp-zip" class="form-input" style="width:100px;text-align:center" maxlength="5" onchange="saveSetting('weatherZipCode',this.value)">
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-label">Weather Alerts</div>
+                            <label class="toggle"><input type="checkbox" id="chk-weather" onchange="saveSetting('weatherAlertsEnabled',this.checked)"><span class="slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── Favorites ─── -->
+        <div id="view-favorites" class="view">
+            <h2 style="margin-bottom:12px">Favorites</h2>
+            <div class="profile-selector">
+                <span style="font-size:13px;color:var(--muted)">Profile:</span>
+                <select id="fav-profile-select" onchange="loadFavorites()"></select>
+            </div>
+            <div class="tabs" id="fav-tabs">
+                <div class="tab active" onclick="switchFavTab('vod',this)">VOD</div>
+                <div class="tab" onclick="switchFavTab('channels',this)">Channels</div>
+                <div class="tab" onclick="switchFavTab('lists',this)">Custom Lists</div>
+            </div>
+            <div id="fav-loading" class="loading-full"><span class="spinner"></span> Loading...</div>
+            <div id="fav-content"></div>
+        </div>
+
+        <!-- ─── Profiles ─── -->
+        <div id="view-profiles" class="view">
+            <h2 style="margin-bottom:16px">Profiles</h2>
+            <div id="profiles-loading" class="loading-full"><span class="spinner"></span> Loading...</div>
+            <div id="profiles-content"></div>
+            <button class="btn btn-secondary" style="margin-top:12px" onclick="openAddProfile()">+ Add Profile</button>
+        </div>
+
+        <!-- ─── Bottom Nav ─── -->
+        <div id="bottom-nav" class="bottom-nav hidden">
+            <button class="nav-item active" onclick="showView('dashboard')" data-view="dashboard">
+                <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home
+            </button>
+            <button class="nav-item" onclick="showView('favorites')" data-view="favorites">
+                <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Favs
+            </button>
+            <button class="nav-item" onclick="showView('settings')" data-view="settings">
+                <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></svg>Settings
+            </button>
+            <button class="nav-item" onclick="showView('profiles')" data-view="profiles">
+                <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Profiles
+            </button>
+        </div>
+    </div>
+
+    <!-- ─── Modal Container ─── -->
+    <div id="modal" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
+        <div class="modal" id="modal-content"></div>
+    </div>
+
+    <script>
+    // ═══════════════════════════════════════════
+    //  Firebase Config
+    // ═══════════════════════════════════════════
+    const API_KEY = 'AIzaSyC9eMpUTlUyjWP5NzHeifaKrVS-PFaoSJc';
+    const PROJECT_ID = 'merlot-tv';
+    const FS = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+    const AUTH = 'https://identitytoolkit.googleapis.com/v1';
+
+    const AVATAR_COLORS = ['#00E5FF','#FF5252','#69F0AE','#FFD740','#E040FB','#448AFF','#FF6E40','#64FFDA'];
+
+    // ═══════════════════════════════════════════
+    //  State
+    // ═══════════════════════════════════════════
+    let auth = JSON.parse(localStorage.getItem('merlot_auth') || 'null');
+    let settingsData = {};
+    let profilesData = { profiles: [], activeProfileId: 'default' };
+    let favoritesData = {};
+    let watchProgressData = {};
+    let currentFavTab = 'vod';
+
+    // ═══════════════════════════════════════════
+    //  Firestore REST helpers
+    // ═══════════════════════════════════════════
+    function toFsValue(v) {
+        if (v === null || v === undefined) return { nullValue: null };
+        if (typeof v === 'boolean') return { booleanValue: v };
+        if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+        if (typeof v === 'string') return { stringValue: v };
+        if (Array.isArray(v)) return { arrayValue: { values: v.map(toFsValue) } };
+        if (typeof v === 'object') {
+            const fields = {};
+            for (const [k, val] of Object.entries(v)) fields[k] = toFsValue(val);
+            return { mapValue: { fields } };
+        }
+        return { stringValue: String(v) };
+    }
+
+    function fromFsValue(v) {
+        if (!v) return null;
+        if ('stringValue' in v) return v.stringValue;
+        if ('booleanValue' in v) return v.booleanValue;
+        if ('integerValue' in v) return parseInt(v.integerValue);
+        if ('doubleValue' in v) return v.doubleValue;
+        if ('nullValue' in v) return null;
+        if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromFsValue);
+        if ('mapValue' in v) {
+            const obj = {};
+            for (const [k, val] of Object.entries(v.mapValue.fields || {})) obj[k] = fromFsValue(val);
+            return obj;
+        }
+        return null;
+    }
+
+    function fromFsDoc(doc) {
+        const obj = {};
+        for (const [k, v] of Object.entries(doc.fields || {})) obj[k] = fromFsValue(v);
+        return obj;
+    }
+
+    function toFsFields(obj) {
+        const fields = {};
+        for (const [k, v] of Object.entries(obj)) fields[k] = toFsValue(v);
+        return fields;
+    }
+
+    async function fsGet(path) {
+        await ensureToken();
+        const resp = await fetch(`${FS}/${path}`, { headers: { Authorization: `Bearer ${auth.idToken}` } });
+        if (resp.status === 404) return null;
+        if (!resp.ok) throw new Error(`Firestore GET ${path}: ${resp.status}`);
+        return fromFsDoc(await resp.json());
+    }
+
+    async function fsSet(path, data) {
+        await ensureToken();
+        const resp = await fetch(`${FS}/${path}`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${auth.idToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: toFsFields(data) })
+        });
+        if (!resp.ok) throw new Error(`Firestore SET ${path}: ${resp.status}`);
+    }
+
+    async function fsUpdate(path, fields) {
+        await ensureToken();
+        const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
+        const resp = await fetch(`${FS}/${path}?${mask}`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${auth.idToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: toFsFields(fields) })
+        });
+        if (!resp.ok) throw new Error(`Firestore UPDATE ${path}: ${resp.status}`);
+    }
+
+    // ═══════════════════════════════════════════
+    //  Auth
+    // ═══════════════════════════════════════════
+    let isSignUp = false;
+
+    document.getElementById('login-toggle').addEventListener('click', (e) => {
+        e.preventDefault();
+        isSignUp = !isSignUp;
+        document.getElementById('login-title').textContent = isSignUp ? 'Create Account' : 'Sign In';
+        document.getElementById('btn-login').textContent = isSignUp ? 'Create Account' : 'Sign In';
+        document.getElementById('login-confirm-group').classList.toggle('hidden', !isSignUp);
+        document.getElementById('login-toggle-text').textContent = isSignUp ? 'Already have an account? ' : "Don't have an account? ";
+        document.getElementById('login-toggle').textContent = isSignUp ? 'Sign In' : 'Sign Up';
+        document.getElementById('login-error').classList.add('hidden');
+    });
+
+    document.getElementById('btn-login').addEventListener('click', doLogin);
+    document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter' && !isSignUp) doLogin(); });
+
+    async function doLogin() {
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        const errEl = document.getElementById('login-error');
+        errEl.classList.add('hidden');
+
+        if (!email || !password) { errEl.textContent = 'Email and password required'; errEl.classList.remove('hidden'); return; }
+        if (isSignUp) {
+            if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; errEl.classList.remove('hidden'); return; }
+            if (password !== document.getElementById('login-confirm').value) { errEl.textContent = 'Passwords do not match'; errEl.classList.remove('hidden'); return; }
+        }
+
+        const btn = document.getElementById('btn-login');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>' + (isSignUp ? 'Creating...' : 'Signing in...');
+
+        try {
+            const endpoint = isSignUp ? `${AUTH}/accounts:signUp?key=${API_KEY}` : `${AUTH}/accounts:signInWithPassword?key=${API_KEY}`;
+            const resp = await fetch(endpoint, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, returnSecureToken: true })
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                const code = data.error?.message || '';
+                let msg = 'Authentication failed';
+                if (code.includes('INVALID_LOGIN') || code.includes('INVALID_PASSWORD') || code.includes('EMAIL_NOT_FOUND')) msg = 'Invalid email or password';
+                else if (code.includes('EMAIL_EXISTS')) msg = 'Account already exists — try signing in';
+                else if (code.includes('WEAK_PASSWORD')) msg = 'Password too weak (min 6 chars)';
+                else if (code.includes('TOO_MANY')) msg = 'Too many attempts — try later';
+                throw new Error(msg);
+            }
+
+            auth = {
+                idToken: data.idToken,
+                refreshToken: data.refreshToken,
+                uid: data.localId,
+                email: data.email || email,
+                expiresAt: Date.now() + (parseInt(data.expiresIn) || 3600) * 1000
+            };
+            localStorage.setItem('merlot_auth', JSON.stringify(auth));
+            onLoggedIn();
+        } catch (e) {
+            errEl.textContent = e.message;
+            errEl.classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = isSignUp ? 'Create Account' : 'Sign In';
+        }
+    }
+
+    async function ensureToken() {
+        if (!auth) throw new Error('Not logged in');
+        if (Date.now() < auth.expiresAt - 60000) return;
+        try {
+            const resp = await fetch(`https://securetoken.googleapis.com/v1/token?key=${API_KEY}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `grant_type=refresh_token&refresh_token=${auth.refreshToken}`
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error('Token refresh failed');
+            auth.idToken = data.id_token;
+            auth.refreshToken = data.refresh_token;
+            auth.expiresAt = Date.now() + (parseInt(data.expires_in) || 3600) * 1000;
+            localStorage.setItem('merlot_auth', JSON.stringify(auth));
+        } catch (e) {
+            auth = null;
+            localStorage.removeItem('merlot_auth');
+            showView('login');
+            throw e;
+        }
+    }
+
+    function signOut() {
+        auth = null;
+        localStorage.removeItem('merlot_auth');
+        settingsData = {};
+        profilesData = { profiles: [], activeProfileId: 'default' };
+        favoritesData = {};
+        showView('login');
+        document.getElementById('app-header').classList.add('hidden');
+        document.getElementById('bottom-nav').classList.add('hidden');
+    }
+
+    document.getElementById('btn-signout').addEventListener('click', signOut);
+
+    // ═══════════════════════════════════════════
+    //  Navigation
+    // ═══════════════════════════════════════════
+    function showView(name) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        const view = document.getElementById(`view-${name}`);
+        if (view) view.classList.add('active');
+
+        document.querySelectorAll('.nav-item').forEach(n => {
+            n.classList.toggle('active', n.dataset.view === name);
+        });
+
+        if (name === 'login') {
+            document.getElementById('app-header').classList.add('hidden');
+            document.getElementById('bottom-nav').classList.add('hidden');
+        } else {
+            document.getElementById('app-header').classList.remove('hidden');
+            document.getElementById('bottom-nav').classList.remove('hidden');
+        }
+
+        if (name === 'settings') loadSettings();
+        if (name === 'favorites') { populateProfileSelector(); loadFavorites(); }
+        if (name === 'profiles') loadProfiles();
+    }
+
+    // ═══════════════════════════════════════════
+    //  Logged In — Load Data
+    // ═══════════════════════════════════════════
+    async function onLoggedIn() {
+        showView('dashboard');
+        document.getElementById('dash-avatar').textContent = (auth.email[0] || 'U').toUpperCase();
+        document.getElementById('dash-email').textContent = auth.email;
+
+        try {
+            const [profiles, settings] = await Promise.all([
+                fsGet(`users/${auth.uid}/profiles/data`),
+                fsGet(`users/${auth.uid}/settings/app`)
+            ]);
+            if (profiles) profilesData = profiles;
+            if (settings) settingsData = settings;
+
+            // Load favorites count for active profile
+            const pid = profilesData.activeProfileId || 'default';
+            const favs = await fsGet(`users/${auth.uid}/favorites/${pid}`);
+            if (favs) favoritesData = favs;
+
+            const wp = await fsGet(`users/${auth.uid}/watchProgress/${pid}`);
+            if (wp) watchProgressData = wp;
+
+            updateDashStats();
+        } catch (e) {
+            console.error('Load failed:', e);
+        }
+    }
+
+    function updateDashStats() {
+        const vodCount = (favoritesData.vod || []).length + (favoritesData.channels || []).length;
+        const watchCount = Object.keys(watchProgressData.items || {}).length;
+        const profileCount = (profilesData.profiles || []).length;
+        document.getElementById('stat-favs').textContent = vodCount;
+        document.getElementById('stat-watching').textContent = watchCount;
+        document.getElementById('stat-profiles').textContent = profileCount;
+    }
+
+    document.getElementById('btn-refresh').addEventListener('click', () => onLoggedIn());
+
+    // ═══════════════════════════════════════════
+    //  Settings
+    // ═══════════════════════════════════════════
+    async function loadSettings() {
+        const loading = document.getElementById('settings-loading');
+        const content = document.getElementById('settings-content');
+        loading.classList.remove('hidden');
+        content.classList.add('hidden');
+
+        try {
+            const data = await fsGet(`users/${auth.uid}/settings/app`);
+            if (data) settingsData = data;
+            renderSettings();
+            content.classList.remove('hidden');
+        } catch (e) {
+            console.error('Settings load failed:', e);
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    function renderSettings() {
+        const s = settingsData;
+        // Playlists
+        document.getElementById('playlists-count').textContent = `${(s.playlists||[]).length} playlists`;
+        document.getElementById('epg-count').textContent = `${(s.epgSources||[]).length} sources`;
+        document.getElementById('backup-count').textContent = `${(s.backupSources||[]).length} sources`;
+
+        // Playback
+        const buf = s.bufferDurationMs || 1000;
+        document.getElementById('slider-buffer').value = buf;
+        document.getElementById('buffer-val').textContent = `${buf}ms`;
+        document.getElementById('sel-framerate').value = s.frameRateMatching || 'off';
+        document.getElementById('chk-autoplay').checked = s.nextEpisodeAutoPlay !== false;
+        const thr = s.nextEpisodeThresholdPercent || 95;
+        document.getElementById('slider-threshold').value = thr;
+        document.getElementById('threshold-val').textContent = `${thr}%`;
+        document.getElementById('chk-bitrate').checked = !!s.bitrateCheckerEnabled;
+
+        // Subtitles
+        document.getElementById('chk-subs').checked = !!s.subtitlesEnabled;
+        document.getElementById('sel-sublang').value = s.subtitleLanguage || 'eng';
+        const ss = s.subtitleSize || 1.0;
+        document.getElementById('slider-subsize').value = ss;
+        document.getElementById('subsize-val').textContent = `${ss}x`;
+        document.getElementById('sel-subfont').value = s.subtitleFont || 'default';
+
+        // Weather
+        document.getElementById('inp-zip').value = s.weatherZipCode || '43616';
+        document.getElementById('chk-weather').checked = s.weatherAlertsEnabled !== false;
+    }
+
+    async function saveSetting(key, value) {
+        settingsData[key] = value;
+        const statusEl = document.getElementById('settings-status');
+        statusEl.innerHTML = '<div class="success-msg">Saving...</div>';
+        try {
+            await fsUpdate(`users/${auth.uid}/settings/app`, { [key]: value });
+            statusEl.innerHTML = '<div class="success-msg">Saved</div>';
+            setTimeout(() => statusEl.innerHTML = '', 2000);
+        } catch (e) {
+            statusEl.innerHTML = `<div class="error-msg">${e.message}</div>`;
+        }
+    }
+
+    function onBufferChange(v) {
+        document.getElementById('buffer-val').textContent = `${v}ms`;
+        clearTimeout(window._bufferTimer);
+        window._bufferTimer = setTimeout(() => saveSetting('bufferDurationMs', parseInt(v)), 500);
+    }
+    function onThresholdChange(v) {
+        document.getElementById('threshold-val').textContent = `${v}%`;
+        clearTimeout(window._threshTimer);
+        window._threshTimer = setTimeout(() => saveSetting('nextEpisodeThresholdPercent', parseInt(v)), 500);
+    }
+    function onSubSizeChange(v) {
+        document.getElementById('subsize-val').textContent = `${parseFloat(v).toFixed(1)}x`;
+        clearTimeout(window._subsizeTimer);
+        window._subsizeTimer = setTimeout(() => saveSetting('subtitleSize', parseFloat(v)), 500);
+    }
+
+    function toggleSection(header) {
+        header.classList.toggle('open');
+        const body = header.nextElementSibling;
+        body.style.display = header.classList.contains('open') ? 'block' : 'none';
+    }
+
+    // ─── List Editors (Playlists, EPG, Backup) ───
+    function openListEditor(title, key, items) {
+        let html = `<h3>${title}</h3><div id="modal-list">`;
+        (items || []).forEach((item, i) => {
+            html += `<div class="list-item">
+                <div style="flex:1;overflow:hidden">
+                    <div class="name">${esc(item.name || `Item ${i+1}`)}</div>
+                    <div class="url">${esc(item.url || '')}</div>
+                </div>
+                <label class="toggle" style="margin:0 8px"><input type="checkbox" ${item.enabled !== false ? 'checked' : ''} onchange="toggleListItem('${key}',${i},this.checked)"><span class="slider"></span></label>
+                <button class="remove-btn" onclick="removeListItem('${key}',${i})">&#10005;</button>
+            </div>`;
+        });
+        html += `</div>
+            <div style="margin-top:12px;display:flex;gap:8px">
+                <input type="text" id="modal-new-name" class="form-input" placeholder="Name" style="flex:1">
+                <input type="text" id="modal-new-url" class="form-input" placeholder="URL" style="flex:2">
+            </div>
+            <button class="btn btn-primary" style="margin-top:8px" onclick="addListItem('${key}')">Add</button>
+            <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Done</button>`;
+        openModal(html);
+    }
+
+    function openPlaylistEditor() { openListEditor('Playlists', 'playlists', settingsData.playlists || []); }
+    function openEpgEditor() { openListEditor('EPG Sources', 'epgSources', settingsData.epgSources || []); }
+    function openBackupEditor() { openListEditor('Backup Sources', 'backupSources', settingsData.backupSources || []); }
+
+    async function addListItem(key) {
+        const name = document.getElementById('modal-new-name').value.trim();
+        const url = document.getElementById('modal-new-url').value.trim();
+        if (!url) return;
+        const list = settingsData[key] || [];
+        list.push({ name: name || `Item ${list.length + 1}`, url, enabled: true });
+        settingsData[key] = list;
+        await saveSetting(key, list);
+        openListEditor(key === 'playlists' ? 'Playlists' : key === 'epgSources' ? 'EPG Sources' : 'Backup Sources', key, list);
+        renderSettings();
+    }
+
+    async function removeListItem(key, index) {
+        const list = settingsData[key] || [];
+        list.splice(index, 1);
+        settingsData[key] = list;
+        await saveSetting(key, list);
+        openListEditor(key === 'playlists' ? 'Playlists' : key === 'epgSources' ? 'EPG Sources' : 'Backup Sources', key, list);
+        renderSettings();
+    }
+
+    async function toggleListItem(key, index, enabled) {
+        const list = settingsData[key] || [];
+        if (list[index]) list[index].enabled = enabled;
+        settingsData[key] = list;
+        await saveSetting(key, list);
+    }
+
+    function editTorboxKey() {
+        const current = settingsData.torboxKey || '';
+        openModal(`<h3>TorBox API Key</h3>
+            <div class="form-group"><input type="text" id="modal-torbox" class="form-input" value="${esc(current)}"></div>
+            <button class="btn btn-primary" onclick="saveTorbox()">Save</button>
+            <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Cancel</button>`);
+    }
+    async function saveTorbox() {
+        const val = document.getElementById('modal-torbox').value.trim();
+        await saveSetting('torboxKey', val);
+        closeModal();
+    }
+
+    // ═══════════════════════════════════════════
+    //  Favorites
+    // ═══════════════════════════════════════════
+    function populateProfileSelector() {
+        const sel = document.getElementById('fav-profile-select');
+        const profiles = profilesData.profiles || [];
+        sel.innerHTML = profiles.map(p => `<option value="${p.id}" ${p.id === profilesData.activeProfileId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+        if (!profiles.length) sel.innerHTML = '<option value="default">Default</option>';
+    }
+
+    async function loadFavorites() {
+        const loading = document.getElementById('fav-loading');
+        const content = document.getElementById('fav-content');
+        loading.classList.remove('hidden');
+        content.innerHTML = '';
+
+        const profileId = document.getElementById('fav-profile-select').value || 'default';
+        try {
+            const data = await fsGet(`users/${auth.uid}/favorites/${profileId}`);
+            favoritesData = data || {};
+            renderFavorites();
+        } catch (e) {
+            content.innerHTML = `<div class="error-msg">${e.message}</div>`;
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    function switchFavTab(tab, el) {
+        currentFavTab = tab;
+        document.querySelectorAll('#fav-tabs .tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        renderFavorites();
+    }
+
+    function renderFavorites() {
+        const content = document.getElementById('fav-content');
+        const profileId = document.getElementById('fav-profile-select').value || 'default';
+
+        if (currentFavTab === 'vod') {
+            const ids = favoritesData.vod || [];
+            const meta = favoritesData.vodMeta || {};
+            if (!ids.length) { content.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">No VOD favorites</div>'; return; }
+            let html = '<div class="vod-grid">';
+            ids.forEach(id => {
+                const m = meta[id] || {};
+                const poster = m.poster || '';
+                const name = m.name || id;
+                const type = m.type || 'movie';
+                const rating = m.imdbRating || '';
+                html += `<div class="vod-card" onclick="showVodDetail('${esc(id)}','${esc(profileId)}')">
+                    <img src="${esc(poster)}" alt="" onerror="this.style.background='var(--surface2)';this.alt='No image'">
+                    <div class="info">
+                        <div class="title">${esc(name)}</div>
+                        <div class="meta">${type}${rating ? ' · ' + rating : ''}</div>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+            content.innerHTML = html;
+        } else if (currentFavTab === 'channels') {
+            const ids = favoritesData.channels || [];
+            if (!ids.length) { content.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">No channel favorites</div>'; return; }
+            let html = '';
+            ids.forEach(id => {
+                html += `<div class="list-item">
+                    <div class="name">${esc(id)}</div>
+                    <button class="remove-btn" onclick="removeFav('channels','${esc(id)}','${esc(profileId)}')">&#10005;</button>
+                </div>`;
+            });
+            content.innerHTML = html;
+        } else {
+            const lists = favoritesData.customLists || {};
+            const names = Object.keys(lists);
+            if (!names.length) { content.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px">No custom lists</div>'; return; }
+            let html = '';
+            names.forEach(name => {
+                const items = lists[name] || [];
+                html += `<div class="card"><h3>${esc(name)} (${items.length})</h3>`;
+                items.forEach(id => {
+                    html += `<div class="list-item"><div class="name">${esc(id)}</div>
+                        <button class="remove-btn" onclick="removeFromList('${esc(name)}','${esc(id)}','${esc(profileId)}')">&#10005;</button>
+                    </div>`;
+                });
+                html += '</div>';
+            });
+            content.innerHTML = html;
+        }
+    }
+
+    function showVodDetail(id, profileId) {
+        const meta = (favoritesData.vodMeta || {})[id] || {};
+        openModal(`<div style="text-align:center">
+            ${meta.poster ? `<img src="${esc(meta.poster)}" style="width:120px;border-radius:8px;margin-bottom:12px">` : ''}
+            <h3>${esc(meta.name || id)}</h3>
+            <div style="color:var(--muted);font-size:13px;margin:8px 0">${meta.type || 'movie'}${meta.imdbRating ? ' · ' + meta.imdbRating : ''}</div>
+            ${meta.description ? `<p style="font-size:13px;color:var(--muted);margin:12px 0;text-align:left">${esc(meta.description)}</p>` : ''}
+            <button class="btn btn-danger" style="margin-top:12px" onclick="removeFav('vod','${esc(id)}','${esc(profileId)}');closeModal()">Remove from Favorites</button>
+            <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Close</button>
+        </div>`);
+    }
+
+    async function removeFav(type, id, profileId) {
+        const list = favoritesData[type] || [];
+        favoritesData[type] = list.filter(x => x !== id);
+        if (type === 'vod' && favoritesData.vodMeta) delete favoritesData.vodMeta[id];
+        try {
+            await fsSet(`users/${auth.uid}/favorites/${profileId}`, favoritesData);
+            renderFavorites();
+            updateDashStats();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    async function removeFromList(listName, vodId, profileId) {
+        const lists = favoritesData.customLists || {};
+        if (lists[listName]) {
+            lists[listName] = lists[listName].filter(x => x !== vodId);
+            favoritesData.customLists = lists;
+        }
+        try {
+            await fsSet(`users/${auth.uid}/favorites/${profileId}`, favoritesData);
+            renderFavorites();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    // ═══════════════════════════════════════════
+    //  Profiles
+    // ═══════════════════════════════════════════
+    async function loadProfiles() {
+        const loading = document.getElementById('profiles-loading');
+        const content = document.getElementById('profiles-content');
+        loading.classList.remove('hidden');
+        content.innerHTML = '';
+
+        try {
+            const data = await fsGet(`users/${auth.uid}/profiles/data`);
+            if (data) profilesData = data;
+            renderProfiles();
+        } catch (e) {
+            content.innerHTML = `<div class="error-msg">${e.message}</div>`;
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    function renderProfiles() {
+        const content = document.getElementById('profiles-content');
+        const profiles = profilesData.profiles || [];
+        const activeId = profilesData.activeProfileId || 'default';
+
+        let html = '';
+        profiles.forEach(p => {
+            const color = AVATAR_COLORS[p.colorIndex || 0];
+            const isActive = p.id === activeId;
+            html += `<div class="profile-item ${isActive ? 'active-profile' : ''}">
+                <div class="profile-avatar" style="background:${color}">${(p.name||'?')[0].toUpperCase()}</div>
+                <div style="flex:1">
+                    <div class="profile-name">${esc(p.name)}</div>
+                    ${isActive ? '<div class="profile-active-badge">Active</div>' : ''}
+                </div>
+                ${!isActive ? `<button class="btn btn-sm btn-secondary" onclick="switchProfile('${p.id}')">Switch</button>` : ''}
+                ${!p.isDefault ? `<button class="remove-btn" onclick="removeProfile('${p.id}')">&#10005;</button>` : ''}
+            </div>`;
+        });
+        content.innerHTML = html;
+    }
+
+    async function switchProfile(id) {
+        profilesData.activeProfileId = id;
+        try {
+            await fsSet(`users/${auth.uid}/profiles/data`, profilesData);
+            renderProfiles();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    async function removeProfile(id) {
+        if (!confirm('Remove this profile?')) return;
+        profilesData.profiles = (profilesData.profiles || []).filter(p => p.id !== id);
+        if (profilesData.activeProfileId === id) {
+            profilesData.activeProfileId = (profilesData.profiles[0] || {}).id || 'default';
+        }
+        try {
+            await fsSet(`users/${auth.uid}/profiles/data`, profilesData);
+            renderProfiles();
+            updateDashStats();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    function openAddProfile() {
+        let colorsHtml = AVATAR_COLORS.map((c, i) =>
+            `<div style="width:36px;height:36px;border-radius:50%;background:${c};cursor:pointer;border:2px solid transparent" data-ci="${i}" onclick="selectProfileColor(this,${i})"></div>`
+        ).join('');
+        openModal(`<h3>Add Profile</h3>
+            <div class="form-group"><label>Name</label><input type="text" id="modal-profile-name" class="form-input" placeholder="Profile name"></div>
+            <div class="form-group"><label>Color</label><div style="display:flex;gap:8px;flex-wrap:wrap" id="color-picker">${colorsHtml}</div></div>
+            <input type="hidden" id="modal-profile-color" value="0">
+            <button class="btn btn-primary" style="margin-top:12px" onclick="doAddProfile()">Add Profile</button>
+            <button class="btn btn-secondary" style="margin-top:8px" onclick="closeModal()">Cancel</button>`);
+        document.querySelector('#color-picker div').style.borderColor = 'var(--accent)';
+    }
+
+    function selectProfileColor(el, index) {
+        document.querySelectorAll('#color-picker div').forEach(d => d.style.borderColor = 'transparent');
+        el.style.borderColor = 'var(--accent)';
+        document.getElementById('modal-profile-color').value = index;
+    }
+
+    async function doAddProfile() {
+        const name = document.getElementById('modal-profile-name').value.trim();
+        if (!name) return;
+        const colorIndex = parseInt(document.getElementById('modal-profile-color').value);
+        const id = Math.random().toString(36).substring(2, 10);
+        const profiles = profilesData.profiles || [];
+        if (profiles.length >= 6) { alert('Maximum 6 profiles'); return; }
+        profiles.push({ id, name, colorIndex, avatarUrl: '', isDefault: false });
+        profilesData.profiles = profiles;
+        try {
+            await fsSet(`users/${auth.uid}/profiles/data`, profilesData);
+            closeModal();
+            renderProfiles();
+            updateDashStats();
+        } catch (e) { alert('Error: ' + e.message); }
+    }
+
+    // ═══════════════════════════════════════════
+    //  Modal
+    // ═══════════════════════════════════════════
+    function openModal(html) {
+        document.getElementById('modal-content').innerHTML = html;
+        document.getElementById('modal').classList.remove('hidden');
+    }
+    function closeModal() {
+        document.getElementById('modal').classList.add('hidden');
+    }
+
+    // ═══════════════════════════════════════════
+    //  Utilities
+    // ═══════════════════════════════════════════
+    function esc(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    // ═══════════════════════════════════════════
+    //  Init
+    // ═══════════════════════════════════════════
+    if (auth && auth.uid) {
+        onLoggedIn();
+    }
+    </script>
+</body>
+</html>
