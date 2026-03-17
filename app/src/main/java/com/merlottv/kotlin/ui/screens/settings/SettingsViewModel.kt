@@ -12,15 +12,19 @@ import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.UserProfile
 import com.merlottv.kotlin.domain.model.Addon
 import com.merlottv.kotlin.domain.model.DefaultData
+import com.merlottv.kotlin.data.sync.CloudSyncManager
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.ChannelRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -74,7 +78,20 @@ data class SettingsUiState(
     // Release notes
     val releaseNotes: String = "",
     val isFetchingReleaseNotes: Boolean = false,
-    val showReleaseNotes: Boolean = false
+    val showReleaseNotes: Boolean = false,
+    // VOD Category System
+    val showVodCategorySystem: Boolean = false,
+    val homeCategoryItems: List<CategoryItem> = emptyList(),
+    val vodCategoryItems: List<CategoryItem> = emptyList(),
+    val isLoadingVodCategories: Boolean = false,
+    val activeCategoryTab: String = "Home",
+    val reorderMode: Boolean = false
+)
+
+data class CategoryItem(
+    val key: String,
+    val title: String,
+    val enabled: Boolean = true
 )
 
 @HiltViewModel
@@ -83,7 +100,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val addonRepository: AddonRepository,
     private val profileDataStore: ProfileDataStore,
-    private val channelRepository: ChannelRepository
+    private val channelRepository: ChannelRepository,
+    private val cloudSyncManager: CloudSyncManager
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -152,6 +170,7 @@ class SettingsViewModel @Inject constructor(
             current.add(PlaylistEntry(name.ifBlank { "Playlist ${current.size + 1}" }, url))
             settingsDataStore.setPlaylists(current)
             _uiState.value = _uiState.value.copy(playlists = current)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -162,6 +181,7 @@ class SettingsViewModel @Inject constructor(
                 current.removeAt(index)
                 settingsDataStore.setPlaylists(current)
                 _uiState.value = _uiState.value.copy(playlists = current)
+                cloudSyncManager.notifySettingsChanged()
             }
         }
     }
@@ -173,6 +193,7 @@ class SettingsViewModel @Inject constructor(
                 current[index] = current[index].copy(enabled = !current[index].enabled)
                 settingsDataStore.setPlaylists(current)
                 _uiState.value = _uiState.value.copy(playlists = current)
+                cloudSyncManager.notifySettingsChanged()
             }
         }
     }
@@ -185,6 +206,7 @@ class SettingsViewModel @Inject constructor(
             current.add(EpgSourceEntry(name.ifBlank { "EPG ${current.size + 1}" }, url))
             settingsDataStore.setCustomEpgSources(current)
             _uiState.value = _uiState.value.copy(customEpgSources = current)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -195,6 +217,7 @@ class SettingsViewModel @Inject constructor(
                 current.removeAt(index)
                 settingsDataStore.setCustomEpgSources(current)
                 _uiState.value = _uiState.value.copy(customEpgSources = current)
+                cloudSyncManager.notifySettingsChanged()
             }
         }
     }
@@ -382,6 +405,7 @@ class SettingsViewModel @Inject constructor(
             current.add(BackupSourceEntry(name.ifBlank { "Backup ${current.size + 1}" }, url))
             settingsDataStore.setBackupSources(current)
             _uiState.value = _uiState.value.copy(backupSources = current)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -392,6 +416,7 @@ class SettingsViewModel @Inject constructor(
                 current.removeAt(index)
                 settingsDataStore.setBackupSources(current)
                 _uiState.value = _uiState.value.copy(backupSources = current)
+                cloudSyncManager.notifySettingsChanged()
             }
         }
     }
@@ -403,6 +428,7 @@ class SettingsViewModel @Inject constructor(
                 current[index] = current[index].copy(enabled = !current[index].enabled)
                 settingsDataStore.setBackupSources(current)
                 _uiState.value = _uiState.value.copy(backupSources = current)
+                cloudSyncManager.notifySettingsChanged()
             }
         }
     }
@@ -453,6 +479,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             profileDataStore.setActiveProfile(profileId)
             _uiState.value = _uiState.value.copy(activeProfileId = profileId)
+            cloudSyncManager.notifyProfilesChanged()
         }
     }
 
@@ -461,6 +488,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setPlaylistUrl(url)
             _uiState.value = _uiState.value.copy(playlistUrl = url)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -468,6 +496,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setTorboxKey(key)
             _uiState.value = _uiState.value.copy(torboxKey = key)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -493,6 +522,7 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.setAddonEnabled(url, !currentlyEnabled)
             val updated = settingsDataStore.disabledAddons.first()
             _uiState.value = _uiState.value.copy(disabledAddons = updated)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -501,6 +531,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(weatherAlertsEnabled = enabled)
         viewModelScope.launch {
             settingsDataStore.setWeatherAlertsEnabled(enabled)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -510,6 +541,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(bufferDurationMs = clamped)
         viewModelScope.launch {
             settingsDataStore.setBufferDurationMs(clamped)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -518,6 +550,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(frameRateMatching = mode)
         viewModelScope.launch {
             settingsDataStore.setFrameRateMatching(mode)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -526,6 +559,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(bitrateCheckerEnabled = enabled)
         viewModelScope.launch {
             settingsDataStore.setBitrateCheckerEnabled(enabled)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -534,6 +568,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(nextEpisodeAutoPlay = enabled)
         viewModelScope.launch {
             settingsDataStore.setNextEpisodeAutoPlay(enabled)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -542,6 +577,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(nextEpisodeThresholdPercent = clamped)
         viewModelScope.launch {
             settingsDataStore.setNextEpisodeThresholdPercent(clamped)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -600,6 +636,7 @@ class SettingsViewModel @Inject constructor(
     fun saveCategoryOrder() {
         viewModelScope.launch {
             settingsDataStore.setCategoryOrder(_uiState.value.categoryOrder)
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 
@@ -607,6 +644,186 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setCategoryOrder(emptyList())
             _uiState.value = _uiState.value.copy(categoryOrder = _uiState.value.availableCategories)
+            cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    // ─── VOD Category System ───
+    fun openVodCategorySystem() {
+        _uiState.value = _uiState.value.copy(showVodCategorySystem = true, activeCategoryTab = "Home", reorderMode = false)
+        loadVodCategories()
+    }
+
+    fun closeVodCategorySystem() {
+        _uiState.value = _uiState.value.copy(showVodCategorySystem = false, reorderMode = false)
+    }
+
+    fun setActiveCategoryTab(tab: String) {
+        _uiState.value = _uiState.value.copy(activeCategoryTab = tab, reorderMode = false)
+    }
+
+    fun toggleReorderMode() {
+        _uiState.value = _uiState.value.copy(reorderMode = !_uiState.value.reorderMode)
+    }
+
+    private fun loadVodCategories() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingVodCategories = true)
+            try {
+                val addons = addonRepository.getAllAddons().first()
+                val manifests = supervisorScope {
+                    addons.map { addon ->
+                        async(Dispatchers.IO) {
+                            try { addonRepository.fetchManifest(addon.url) ?: addon } catch (_: Exception) { addon }
+                        }
+                    }.awaitAll()
+                }
+
+                data class CatJob(val addonId: String, val addonName: String, val catalogName: String, val catalogId: String, val type: String)
+
+                val jobs = mutableListOf<CatJob>()
+                for (manifest in manifests) {
+                    for (catalog in manifest.catalogs) {
+                        val requiresSpecial = catalog.extra.any { it.isRequired && it.name != "genre" && it.name != "search" }
+                        if (requiresSpecial) continue
+                        jobs.add(CatJob(manifest.id, manifest.name, catalog.name, catalog.id, catalog.type))
+                    }
+                }
+                jobs.removeAll { it.addonName.contains("torbox", true) && it.catalogName.contains("your media", true) }
+
+                // Build items with title format matching HomeViewModel/VodViewModel
+                val allItems = jobs.map { job ->
+                    val typeLabel = when (job.type) { "movie" -> "Movies"; "series" -> "Series"; else -> job.type }
+                    val key = "${job.addonId}:${job.catalogId}:${job.type}"
+                    val title = "${job.catalogName} $typeLabel — ${job.addonName}"
+                    CategoryItem(key = key, title = title, enabled = true)
+                }.distinctBy { it.key }
+
+                // Load saved order and hidden for Home
+                val homeOrder = settingsDataStore.homeCategoryOrder.first()
+                val homeHidden = settingsDataStore.homeHiddenCategories.first()
+                val homeItems = mergeWithSavedOrder(allItems, homeOrder, homeHidden)
+
+                // Load saved order and hidden for VOD
+                val vodOrder = settingsDataStore.vodCategoryOrder.first()
+                val vodHidden = settingsDataStore.vodHiddenCategories.first()
+                val vodItems = mergeWithSavedOrder(allItems, vodOrder, vodHidden)
+
+                _uiState.value = _uiState.value.copy(
+                    isLoadingVodCategories = false,
+                    homeCategoryItems = homeItems,
+                    vodCategoryItems = vodItems
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingVodCategories = false)
+            }
+        }
+    }
+
+    private fun mergeWithSavedOrder(
+        allItems: List<CategoryItem>,
+        savedOrder: List<String>,
+        hiddenKeys: Set<String>
+    ): List<CategoryItem> {
+        if (savedOrder.isEmpty()) {
+            return allItems.map { it.copy(enabled = it.key !in hiddenKeys) }
+        }
+        val itemMap = allItems.associateBy { it.key }
+        // Saved items first (in order), then new items appended
+        val ordered = mutableListOf<CategoryItem>()
+        for (key in savedOrder) {
+            val item = itemMap[key] ?: continue
+            ordered.add(item.copy(enabled = key !in hiddenKeys))
+        }
+        // Append any new items not in saved order
+        for (item in allItems) {
+            if (ordered.none { it.key == item.key }) {
+                ordered.add(item.copy(enabled = item.key !in hiddenKeys))
+            }
+        }
+        return ordered
+    }
+
+    fun toggleHomeCategoryVisible(key: String) {
+        val items = _uiState.value.homeCategoryItems.map {
+            if (it.key == key) it.copy(enabled = !it.enabled) else it
+        }
+        _uiState.value = _uiState.value.copy(homeCategoryItems = items)
+    }
+
+    fun toggleVodCategoryVisible(key: String) {
+        val items = _uiState.value.vodCategoryItems.map {
+            if (it.key == key) it.copy(enabled = !it.enabled) else it
+        }
+        _uiState.value = _uiState.value.copy(vodCategoryItems = items)
+    }
+
+    fun moveHomeCategoryUp(index: Int) {
+        if (index <= 0) return
+        val items = _uiState.value.homeCategoryItems.toMutableList()
+        if (index in items.indices) {
+            val item = items.removeAt(index)
+            items.add(index - 1, item)
+            _uiState.value = _uiState.value.copy(homeCategoryItems = items)
+        }
+    }
+
+    fun moveHomeCategoryDown(index: Int) {
+        val items = _uiState.value.homeCategoryItems.toMutableList()
+        if (index in items.indices && index < items.size - 1) {
+            val item = items.removeAt(index)
+            items.add(index + 1, item)
+            _uiState.value = _uiState.value.copy(homeCategoryItems = items)
+        }
+    }
+
+    fun moveVodCategoryUp(index: Int) {
+        if (index <= 0) return
+        val items = _uiState.value.vodCategoryItems.toMutableList()
+        if (index in items.indices) {
+            val item = items.removeAt(index)
+            items.add(index - 1, item)
+            _uiState.value = _uiState.value.copy(vodCategoryItems = items)
+        }
+    }
+
+    fun moveVodCategoryDown(index: Int) {
+        val items = _uiState.value.vodCategoryItems.toMutableList()
+        if (index in items.indices && index < items.size - 1) {
+            val item = items.removeAt(index)
+            items.add(index + 1, item)
+            _uiState.value = _uiState.value.copy(vodCategoryItems = items)
+        }
+    }
+
+    fun saveVodCategorySystem() {
+        viewModelScope.launch {
+            val homeItems = _uiState.value.homeCategoryItems
+            val vodItems = _uiState.value.vodCategoryItems
+            settingsDataStore.setHomeCategoryOrder(homeItems.map { it.key })
+            settingsDataStore.setHomeHiddenCategories(homeItems.filter { !it.enabled }.map { it.key }.toSet())
+            settingsDataStore.setVodCategoryOrder(vodItems.map { it.key })
+            settingsDataStore.setVodHiddenCategories(vodItems.filter { !it.enabled }.map { it.key }.toSet())
+            _uiState.value = _uiState.value.copy(showVodCategorySystem = false, reorderMode = false)
+            cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    fun resetHomeCategoryOrder() {
+        viewModelScope.launch {
+            settingsDataStore.setHomeCategoryOrder(emptyList())
+            settingsDataStore.setHomeHiddenCategories(emptySet())
+            loadVodCategories()
+            cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    fun resetVodCategoryOrder() {
+        viewModelScope.launch {
+            settingsDataStore.setVodCategoryOrder(emptyList())
+            settingsDataStore.setVodHiddenCategories(emptySet())
+            loadVodCategories()
+            cloudSyncManager.notifySettingsChanged()
         }
     }
 }

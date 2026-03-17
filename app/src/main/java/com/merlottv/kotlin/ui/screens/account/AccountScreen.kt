@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -109,7 +110,8 @@ fun AccountScreen(
             )
             AccountMode.SIGNED_IN -> SignedInView(
                 state = uiState,
-                onSignOut = viewModel::signOut
+                onSignOut = viewModel::signOut,
+                onSyncNow = viewModel::syncNow
             )
         }
     }
@@ -522,7 +524,8 @@ private fun DeviceCodePasswordView(
 @Composable
 private fun SignedInView(
     state: AccountUiState,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onSyncNow: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -565,7 +568,7 @@ private fun SignedInView(
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
             Text(
-                text = "Sync Active",
+                text = if (state.isSyncing) "Syncing..." else "Sync Active",
                 fontSize = 12.sp,
                 color = MerlotColors.Success,
                 fontWeight = FontWeight.Medium
@@ -580,6 +583,22 @@ private fun SignedInView(
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(32.dp))
+
+        if (state.isSyncing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(40.dp),
+                color = MerlotColors.Accent,
+                strokeWidth = 3.dp
+            )
+        } else {
+            AccountActionButton(
+                text = "Sync Now",
+                icon = Icons.Default.Sync,
+                onClick = onSyncNow,
+                isPrimary = true
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         AccountActionButton(
             text = "Sign Out",
             icon = Icons.Default.Logout,

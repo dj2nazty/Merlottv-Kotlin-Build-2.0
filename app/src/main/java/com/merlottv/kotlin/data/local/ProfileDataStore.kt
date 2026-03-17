@@ -156,6 +156,15 @@ class ProfileDataStore(private val context: Context) {
         context.profileDataStore.edit { it[PROFILES] = jsonArray.toString() }
     }
 
+    // ─── Cloud Sync Restore ───
+    suspend fun restoreProfiles(profiles: List<UserProfile>) {
+        saveProfiles(profiles)
+    }
+
+    suspend fun restoreActiveProfileId(id: String) {
+        setActiveProfile(id)
+    }
+
     private fun parseProfilesJson(json: String): List<UserProfile> {
         return try {
             val arr = JSONArray(json)

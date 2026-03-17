@@ -3,6 +3,7 @@ package com.merlottv.kotlin.ui.screens.account
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.merlottv.kotlin.data.sync.CloudSyncManager
 import com.merlottv.kotlin.domain.repository.AuthRepository
 import com.merlottv.kotlin.domain.repository.DeviceCodeRepository
 import com.merlottv.kotlin.domain.repository.DeviceCodeStatus
@@ -31,6 +32,7 @@ data class AccountUiState(
     val password: String = "",
     val confirmPassword: String = "",
     val isLoading: Boolean = false,
+    val isSyncing: Boolean = false,
     val error: String? = null,
     val userEmail: String? = null,
     val deviceCode: String? = null,
@@ -41,7 +43,8 @@ data class AccountUiState(
 @HiltViewModel
 class AccountViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    private val deviceCodeRepository: DeviceCodeRepository
+    private val deviceCodeRepository: DeviceCodeRepository,
+    private val cloudSyncManager: CloudSyncManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AccountUiState())
@@ -57,6 +60,8 @@ class AccountViewModel @Inject constructor(
                 _uiState.update { state ->
                     if (user != null) {
                         cancelDeviceCodeFlow()
+                        // Cloud sync: download all data on sign-in
+                        triggerCloudDownload()
                         state.copy(
                             mode = AccountMode.SIGNED_IN,
                             userEmail = user.email,
@@ -68,6 +73,8 @@ class AccountViewModel @Inject constructor(
                             linkedEmail = null
                         )
                     } else {
+                        // Stop real-time sync on sign-out
+                        cloudSyncManager.stopRealtimeSync()
                         state.copy(
                             mode = AccountMode.SIGNED_OUT,
                             userEmail = null
@@ -261,7 +268,32 @@ class AccountViewModel @Inject constructor(
 
     fun signOut() {
         viewModelScope.launch {
+            cloudSyncManager.stopRealtimeSync()
             authRepository.signOut()
+        }
+    }
+
+    fun syncNow() {
+        _uiState.update { it.copy(isSyncing = true) }
+        viewModelScope.launch {
+            try {
+                cloudSyncManager.uploadAll()
+            } finally {
+                // Small delay so user sees the indicator
+                delay(1000)
+                _uiState.update { it.copy(isSyncing = false) }
+            }
+        }
+    }
+
+    private fun triggerCloudDownload() {
+        viewModelScope.launch {
+            try {
+                cloudSyncManager.downloadAll()
+                cloudSyncManager.startRealtimeSync()
+            } catch (e: Exception) {
+                Log.e("MerlotTV", "Cloud sync failed: ${e.message}", e)
+            }
         }
     }
 

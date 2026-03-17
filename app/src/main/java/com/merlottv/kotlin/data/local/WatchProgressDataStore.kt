@@ -132,6 +132,35 @@ class WatchProgressDataStore(private val context: Context) {
             }.sortedByDescending { it.timestamp }
         }
     }
+    // ─── Cloud Sync Restore ───
+    suspend fun restoreProgress(profileId: String, items: Map<String, WatchProgressItem>) {
+        context.watchProgressDataStore.edit { prefs ->
+            // Clear existing tracked IDs for this profile first
+            val existingIds = (prefs[trackedIdsKey(profileId)] ?: "")
+                .split(",").filter { it.isNotEmpty() }
+            for (id in existingIds) {
+                prefs.remove(positionKey(profileId, id))
+                prefs.remove(durationKey(profileId, id))
+                prefs.remove(titleKey(profileId, id))
+                prefs.remove(posterKey(profileId, id))
+                prefs.remove(typeKey(profileId, id))
+                prefs.remove(timestampKey(profileId, id))
+            }
+
+            // Write all cloud items
+            val ids = mutableSetOf<String>()
+            items.forEach { (id, item) ->
+                prefs[positionKey(profileId, id)] = item.position
+                prefs[durationKey(profileId, id)] = item.duration
+                prefs[titleKey(profileId, id)] = item.title
+                prefs[posterKey(profileId, id)] = item.poster
+                prefs[typeKey(profileId, id)] = item.type
+                prefs[timestampKey(profileId, id)] = item.timestamp
+                ids.add(id)
+            }
+            prefs[trackedIdsKey(profileId)] = ids.joinToString(",")
+        }
+    }
 }
 
 data class WatchProgressItem(

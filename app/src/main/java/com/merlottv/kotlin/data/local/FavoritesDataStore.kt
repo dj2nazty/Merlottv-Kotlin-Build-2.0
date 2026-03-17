@@ -238,6 +238,53 @@ class FavoritesDataStore(private val context: Context) {
         }
     }
 
+    // =============== Cloud Sync Restore ===============
+
+    suspend fun restoreFavoriteChannels(profileId: String, ids: Set<String>) {
+        context.favoritesDataStore.edit { prefs ->
+            prefs[channelsKey(profileId)] = ids
+        }
+    }
+
+    suspend fun restoreFavoriteVod(profileId: String, ids: Set<String>) {
+        context.favoritesDataStore.edit { prefs ->
+            prefs[vodKey(profileId)] = ids
+        }
+    }
+
+    suspend fun restoreVodMeta(profileId: String, metaMap: Map<String, FavoriteVodMeta>) {
+        val json = JSONObject()
+        metaMap.forEach { (id, meta) ->
+            val item = JSONObject().apply {
+                put("name", meta.name)
+                put("poster", meta.poster)
+                put("type", meta.type)
+                put("imdbRating", meta.imdbRating)
+                put("description", meta.description)
+            }
+            json.put(id, item)
+        }
+        context.favoritesDataStore.edit { prefs ->
+            prefs[vodMetaKey(profileId)] = json.toString()
+        }
+    }
+
+    suspend fun restoreWatched(profileId: String, ids: Set<String>) {
+        context.favoritesDataStore.edit { prefs ->
+            prefs[watchedKey(profileId)] = ids
+        }
+    }
+
+    suspend fun restoreCustomLists(lists: Map<String, List<String>>) {
+        val json = JSONObject()
+        lists.forEach { (name, ids) ->
+            json.put(name, JSONArray(ids))
+        }
+        context.favoritesDataStore.edit { prefs ->
+            prefs[CUSTOM_LISTS] = json.toString()
+        }
+    }
+
     // =============== Legacy methods (no profile) ===============
 
     val favoriteChannels: Flow<Set<String>> = context.favoritesDataStore.data.map { prefs ->

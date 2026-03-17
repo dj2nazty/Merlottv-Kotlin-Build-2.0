@@ -3,6 +3,7 @@ package com.merlottv.kotlin.data.repository
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
 import com.merlottv.kotlin.data.local.FavoritesDataStore
 import com.merlottv.kotlin.data.local.ProfileDataStore
+import com.merlottv.kotlin.data.sync.CloudSyncManager
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -15,7 +16,8 @@ import javax.inject.Singleton
 @Singleton
 class FavoritesRepositoryImpl @Inject constructor(
     private val favoritesDataStore: FavoritesDataStore,
-    private val profileDataStore: ProfileDataStore
+    private val profileDataStore: ProfileDataStore,
+    private val cloudSyncManager: CloudSyncManager
 ) : FavoritesRepository {
 
     // Profile-aware: automatically re-emits when active profile changes
@@ -37,11 +39,13 @@ class FavoritesRepositoryImpl @Inject constructor(
     override suspend fun toggleFavoriteChannel(channelId: String) {
         val profileId = profileDataStore.getActiveProfileId()
         favoritesDataStore.toggleFavoriteChannel(channelId, profileId)
+        cloudSyncManager.notifyFavoritesChanged(profileId)
     }
 
     override suspend fun toggleFavoriteVod(vodId: String) {
         val profileId = profileDataStore.getActiveProfileId()
         favoritesDataStore.toggleFavoriteVod(vodId, profileId)
+        cloudSyncManager.notifyFavoritesChanged(profileId)
     }
 
     override suspend fun toggleFavoriteVodWithMeta(vodId: String, meta: FavoriteVodMeta) {
@@ -49,17 +53,17 @@ class FavoritesRepositoryImpl @Inject constructor(
         val isFav = favoritesDataStore.favoriteVod(profileId).first().contains(vodId)
         favoritesDataStore.toggleFavoriteVod(vodId, profileId)
         if (!isFav) {
-            // Adding — save metadata
             favoritesDataStore.saveVodMeta(meta, profileId)
         } else {
-            // Removing — clean up metadata
             favoritesDataStore.removeVodMeta(vodId, profileId)
         }
+        cloudSyncManager.notifyFavoritesChanged(profileId)
     }
 
     override suspend fun saveVodMeta(meta: FavoriteVodMeta) {
         val profileId = profileDataStore.getActiveProfileId()
         favoritesDataStore.saveVodMeta(meta, profileId)
+        cloudSyncManager.notifyFavoritesChanged(profileId)
     }
 
     override suspend fun isFavoriteChannel(channelId: String): Boolean {
@@ -79,22 +83,27 @@ class FavoritesRepositoryImpl @Inject constructor(
 
     override suspend fun createCustomList(name: String) {
         favoritesDataStore.createCustomList(name)
+        cloudSyncManager.notifyFavoritesChanged(profileDataStore.getActiveProfileId())
     }
 
     override suspend fun deleteCustomList(name: String) {
         favoritesDataStore.deleteCustomList(name)
+        cloudSyncManager.notifyFavoritesChanged(profileDataStore.getActiveProfileId())
     }
 
     override suspend fun addToCustomList(listName: String, vodId: String) {
         favoritesDataStore.addToCustomList(listName, vodId)
+        cloudSyncManager.notifyFavoritesChanged(profileDataStore.getActiveProfileId())
     }
 
     override suspend fun removeFromCustomList(listName: String, vodId: String) {
         favoritesDataStore.removeFromCustomList(listName, vodId)
+        cloudSyncManager.notifyFavoritesChanged(profileDataStore.getActiveProfileId())
     }
 
     override suspend fun renameCustomList(oldName: String, newName: String) {
         favoritesDataStore.renameCustomList(oldName, newName)
+        cloudSyncManager.notifyFavoritesChanged(profileDataStore.getActiveProfileId())
     }
 
     // Watched tracking
@@ -107,5 +116,6 @@ class FavoritesRepositoryImpl @Inject constructor(
     override suspend fun toggleWatched(vodId: String) {
         val profileId = profileDataStore.getActiveProfileId()
         favoritesDataStore.toggleWatched(vodId, profileId)
+        cloudSyncManager.notifyFavoritesChanged(profileId)
     }
 }

@@ -41,7 +41,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -230,6 +232,7 @@ fun SettingsScreen(
         scrollState.scrollTo(0)
     }
 
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -238,6 +241,12 @@ fun SettingsScreen(
         // Tab row with focus requesters for each tab
         val tabs = listOf("General", "Playback", "Sources", "Addons", "Advanced")
         val tabFocusRequesters = remember { tabs.map { FocusRequester() } }
+
+        // Auto-focus General tab when Settings opens
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(200)
+            try { tabFocusRequesters[0].requestFocus() } catch (_: Exception) {}
+        }
 
         Row(
             modifier = Modifier
@@ -1150,6 +1159,21 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ VOD Category System ═══ [Advanced]
+        if (selectedTab == "Advanced") {
+            SettingsSection(title = "VOD Category System", icon = { Icon(Icons.Default.Tune, null, tint = MerlotColors.Accent) }) {
+                Text(
+                    "Customize which catalog rows appear on the Home and VOD screens, and their display order.",
+                    color = MerlotColors.TextMuted, fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                DpadButton(onClick = { viewModel.openVodCategorySystem() }) {
+                    Text("Open VOD Category System", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         // ═══ Live TV Category Order ═══ [Advanced]
         if (selectedTab == "Advanced" && uiState.categoryOrder.isNotEmpty()) {
                 var movingIndex by remember { mutableStateOf(-1) }  // -1 = not moving
@@ -1284,6 +1308,24 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(16.dp))
         }  // end scrollable Column
     }  // end outer Column
+
+    // ═══ VOD Category System Overlay ═══
+    if (uiState.showVodCategorySystem) {
+        VodCategorySystemOverlay(
+            uiState = uiState,
+            onClose = { viewModel.closeVodCategorySystem() },
+            onSave = { viewModel.saveVodCategorySystem() },
+            onTabChange = { viewModel.setActiveCategoryTab(it) },
+            onToggleHome = { viewModel.toggleHomeCategoryVisible(it) },
+            onToggleVod = { viewModel.toggleVodCategoryVisible(it) },
+            onMoveHomeUp = { viewModel.moveHomeCategoryUp(it) },
+            onMoveHomeDown = { viewModel.moveHomeCategoryDown(it) },
+            onMoveVodUp = { viewModel.moveVodCategoryUp(it) },
+            onMoveVodDown = { viewModel.moveVodCategoryDown(it) },
+            onResetHome = { viewModel.resetHomeCategoryOrder() },
+            onResetVod = { viewModel.resetVodCategoryOrder() }
+        )
+    }
 }
 
 @Composable
@@ -1299,5 +1341,357 @@ private fun SettingsSection(
             Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
         content()
+    }
+}
+
+// ═══ VOD Category System Overlay ═══
+@Composable
+private fun VodCategorySystemOverlay(
+    uiState: SettingsUiState,
+    onClose: () -> Unit,
+    onSave: () -> Unit,
+    onTabChange: (String) -> Unit,
+    onToggleHome: (String) -> Unit,
+    onToggleVod: (String) -> Unit,
+    onMoveHomeUp: (Int) -> Unit,
+    onMoveHomeDown: (Int) -> Unit,
+    onMoveVodUp: (Int) -> Unit,
+    onMoveVodDown: (Int) -> Unit,
+    onResetHome: () -> Unit,
+    onResetVod: () -> Unit
+) {
+    val isHome = uiState.activeCategoryTab == "Home"
+    val items = if (isHome) uiState.homeCategoryItems else uiState.vodCategoryItems
+    var movingIndex by remember { mutableStateOf(-1) }
+
+    // Reset moving index on tab change
+    LaunchedEffect(uiState.activeCategoryTab) { movingIndex = -1 }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MerlotColors.Background)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                    if (movingIndex >= 0) {
+                        movingIndex = -1
+                        true
+                    } else {
+                        onClose()
+                        true
+                    }
+                } else false
+            }
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Tune, null, tint = MerlotColors.Accent, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    "VOD Category System",
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                val saveFocus = remember { FocusRequester() }
+                val closeFocus = remember { FocusRequester() }
+                DpadButton(
+                    onClick = { movingIndex = -1; onSave() },
+                    modifier = Modifier
+                        .focusRequester(saveFocus)
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                                try { closeFocus.requestFocus() } catch (_: Exception) {}
+                                true
+                            } else false
+                        }
+                ) {
+                    Icon(Icons.Default.Save, null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                DpadButton(
+                    onClick = { onClose() },
+                    modifier = Modifier
+                        .focusRequester(closeFocus)
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                                try { saveFocus.requestFocus() } catch (_: Exception) {}
+                                true
+                            } else false
+                        }
+                ) {
+                    Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Close", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Tab chips: Home / VOD
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val homeFocus = remember { FocusRequester() }
+                val vodFocus = remember { FocusRequester() }
+
+                // Auto-focus Home tab when overlay opens
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(200)
+                    try { homeFocus.requestFocus() } catch (_: Exception) {}
+                }
+                listOf("Home" to homeFocus, "VOD" to vodFocus).forEach { (tab, focusReq) ->
+                    val selected = uiState.activeCategoryTab == tab
+                    val otherFocus = if (tab == "Home") vodFocus else homeFocus
+                    var chipFocused by remember { mutableStateOf(false) }
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (selected) MerlotColors.Accent
+                                else if (chipFocused) FocusedGrey
+                                else MerlotColors.Surface2,
+                                RoundedCornerShape(20.dp)
+                            )
+                            .border(
+                                2.dp,
+                                if (chipFocused && !selected) FocusedGrey else Color.Transparent,
+                                RoundedCornerShape(20.dp)
+                            )
+                            .focusRequester(focusReq)
+                            .onFocusChanged { chipFocused = it.isFocused }
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown) {
+                                    when (event.key) {
+                                        Key.DirectionCenter, Key.Enter -> {
+                                            movingIndex = -1
+                                            onTabChange(tab)
+                                            true
+                                        }
+                                        Key.DirectionLeft -> {
+                                            if (tab == "VOD") {
+                                                try { homeFocus.requestFocus() } catch (_: Exception) {}
+                                            }
+                                            true // Always consume Left to block sidebar
+                                        }
+                                        Key.DirectionRight -> {
+                                            if (tab == "Home") {
+                                                try { vodFocus.requestFocus() } catch (_: Exception) {}
+                                            }
+                                            true // Consume Right to stay in tabs
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
+                            .focusable()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "$tab Categories",
+                            color = if (selected) MerlotColors.White else MerlotColors.TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Mode toggle + instructions row
+            var reorderMode by remember { mutableStateOf(false) }
+            // Reset reorder mode on tab change
+            LaunchedEffect(uiState.activeCategoryTab) { reorderMode = false; movingIndex = -1 }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Mode toggle button
+                DpadButton(onClick = {
+                    movingIndex = -1
+                    reorderMode = !reorderMode
+                }) {
+                    Icon(
+                        if (reorderMode) Icons.Default.Check else Icons.Default.List,
+                        null, modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        if (reorderMode) "Done Reordering" else "Reorder Mode",
+                        fontWeight = FontWeight.Bold, fontSize = 11.sp
+                    )
+                }
+
+                // Instructions
+                Text(
+                    text = when {
+                        movingIndex >= 0 -> "▲▼ D-pad Up/Down to move, OK to confirm"
+                        reorderMode -> "Press OK to pick up a row, then move it"
+                        else -> "Press OK to toggle on/off"
+                    },
+                    color = when {
+                        movingIndex >= 0 -> MerlotColors.Accent
+                        reorderMode -> Color(0xFFFF9800)
+                        else -> MerlotColors.TextMuted
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = if (movingIndex >= 0 || reorderMode) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (uiState.isLoadingVodCategories) {
+                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
+                }
+            } else {
+                // Scrollable category list
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    items.forEachIndexed { index, item ->
+                        val isMoving = movingIndex == index
+                        var isFocused by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    when {
+                                        isMoving -> MerlotColors.Accent.copy(alpha = 0.15f)
+                                        reorderMode && isFocused -> Color(0xFFFF9800).copy(alpha = 0.1f)
+                                        !item.enabled -> MerlotColors.Surface2.copy(alpha = 0.4f)
+                                        else -> MerlotColors.Surface2
+                                    },
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .then(
+                                    when {
+                                        isMoving -> Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                        reorderMode && isFocused -> Modifier.border(2.dp, Color(0xFFFF9800), RoundedCornerShape(8.dp))
+                                        isFocused -> Modifier.border(2.dp, FocusedGrey, RoundedCornerShape(8.dp))
+                                        else -> Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
+                                    }
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown) {
+                                        when (event.key) {
+                                            Key.DirectionCenter, Key.Enter -> {
+                                                if (reorderMode) {
+                                                    // Reorder mode: pick up / put down
+                                                    if (isMoving) {
+                                                        movingIndex = -1 // Confirm position
+                                                    } else if (movingIndex >= 0) {
+                                                        movingIndex = -1 // Cancel current, don't pick up new
+                                                    } else {
+                                                        movingIndex = index // Pick up this item
+                                                    }
+                                                } else {
+                                                    // Toggle mode: toggle visibility
+                                                    if (isHome) onToggleHome(item.key) else onToggleVod(item.key)
+                                                }
+                                                true
+                                            }
+                                            Key.DirectionUp -> {
+                                                if (isMoving && index > 0) {
+                                                    if (isHome) onMoveHomeUp(index) else onMoveVodUp(index)
+                                                    movingIndex = index - 1
+                                                    true
+                                                } else false
+                                            }
+                                            Key.DirectionDown -> {
+                                                if (isMoving && index < items.size - 1) {
+                                                    if (isHome) onMoveHomeDown(index) else onMoveVodDown(index)
+                                                    movingIndex = index + 1
+                                                    true
+                                                } else false
+                                            }
+                                            Key.Back -> {
+                                                if (isMoving) {
+                                                    movingIndex = -1
+                                                    true
+                                                } else false
+                                            }
+                                            else -> false
+                                        }
+                                    } else false
+                                }
+                                .focusable()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Row number
+                            Text(
+                                text = "${index + 1}.",
+                                color = if (isMoving) MerlotColors.Accent else MerlotColors.TextMuted,
+                                fontSize = 11.sp,
+                                fontWeight = if (isMoving) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.width(28.dp)
+                            )
+                            // Reorder indicator
+                            if (reorderMode) {
+                                if (isMoving) {
+                                    Text("▲▼", color = MerlotColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.KeyboardArrowUp, null, tint = Color(0xFFFF9800).copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+                                    Icon(Icons.Default.KeyboardArrowDown, null, tint = Color(0xFFFF9800).copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            // Title
+                            Text(
+                                text = item.title,
+                                color = when {
+                                    isMoving -> MerlotColors.Accent
+                                    !item.enabled -> MerlotColors.TextMuted
+                                    else -> MerlotColors.TextPrimary
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            // Toggle switch (visible in both modes for state awareness)
+                            Switch(
+                                checked = item.enabled,
+                                onCheckedChange = null,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MerlotColors.Accent,
+                                    checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f),
+                                    uncheckedThumbColor = MerlotColors.TextMuted,
+                                    uncheckedTrackColor = MerlotColors.Surface2
+                                ),
+                                modifier = Modifier.height(24.dp).focusable(false)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Bottom buttons: Reset
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DpadButton(onClick = { movingIndex = -1; reorderMode = false; if (isHome) onResetHome() else onResetVod() }) {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Reset to Default", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
     }
 }

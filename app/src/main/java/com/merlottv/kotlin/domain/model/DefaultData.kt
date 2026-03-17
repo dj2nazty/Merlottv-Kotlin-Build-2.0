@@ -72,6 +72,12 @@ object DefaultData {
             name = "TMDB",
             url = "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json",
             isDefault = true
+        ),
+        Addon(
+            id = "merlottv-plus",
+            name = "MerlotTV+",
+            url = "http://10.0.2.2:7000/manifest.json",
+            isDefault = true
         )
     )
 

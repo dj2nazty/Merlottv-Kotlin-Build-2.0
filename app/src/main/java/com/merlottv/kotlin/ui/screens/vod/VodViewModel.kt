@@ -3,6 +3,7 @@ package com.merlottv.kotlin.ui.screens.vod
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
+import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.Addon
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.domain.repository.AddonRepository
@@ -22,6 +23,7 @@ import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
 
 data class CatalogSection(
+    val key: String = "",
     val title: String,
     val addonName: String,
     val addonLogo: String = "",
@@ -47,7 +49,8 @@ data class VodUiState(
 @HiltViewModel
 class VodViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
-    private val favoritesRepository: FavoritesRepository
+    private val favoritesRepository: FavoritesRepository,
+    private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VodUiState())
@@ -255,6 +258,7 @@ class VodViewModel @Inject constructor(
                                     val title = buildSectionTitle(job.catalogName, job.addon.name, job.type)
                                     val brandLogo = getBrandLogoUrl(job.catalogName)
                                     CatalogSection(
+                                        key = "${job.addon.id}:${job.catalogId}:${job.type}",
                                         title = title,
                                         addonName = job.addon.name,
                                         addonLogo = job.addon.logo,
@@ -271,12 +275,26 @@ class VodViewModel @Inject constructor(
                     }.awaitAll().filterNotNull()
                 }
 
-                // Sort: Popular/New/Featured first, then streaming platforms
-                val sorted = sections.sortedWith(compareBy(
-                    { getCategoryOrder(it.title, it.catalogId) },
-                    { when (it.type) { "movie" -> 0; "series" -> 1; else -> 2 } },
-                    { it.title }
-                ))
+                // Apply saved category order and hidden from VOD Category System
+                val savedOrder = settingsDataStore.vodCategoryOrder.first()
+                val hiddenKeys = settingsDataStore.vodHiddenCategories.first()
+
+                val visible = sections.filter { it.key !in hiddenKeys }
+
+                val sorted = if (savedOrder.isNotEmpty()) {
+                    val orderMap = savedOrder.withIndex().associate { (i, key) -> key to i }
+                    visible.sortedWith(compareBy(
+                        { orderMap[it.key] ?: (1000 + getCategoryOrder(it.title, it.catalogId)) },
+                        { when (it.type) { "movie" -> 0; "series" -> 1; else -> 2 } },
+                        { it.title }
+                    ))
+                } else {
+                    visible.sortedWith(compareBy(
+                        { getCategoryOrder(it.title, it.catalogId) },
+                        { when (it.type) { "movie" -> 0; "series" -> 1; else -> 2 } },
+                        { it.title }
+                    ))
+                }
 
                 _uiState.value = VodUiState(
                     isLoading = false,
@@ -319,19 +337,32 @@ class VodViewModel @Inject constructor(
         val t = title.lowercase()
         val cid = catalogId.lowercase()
         return when {
-            "popular" in t || cid == "top" -> 0         // Popular first
-            "new" in t || cid == "year" -> 1             // New releases second
-            "featured" in t || "imdbrating" in cid -> 2  // Featured/Top Rated third
-            "netflix" in t -> 3
-            "disney" in t -> 4
-            "prime" in t || "amazon" in t -> 5
-            "hbo" in t -> 6
-            "apple tv" in t -> 7
-            "paramount" in t -> 8
-            "peacock" in t -> 9
-            "discovery" in t -> 10
-            "imdb" in t -> 11
-            else -> 15
+            "trending" in t -> 0
+            "popular" in t || cid == "top" -> 1
+            "upcoming" in t -> 2
+            "in theaters" in t || "now_playing" in cid -> 3
+            "airing today" in t -> 4
+            "on the air" in t -> 5
+            "top rated" in t -> 6
+            "latest" in t || "new" in t || cid == "year" -> 7
+            "featured" in t || "imdbrating" in cid -> 8
+            "netflix" in t -> 9
+            "disney" in t -> 10
+            "prime" in t || "amazon" in t -> 11
+            "hbo" in t -> 12
+            "apple tv" in t -> 13
+            "paramount" in t -> 14
+            "peacock" in t -> 15
+            "discovery" in t -> 16
+            // Network catalogs
+            "nbc" in t -> 17
+            "abc" in t -> 18
+            "cbs" in t -> 19
+            "fox" in t -> 20
+            "cw" in t -> 21
+            "showtime" in t -> 22
+            "imdb" in t -> 23
+            else -> 30
         }
     }
 

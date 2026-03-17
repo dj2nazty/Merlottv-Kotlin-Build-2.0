@@ -52,6 +52,12 @@ class SettingsDataStore(private val context: Context) {
         // Live TV category order
         val CATEGORY_ORDER = stringPreferencesKey("live_tv_category_order")
 
+        // VOD Category System — order and visibility for Home and VOD screens
+        val HOME_CATEGORY_ORDER = stringPreferencesKey("home_category_order")
+        val HOME_HIDDEN_CATEGORIES = stringPreferencesKey("home_hidden_categories")
+        val VOD_CATEGORY_ORDER = stringPreferencesKey("vod_category_order")
+        val VOD_HIDDEN_CATEGORIES = stringPreferencesKey("vod_hidden_categories")
+
         // Live TV buffer duration (milliseconds) — adjustable 300ms to 3000ms
         val BUFFER_DURATION_MS = intPreferencesKey("live_tv_buffer_duration_ms")
         const val DEFAULT_BUFFER_MS = 1000 // 1.0 second default (matches TiviMate)
@@ -251,6 +257,13 @@ class SettingsDataStore(private val context: Context) {
         }
     }
 
+    // ─── Cloud Sync: Restore disabled addons (bulk write) ───
+    suspend fun restoreDisabledAddons(addons: Set<String>) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[DISABLED_ADDONS] = addons
+        }
+    }
+
     // ─── Weather Alerts Toggle ───
     val weatherAlertsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[WEATHER_ALERTS_ENABLED] ?: true // Enabled by default
@@ -364,4 +377,29 @@ class SettingsDataStore(private val context: Context) {
         order.forEach { jsonArray.put(it) }
         context.settingsDataStore.edit { it[CATEGORY_ORDER] = jsonArray.toString() }
     }
+
+    // ─── VOD Category System ───
+    private fun readJsonStringList(prefs: Preferences, key: Preferences.Key<String>): List<String> {
+        val json = prefs[key] ?: return emptyList()
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private suspend fun writeJsonStringList(key: Preferences.Key<String>, list: List<String>) {
+        val jsonArray = JSONArray()
+        list.forEach { jsonArray.put(it) }
+        context.settingsDataStore.edit { it[key] = jsonArray.toString() }
+    }
+
+    val homeCategoryOrder: Flow<List<String>> = context.settingsDataStore.data.map { readJsonStringList(it, HOME_CATEGORY_ORDER) }
+    val homeHiddenCategories: Flow<Set<String>> = context.settingsDataStore.data.map { readJsonStringList(it, HOME_HIDDEN_CATEGORIES).toSet() }
+    val vodCategoryOrder: Flow<List<String>> = context.settingsDataStore.data.map { readJsonStringList(it, VOD_CATEGORY_ORDER) }
+    val vodHiddenCategories: Flow<Set<String>> = context.settingsDataStore.data.map { readJsonStringList(it, VOD_HIDDEN_CATEGORIES).toSet() }
+
+    suspend fun setHomeCategoryOrder(order: List<String>) = writeJsonStringList(HOME_CATEGORY_ORDER, order)
+    suspend fun setHomeHiddenCategories(hidden: Set<String>) = writeJsonStringList(HOME_HIDDEN_CATEGORIES, hidden.toList())
+    suspend fun setVodCategoryOrder(order: List<String>) = writeJsonStringList(VOD_CATEGORY_ORDER, order)
+    suspend fun setVodHiddenCategories(hidden: Set<String>) = writeJsonStringList(VOD_HIDDEN_CATEGORIES, hidden.toList())
 }

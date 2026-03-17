@@ -2,6 +2,7 @@ package com.merlottv.kotlin.ui.screens.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.WatchProgressDataStore
 import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.data.local.FavoriteVodMeta
@@ -24,6 +25,7 @@ import kotlinx.coroutines.supervisorScope
 import javax.inject.Inject
 
 data class CatalogRow(
+    val key: String = "",
     val title: String,
     val items: List<MetaPreview>
 )
@@ -40,7 +42,8 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
     private val watchProgressDataStore: WatchProgressDataStore,
-    private val favoritesRepository: FavoritesRepository
+    private val favoritesRepository: FavoritesRepository,
+    private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -125,7 +128,9 @@ class HomeViewModel @Inject constructor(
                                         "series" -> "Series"
                                         else -> job.type
                                     }
+                                    val manifest = manifests.find { it.url == job.addonUrl }
                                     CatalogRow(
+                                        key = "${manifest?.id ?: job.addonName}:${job.catalogId}:${job.type}",
                                         title = "${job.catalogName} $typeLabel — ${job.addonName}",
                                         items = items
                                     )
@@ -137,23 +142,20 @@ class HomeViewModel @Inject constructor(
                     }.awaitAll().filterNotNull()
                 }
 
-                val sorted = rows.sortedWith(compareBy { row ->
-                    val t = row.title.lowercase()
-                    when {
-                        "popular" in t -> 0
-                        "new" in t -> 1
-                        "featured" in t -> 2
-                        "netflix" in t -> 3
-                        "disney" in t -> 4
-                        "prime" in t -> 5
-                        "hbo" in t -> 6
-                        "apple" in t -> 7
-                        "paramount" in t -> 8
-                        "peacock" in t -> 9
-                        "imdb" in t -> 10
-                        else -> 15
-                    }
-                })
+                // Apply saved category order and hidden from VOD Category System
+                val savedOrder = settingsDataStore.homeCategoryOrder.first()
+                val hiddenKeys = settingsDataStore.homeHiddenCategories.first()
+
+                // Filter out hidden rows
+                val visible = rows.filter { it.key !in hiddenKeys }
+
+                // Sort: saved order first, then fallback to default
+                val sorted = if (savedOrder.isNotEmpty()) {
+                    val orderMap = savedOrder.withIndex().associate { (i, key) -> key to i }
+                    visible.sortedWith(compareBy { orderMap[it.key] ?: (1000 + defaultSortOrder(it.title)) })
+                } else {
+                    visible.sortedWith(compareBy { defaultSortOrder(it.title) })
+                }
 
                 // Collect top movies for the hero carousel — prefer items with landscape background images
                 val heroItems = sorted
@@ -202,6 +204,37 @@ class HomeViewModel @Inject constructor(
                     description = item.description
                 )
             )
+        }
+    }
+
+    private fun defaultSortOrder(title: String): Int {
+        val t = title.lowercase()
+        return when {
+            "trending" in t -> 0
+            "popular" in t -> 1
+            "upcoming" in t -> 2
+            "in theaters" in t || "now_playing" in t -> 3
+            "airing today" in t -> 4
+            "on the air" in t -> 5
+            "top rated" in t -> 6
+            "latest" in t || "new" in t -> 7
+            "featured" in t -> 8
+            "netflix" in t -> 9
+            "disney" in t -> 10
+            "prime" in t || "amazon" in t -> 11
+            "hbo" in t || "max" in t -> 12
+            "apple" in t -> 13
+            "paramount" in t -> 14
+            "peacock" in t -> 15
+            "discovery" in t -> 16
+            "nbc" in t -> 17
+            "abc" in t -> 18
+            "cbs" in t -> 19
+            "fox" in t -> 20
+            "cw" in t -> 21
+            "showtime" in t -> 22
+            "imdb" in t -> 23
+            else -> 30
         }
     }
 }
