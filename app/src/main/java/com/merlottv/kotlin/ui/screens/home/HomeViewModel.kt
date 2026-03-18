@@ -23,14 +23,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import androidx.compose.runtime.Immutable
 import javax.inject.Inject
 
+@Immutable
 data class CatalogRow(
     val key: String = "",
     val title: String,
     val items: List<MetaPreview>
 )
 
+@Immutable
 data class HomeUiState(
     val isLoading: Boolean = true,
     val featuredItems: List<MetaPreview> = emptyList(),

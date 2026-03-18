@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -170,20 +172,29 @@ fun SpaceXScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(SpaceXTab.entries.toList()) { tab ->
+                itemsIndexed(SpaceXTab.entries.toList()) { index, tab ->
                     val isSelected = uiState.selectedTab == tab
-                    MerlotChip(
-                        selected = isSelected,
-                        onClick = { viewModel.selectTab(tab) },
-                        containerColor = Color(0xFF2A2A2A),
-                        label = {
-                            Text(
-                                tab.title,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MerlotColors.Black else MerlotColors.TextMuted
-                            )
+                    Box(
+                        modifier = Modifier.onKeyEvent { event ->
+                            // Consume LEFT after focus move to prevent sidebar opening
+                            if (event.type == KeyEventType.KeyDown &&
+                                event.key == Key.DirectionLeft && index > 0
+                            ) true else false
                         }
-                    )
+                    ) {
+                        MerlotChip(
+                            selected = isSelected,
+                            onClick = { viewModel.selectTab(tab) },
+                            containerColor = Color(0xFF2A2A2A),
+                            label = {
+                                Text(
+                                    tab.title,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MerlotColors.Black else MerlotColors.TextMuted
+                                )
+                            }
+                        )
+                    }
                 }
             }
 

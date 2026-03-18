@@ -73,17 +73,27 @@ fun CardTrailerPreview(
     var trailerResult by remember { mutableStateOf<TrailerService.TrailerStreamResult?>(null) }
     var shouldShowTrailer by remember { mutableStateOf(false) }
 
+    // Throttle: track a generation counter so rapid focus changes cancel stale fetches
+    var focusGeneration by remember { mutableStateOf(0L) }
+
     // When focused for >2 seconds, start resolving trailer
     LaunchedEffect(isFocused, contentId) {
         if (!isFocused) {
+            // Bump generation to cancel any in-flight fetch for previous focus
+            focusGeneration++
             shouldShowTrailer = false
             trailerResult = null
             onTrailerStateChanged(false)
             return@LaunchedEffect
         }
 
-        // Wait for focus delay
+        val myGeneration = ++focusGeneration
+
+        // Wait for focus delay — if user scrolls past quickly, this coroutine gets cancelled
         delay(focusDelayMs)
+
+        // Check generation: if it changed, another focus event superseded us
+        if (myGeneration != focusGeneration) return@LaunchedEffect
 
         // Still focused — resolve trailer
         if (trailerService == null || contentId.isEmpty()) return@LaunchedEffect
@@ -103,6 +113,9 @@ fun CardTrailerPreview(
                 null
             }
         }
+
+        // Double-check generation after IO — don't show stale trailer
+        if (myGeneration != focusGeneration) return@LaunchedEffect
 
         if (result != null) {
             trailerResult = result

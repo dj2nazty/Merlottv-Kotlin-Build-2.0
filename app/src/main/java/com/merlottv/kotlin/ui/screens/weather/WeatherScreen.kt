@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -52,6 +53,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -502,6 +504,7 @@ private fun ForecastSection(
                 ForecastDayCard(
                     day = forecast[index],
                     isSelected = index == selectedIndex,
+                    itemIndex = index,
                     onClick = { onDayClick(index) }
                 )
             }
@@ -513,6 +516,7 @@ private fun ForecastSection(
 private fun ForecastDayCard(
     day: DayForecast,
     isSelected: Boolean = false,
+    itemIndex: Int = 0,
     onClick: () -> Unit = {}
 ) {
     val shape = RoundedCornerShape(10.dp)
@@ -550,6 +554,13 @@ private fun ForecastDayCard(
                     onClick()
                     true
                 } else false
+            }
+            .onKeyEvent { event ->
+                // Bubble phase: consume LEFT after focus system has moved focus,
+                // preventing event from reaching sidebar handler
+                if (event.type == KeyEventType.KeyDown &&
+                    event.key == Key.DirectionLeft && itemIndex > 0
+                ) true else false
             }
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -756,7 +767,7 @@ private fun DayDetailCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(day.hourly.size) { index ->
-                    HourlyCard(hour = day.hourly[index])
+                    HourlyCard(hour = day.hourly[index], itemIndex = index)
                 }
             }
         }
@@ -780,7 +791,7 @@ private fun DayDetailCard(
 }
 
 @Composable
-private fun HourlyCard(hour: HourForecast) {
+private fun HourlyCard(hour: HourForecast, itemIndex: Int = 0) {
     val shape = RoundedCornerShape(8.dp)
     var isFocused by remember { mutableStateOf(false) }
 
@@ -799,6 +810,12 @@ private fun HourlyCard(hour: HourForecast) {
             )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
+            .onKeyEvent { event ->
+                // Consume LEFT after focus move to prevent sidebar opening
+                if (event.type == KeyEventType.KeyDown &&
+                    event.key == Key.DirectionLeft && itemIndex > 0
+                ) true else false
+            }
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

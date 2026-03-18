@@ -1,5 +1,8 @@
 package com.merlottv.kotlin.domain.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Meta(
     val id: String,
     val type: String,
@@ -22,6 +25,7 @@ data class Meta(
     val trailerStreams: List<TrailerStream> = emptyList()
 )
 
+@Immutable
 data class TrailerStream(
     val title: String = "",
     val ytId: String = "",
@@ -29,6 +33,7 @@ data class TrailerStream(
     val source: String = ""
 )
 
+@Immutable
 data class MetaPreview(
     val id: String,
     val type: String,
@@ -41,6 +46,7 @@ data class MetaPreview(
     val logo: String = ""
 )
 
+@Immutable
 data class Video(
     val id: String,
     val title: String,
@@ -51,6 +57,7 @@ data class Video(
     val thumbnail: String = ""
 )
 
+@Immutable
 data class MetaLink(
     val name: String,
     val category: String,

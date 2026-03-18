@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -98,11 +100,12 @@ fun SportsScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(SportsTab.entries.toList()) { tab ->
+            itemsIndexed(SportsTab.entries.toList()) { index, tab ->
                 SportChip(
                     label = tab.title,
                     selected = uiState.selectedTab == tab,
-                    onClick = { viewModel.selectTab(tab) }
+                    onClick = { viewModel.selectTab(tab) },
+                    itemIndex = index
                 )
             }
         }
@@ -114,11 +117,12 @@ fun SportsScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(SportsLeague.entries.toList()) { league ->
+            itemsIndexed(SportsLeague.entries.toList()) { index, league ->
                 SportChip(
                     label = league.displayName,
                     selected = uiState.selectedLeague == league,
-                    onClick = { viewModel.selectLeague(league) }
+                    onClick = { viewModel.selectLeague(league) },
+                    itemIndex = index
                 )
             }
         }
@@ -175,20 +179,30 @@ fun SportsScreen(
 private fun SportChip(
     label: String,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    itemIndex: Int = 0
 ) {
-    MerlotChip(
-        selected = selected,
-        onClick = onClick,
-        label = {
-            Text(
-                label,
-                fontSize = 12.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                color = if (selected) MerlotColors.Black else MerlotColors.TextPrimary
-            )
+    Box(
+        modifier = Modifier.onKeyEvent { event ->
+            // Consume LEFT after focus move to prevent sidebar opening
+            if (event.type == KeyEventType.KeyDown &&
+                event.key == Key.DirectionLeft && itemIndex > 0
+            ) true else false
         }
-    )
+    ) {
+        MerlotChip(
+            selected = selected,
+            onClick = onClick,
+            label = {
+                Text(
+                    label,
+                    fontSize = 12.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selected) MerlotColors.Black else MerlotColors.TextPrimary
+                )
+            }
+        )
+    }
 }
 
 // ─── Scores List ──────────────────────────────────────────────────────

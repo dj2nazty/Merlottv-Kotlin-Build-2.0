@@ -70,7 +70,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import coil.ImageLoader
+import coil.imageLoader
 import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -420,7 +420,7 @@ private fun CatalogSectionRow(
                             .data(posterUrl)
                             .size(130, 195)
                             .build()
-                        ImageLoader.Builder(context).build().enqueue(request)
+                        context.imageLoader.enqueue(request)
                     }
                 }
             }

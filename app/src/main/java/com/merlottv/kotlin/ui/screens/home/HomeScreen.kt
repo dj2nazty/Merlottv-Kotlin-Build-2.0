@@ -49,7 +49,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import coil.ImageLoader
+import coil.imageLoader
 import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
@@ -639,7 +639,7 @@ private fun CatalogRowSection(
                         .data(posterUrl)
                         .size(130, 195)
                         .build()
-                    ImageLoader.Builder(context).build().enqueue(request)
+                    context.imageLoader.enqueue(request)
                 }
             }
         }
