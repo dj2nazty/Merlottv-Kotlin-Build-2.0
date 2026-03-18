@@ -2277,13 +2277,33 @@
 
         // De-duplicate by URL, but DON'T filter redirect pages (we resolved those)
         const seen = new Set();
-        const filtered = results.filter(r => {
+        const deduped = results.filter(r => {
             if (seen.has(r.url)) return false;
             seen.add(r.url);
             return true;
         });
 
-        return filtered;
+        // Mobile web: only show sources guaranteed to play in Safari (online + offline)
+        // — 720p and below (no 1080p/4K that are huge and often x265)
+        // — MP4 container only (no MKV/WEBM)
+        // — x264 codec only (no x265/HEVC which Safari can't decode)
+        const playable = deduped.filter(r => {
+            const dominated = r.quality === '4K' || r.quality === '1080p';
+            if (dominated) return false;
+            if (r.format !== 'MP4') return false;
+            if (r.codecWarn) return false; // x265
+            return true;
+        });
+
+        // If no playable sources pass the filter, return them all with a warning
+        // so the user isn't stuck with zero options
+        if (playable.length === 0) {
+            debugLog('resolveStreams: No 720p MP4 x264 sources found — showing all ' + deduped.length + ' as fallback');
+            return deduped;
+        }
+
+        debugLog('resolveStreams: filtered to ' + playable.length + ' playable sources (720p MP4 x264)');
+        return playable;
     }
 
     function formatBytes(bytes) {
@@ -2510,16 +2530,17 @@
     }
 
     function renderStreamList(streams, title) {
-        const playableCount = streams.filter(s => s.format === 'MP4' && !s.codecWarn).length;
+        const allPlayable = streams.every(s => s.format === 'MP4' && !s.codecWarn);
+        const hasUnplayable = streams.some(s => s.format !== 'MP4' || s.codecWarn);
         let html = `<h3 style="margin-bottom:4px">Download</h3>
             <p style="color:var(--muted);font-size:12px;margin-bottom:6px">${esc(title)}</p>
             <p style="color:var(--muted);font-size:11px;margin-bottom:14px">
-                <span style="color:#ff8c00;font-weight:600">▶ VLC</span> = stream live in VLC app &nbsp;|&nbsp;
-                <span style="font-weight:600">⬇</span> = download to Files app<br>
-                <span style="color:var(--success)">&#9989; MP4 x264</span> = also plays in Safari &nbsp;|&nbsp;
-                <span style="color:var(--danger)">&#9888; x265/MKV</span> = use VLC
+                ${allPlayable
+                    ? '<span style="color:var(--success)">&#9989; All sources below are 720p MP4 x264 — guaranteed to play</span>'
+                    : `<span style="color:var(--warn)">&#9888; No 720p MP4 sources found — showing all results</span><br>
+                       <span style="color:#ff8c00;font-weight:600">▶ VLC</span> = stream in VLC app for MKV/x265 files`}
             </p>
-            ${playableCount === 0 ? '<div style="background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.3);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--danger)">&#9888; No Safari-playable sources found. Look for x264/H.264 MP4 files.</div>' : ''}
+            ${!allPlayable && streams.length > 0 ? '<div style="background:rgba(255,215,64,0.1);border:1px solid rgba(255,215,64,0.3);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--warn)">&#9888; No guaranteed-playable sources found. Use <strong>▶ VLC</strong> to stream, or <strong>⬇</strong> to save and open in VLC.</div>' : ''}
             <div class="stream-list">`;
         streams.forEach((s, i) => {
             const sizeDisplay = s.size || '<span style="color:var(--muted);font-style:italic">size unknown</span>';
