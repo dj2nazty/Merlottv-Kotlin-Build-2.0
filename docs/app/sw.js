@@ -1,8 +1,13 @@
-const CACHE_NAME = 'merlottv-v4.4';
+const CACHE_NAME = 'merlottv-v4.5';
 const CACHE_URLS = [
   './',
   './index.html',
-  './manifest.json'
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png',
+  './favicon-32.png',
+  './favicon-16.png'
 ];
 
 // Install: cache the app shell
