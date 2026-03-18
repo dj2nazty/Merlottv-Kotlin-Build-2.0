@@ -477,7 +477,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.removeItem('merlot_auth');location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.6</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.7</div>
             </form>
         </div>
 
@@ -677,6 +677,14 @@
                 <div style="font-size:40px;margin-bottom:12px">&#x2B07;</div>
                 <div>No downloads yet</div>
                 <div style="font-size:13px;margin-top:6px">Browse movies and TV shows to download for offline viewing</div>
+            </div>
+            <!-- Debug Log (tap Downloads header 5x to show) -->
+            <div id="debug-log" class="hidden" style="margin-top:16px;background:#111;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:300px;overflow-y:auto">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <span style="font-size:12px;font-weight:700;color:var(--accent)">Debug Log</span>
+                    <button style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer" onclick="document.getElementById('debug-log-content').innerHTML=''">Clear</button>
+                </div>
+                <div id="debug-log-content" style="font-family:monospace;font-size:10px;color:#aaa;word-break:break-all"></div>
             </div>
         </div>
 
@@ -966,6 +974,29 @@
         if (name === 'browse' && !browseInitialized) initBrowse();
         if (name === 'downloads') renderDownloads();
     }
+
+    // ─── Debug Log (visible in Downloads → tap header 5x) ───
+    let _debugTaps = 0;
+    function debugLog(msg) {
+        console.log('[MerlotTV]', msg);
+        const el = document.getElementById('debug-log-content');
+        if (el) {
+            const time = new Date().toLocaleTimeString();
+            el.innerHTML += `<div style="border-bottom:1px solid #222;padding:2px 0"><span style="color:var(--accent)">${time}</span> ${esc(String(msg))}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+    }
+    // Tap "Downloads" header 5x to show debug log
+    document.addEventListener('click', (e) => {
+        if (e.target.tagName === 'H2' && e.target.textContent === 'Downloads') {
+            _debugTaps++;
+            if (_debugTaps >= 5) {
+                document.getElementById('debug-log')?.classList.toggle('hidden');
+                _debugTaps = 0;
+            }
+            setTimeout(() => { _debugTaps = 0; }, 3000);
+        }
+    });
 
     // ═══════════════════════════════════════════
     //  Logged In — Load Data
@@ -1881,22 +1912,26 @@
     // TorBox API: check if torrent is cached, get torrent_id + file_id
     async function torboxCheckCached(hash) {
         const key = getTorBoxApiKey();
+        debugLog('TorBox checkcached: hash=' + hash.substring(0, 12) + '... key=' + key.substring(0, 8) + '...');
         try {
             const resp = await fetch(`https://api.torbox.app/v1/api/torrents/checkcached?hash=${hash}&format=object&list_files=true`, {
                 headers: { 'Authorization': `Bearer ${key}` },
                 signal: AbortSignal.timeout(10000)
             });
-            if (!resp.ok) { console.warn('TorBox checkcached failed:', resp.status); return null; }
+            debugLog('  checkcached HTTP ' + resp.status);
+            if (!resp.ok) { debugLog('  ✘ checkcached failed: HTTP ' + resp.status); return null; }
             const data = await resp.json();
-            console.log('TorBox checkcached response:', JSON.stringify(data).substring(0, 300));
+            const dataStr = JSON.stringify(data).substring(0, 400);
+            debugLog('  checkcached response: ' + dataStr);
             if (data.success && data.data) {
-                // data.data is keyed by hash
                 const entry = data.data[hash.toLowerCase()] || data.data[hash.toUpperCase()] || Object.values(data.data)[0];
+                debugLog('  checkcached entry: ' + (entry ? JSON.stringify(entry).substring(0, 200) : 'null'));
                 return entry || null;
             }
+            debugLog('  checkcached: no data (success=' + data.success + ')');
             return null;
         } catch (e) {
-            console.warn('TorBox checkcached error:', e.message);
+            debugLog('  ✘ checkcached error: ' + e.message);
             return null;
         }
     }
@@ -1904,30 +1939,36 @@
     // TorBox API: request a direct CDN download link
     async function torboxRequestDl(torrentId, fileId) {
         const key = getTorBoxApiKey();
+        debugLog('TorBox requestdl: torrent=' + torrentId + ' file=' + fileId);
         try {
             const resp = await fetch(`https://api.torbox.app/v1/api/torrents/requestdl?token=${key}&torrent_id=${torrentId}&file_id=${fileId}&zip_link=false`, {
                 headers: { 'Authorization': `Bearer ${key}` },
                 signal: AbortSignal.timeout(10000)
             });
-            if (!resp.ok) { console.warn('TorBox requestdl failed:', resp.status); return null; }
+            debugLog('  requestdl HTTP ' + resp.status);
+            if (!resp.ok) { debugLog('  ✘ requestdl failed: HTTP ' + resp.status); return null; }
             const data = await resp.json();
-            console.log('TorBox requestdl response:', JSON.stringify(data).substring(0, 300));
+            debugLog('  requestdl response: ' + JSON.stringify(data).substring(0, 300));
             if (data.success && data.data) {
-                return data.data; // This is the direct CDN URL string
+                debugLog('  ✓ Got CDN URL: ' + String(data.data).substring(0, 80));
+                return data.data;
             }
+            debugLog('  requestdl: no data');
             return null;
         } catch (e) {
-            console.warn('TorBox requestdl error:', e.message);
+            debugLog('  ✘ requestdl error: ' + e.message);
             return null;
         }
     }
 
     // Main function: resolve a TorBox stremio URL to a direct CDN download link
     async function torboxGetDirectUrl(stremioUrl) {
+        debugLog('torboxGetDirectUrl: ' + stremioUrl.substring(0, 80));
         // Method 1: Use TorBox REST API (preferred — returns real CDN URLs)
         const parsed = parseTorBoxStremioUrl(stremioUrl);
+        debugLog('  parsed: ' + JSON.stringify(parsed));
         if (parsed) {
-            console.log('TorBox API: resolving hash', parsed.hash, 'fileIdx', parsed.fileIdx);
+            debugLog('  Method 1: TorBox REST API — hash=' + parsed.hash.substring(0, 12) + ' fileIdx=' + parsed.fileIdx);
             const cached = await torboxCheckCached(parsed.hash);
             if (cached) {
                 // Find the right file — cached response has file list
@@ -1973,25 +2014,27 @@
 
         // Method 2: Use redirect permalink (TorBox API redirect=true)
         if (parsed) {
-            const key = getTorBoxApiKey();
-            // Try creating a redirect permalink — the video element can follow this
-            // This doesn't give us size info but gives a working URL
+            debugLog('  Method 2: Follow stremio URL redirect...');
             try {
                 const resp = await fetch(stremioUrl, {
                     redirect: 'follow', credentials: 'omit',
                     signal: AbortSignal.timeout(8000)
                 });
                 const ct = resp.headers.get('content-type') || '';
+                debugLog('  M2 response: HTTP ' + resp.status + ' type=' + ct + ' finalUrl=' + (resp.url || '').substring(0, 80));
                 if (ct.includes('video/') || ct.includes('application/octet-stream')) {
                     const cl = resp.headers.get('content-length');
                     resp.body?.cancel?.();
+                    debugLog('  ✓ M2 got video URL: ' + resp.url.substring(0, 80));
                     return { url: resp.url, size: cl ? parseInt(cl) : 0, contentType: ct };
                 }
                 resp.body?.cancel?.();
-            } catch (_) {}
+                debugLog('  M2: not video content-type, skipping');
+            } catch (e) { debugLog('  M2 error: ' + e.message); }
         }
 
         // Method 3: Follow redirect and parse HTML (legacy fallback)
+        debugLog('  Method 3: Fetch + parse HTML fallback...');
         try {
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), 8000);
@@ -2000,12 +2043,15 @@
             });
             clearTimeout(t);
             const ct = resp.headers.get('content-type') || '';
+            debugLog('  M3 response: HTTP ' + resp.status + ' type=' + ct);
             if (ct.includes('video/') || ct.includes('application/octet-stream')) {
                 const cl = resp.headers.get('content-length');
                 resp.body?.cancel?.();
+                debugLog('  ✓ M3 got video URL');
                 return { url: resp.url, size: cl ? parseInt(cl) : 0, contentType: ct };
             }
             if (ct.includes('text/html')) {
+                debugLog('  M3: got HTML, parsing for video links...');
                 const html = await resp.text();
                 const patterns = [
                     /https?:\/\/[^"'\s]*(?:dl|download|cdn|relay|debrid)[^"'\s]*\.(?:mp4|mkv|avi|webm)[^"'\s]*/gi,
@@ -2025,29 +2071,31 @@
                 }
             }
             resp.body?.cancel?.();
+            debugLog('  M3: no video links found in HTML');
             return null;
         } catch (e) {
-            console.warn('TorBox direct URL resolution failed:', e.message);
+            debugLog('  ✘ torboxGetDirectUrl failed: ' + e.message);
             return null;
         }
     }
 
     async function resolveStreams(type, imdbId) {
         const addons = getStreamAddons();
+        debugLog('resolveStreams: type=' + type + ' imdb=' + imdbId + ' addons=' + addons.map(a => a.name).join(', '));
         const results = [];
 
         const fetches = addons.map(async (addon) => {
             try {
                 const url = `${addon.url}/stream/${type}/${imdbId}.json`;
-                console.log('Resolving streams from:', addon.name, url);
+                debugLog('  Querying addon: ' + addon.name + ' → ' + url.substring(0, 80));
                 const controller = new AbortController();
                 const timer = setTimeout(() => controller.abort(), 10000);
                 const resp = await fetch(url, { signal: controller.signal });
                 clearTimeout(timer);
-                if (!resp.ok) return;
+                if (!resp.ok) { debugLog('  ' + addon.name + ': HTTP ' + resp.status); return; }
                 const data = await resp.json();
-                console.log('Raw stream response from', addon.name, ':', JSON.stringify(data).substring(0, 500));
                 const streams = data.streams || [];
+                debugLog('  ' + addon.name + ': found ' + streams.length + ' streams');
                 streams.forEach(s => {
                     const streamUrl = s.url || '';
                     const externalUrl = s.externalUrl || '';
@@ -2102,20 +2150,25 @@
                     });
                 });
             } catch (e) {
-                console.warn('Stream addon failed:', addon.name, e.message);
+                debugLog('  ✘ ' + addon.name + ' failed: ' + e.message);
             }
         });
 
         await Promise.all(fetches);
 
+        debugLog('resolveStreams: ' + results.length + ' total streams found');
+        results.forEach((r, i) => debugLog('  [' + i + '] ' + r.addon + ' | ' + r.quality + ' | ' + r.format + ' | torbox=' + r.isTorbox + ' | ' + r.url.substring(0, 60)));
+
         // For TorBox streams, try to resolve the actual direct download URL
         // (TorBox Stremio URLs redirect to a download page, not the actual video)
+        const tbCount = results.filter(r => r.isTorbox).length;
+        debugLog('Resolving ' + tbCount + ' TorBox URLs...');
         const torboxResolves = results.map(async (r) => {
             if (!r.isTorbox) return;
             try {
                 const direct = await torboxGetDirectUrl(r.url);
                 if (direct && direct.url && direct.url !== r.url) {
-                    console.log('TorBox resolved:', r.url, '→', direct.url);
+                    debugLog('  ✓ TorBox resolved: ' + r.url.substring(0, 40) + ' → ' + direct.url.substring(0, 60));
                     r.originalUrl = r.url;
                     r.url = direct.url;
                     if (direct.size > 10 * 1048576) {
@@ -2955,16 +3008,21 @@
         errorEl.classList.add('hidden');
         playerEl.classList.remove('hidden');
 
-        // Show loading
         loadingEl.innerHTML = '<span class="spinner" style="width:32px;height:32px;border-width:3px"></span><div style="margin-top:8px">Loading video...</div>';
         loadingEl.classList.remove('hidden');
 
+        debugLog('▶ Play: ' + d.title);
+        debugLog('  URL: ' + (d.url || 'none').substring(0, 80));
+        debugLog('  idbKey: ' + (d.idbKey || 'none') + ' | savedLocally: ' + d.savedLocally);
+        debugLog('  format: ' + d.format + ' | status: ' + d.status);
+
         try {
             const result = await getPlayableUrl(d);
+            debugLog('  getPlayableUrl → source: ' + result.source + ' | url: ' + (result.url || 'null').substring(0, 80));
 
-            // Check for bad blob (HTML or too small)
             if (result.source === 'bad_blob') {
                 loadingEl.classList.add('hidden');
+                debugLog('  ✘ Bad blob: ' + result.error);
                 errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
                     <div style="font-weight:600;margin-bottom:6px">Bad Download</div>
                     <div style="font-size:13px;color:var(--muted)">${esc(result.error)}</div>
@@ -2977,29 +3035,29 @@
                 return;
             }
 
-            if (!result.url) throw new Error('No video available — try re-downloading');
+            if (!result.url) throw new Error('No video URL available');
 
             let playUrl = result.url;
             const isStream = result.source === 'stream';
+            let fetchedAsBlob = false;
 
-            // ─── KEY FIX: For stream URLs, fetch video into memory first ───
-            // Stream URLs (especially TorBox) often redirect to HTML pages.
-            // The <video> element can't handle this. So we fetch the video as
-            // a blob and play from a blob URL instead.
+            // For stream URLs: fetch video into memory first, then play from blob
             if (isStream) {
-                loadingEl.innerHTML = '<span class="spinner" style="width:32px;height:32px;border-width:3px"></span><div style="margin-top:8px">Preparing video stream...</div><div style="margin-top:4px;font-size:11px;color:var(--muted)" id="vp-stream-progress">Connecting...</div>';
+                debugLog('  Fetching stream into memory...');
+                loadingEl.innerHTML = '<span class="spinner" style="width:32px;height:32px;border-width:3px"></span><div style="margin-top:8px">Downloading video...</div><div style="margin-top:4px;font-size:11px;color:var(--muted)" id="vp-stream-progress">Connecting...</div>';
 
                 try {
+                    debugLog('  fetch(' + playUrl.substring(0, 80) + ')');
                     const resp = await fetch(playUrl, { redirect: 'follow', credentials: 'omit' });
-                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
+                    const finalUrl = resp.url || playUrl;
                     const ct = resp.headers.get('content-type') || '';
-                    // If we got HTML back, this isn't a video
-                    if (ct.includes('text/html')) {
-                        throw new Error('STREAM_IS_HTML');
-                    }
+                    const cl = resp.headers.get('content-length') || '0';
+                    debugLog('  Response: ' + resp.status + ' | type: ' + ct + ' | size: ' + cl + ' | finalURL: ' + finalUrl.substring(0, 80));
 
-                    const totalBytes = parseInt(resp.headers.get('content-length') || '0');
+                    if (!resp.ok) throw new Error('HTTP_' + resp.status);
+                    if (ct.includes('text/html')) throw new Error('STREAM_IS_HTML');
+
+                    const totalBytes = parseInt(cl);
                     const reader = resp.body.getReader();
                     const chunks = [];
                     let downloaded = 0;
@@ -3010,41 +3068,35 @@
                         if (done) break;
                         chunks.push(value);
                         downloaded += value.length;
-
                         const progEl = document.getElementById('vp-stream-progress');
                         if (progEl) {
                             const elapsed = (Date.now() - startTime) / 1000;
                             const speed = elapsed > 0 ? downloaded / elapsed : 0;
-                            if (totalBytes > 0) {
-                                const pct = Math.round((downloaded / totalBytes) * 100);
-                                progEl.textContent = `${pct}% — ${formatBytes(downloaded)} / ${formatBytes(totalBytes)} · ${formatBytes(Math.round(speed))}/s`;
-                            } else {
-                                progEl.textContent = `${formatBytes(downloaded)} loaded · ${formatBytes(Math.round(speed))}/s`;
-                            }
+                            progEl.textContent = totalBytes > 0
+                                ? `${Math.round((downloaded/totalBytes)*100)}% — ${formatBytes(downloaded)} / ${formatBytes(totalBytes)} · ${formatBytes(Math.round(speed))}/s`
+                                : `${formatBytes(downloaded)} loaded · ${formatBytes(Math.round(speed))}/s`;
                         }
-
-                        // For playback, we can start once we have enough data
-                        // But for reliability, let's load the whole thing
                     }
 
-                    // Validate it's not HTML
+                    debugLog('  Downloaded: ' + formatBytes(downloaded));
+
+                    // Validate
                     if (chunks.length > 0) {
-                        const firstChunk = new Uint8Array(chunks[0].slice(0, 30));
-                        const firstText = String.fromCharCode(...firstChunk);
-                        if (firstText.includes('<!DOCTYPE') || firstText.includes('<html')) {
+                        const head = new Uint8Array(chunks[0].slice(0, 50));
+                        const headStr = String.fromCharCode(...head);
+                        debugLog('  First bytes: ' + headStr.substring(0, 30).replace(/[^\x20-\x7E]/g, '.'));
+                        if (headStr.includes('<!DOCTYPE') || headStr.includes('<html') || headStr.includes('<HTML')) {
                             throw new Error('STREAM_IS_HTML');
                         }
                     }
+                    if (downloaded < 500000) throw new Error('STREAM_TOO_SMALL');
 
-                    if (downloaded < 1 * 1048576) {
-                        throw new Error('STREAM_TOO_SMALL');
-                    }
-
-                    // Create blob and play
-                    const blob = new Blob(chunks, { type: 'video/mp4' });
+                    const blob = new Blob(chunks, { type: ct || 'video/mp4' });
                     playUrl = URL.createObjectURL(blob);
+                    fetchedAsBlob = true;
+                    debugLog('  ✓ Blob created: ' + formatBytes(blob.size));
 
-                    // Save to IndexedDB for offline playback later
+                    // Save to IndexedDB
                     const idbKey = 'vid_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
                     try {
                         await saveVideoBlob(idbKey, blob, d.filename || d.title);
@@ -3056,36 +3108,48 @@
                             size: formatBytes(downloaded)
                         });
                         renderDownloads();
-                        console.log('Stream fetched and saved to IndexedDB:', idbKey, formatBytes(downloaded));
-                    } catch (saveErr) {
-                        console.warn('Could not save to IndexedDB:', saveErr);
-                    }
-                } catch (streamErr) {
-                    if (streamErr.message === 'STREAM_IS_HTML') {
+                        debugLog('  ✓ Saved to IndexedDB: ' + idbKey);
+                    } catch (e) { debugLog('  ⚠ IDB save failed: ' + e.message); }
+
+                } catch (fetchErr) {
+                    debugLog('  ✘ Stream fetch error: ' + fetchErr.message);
+                    if (fetchErr.message === 'STREAM_IS_HTML') {
                         loadingEl.classList.add('hidden');
                         errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
                             <div style="font-weight:600;margin-bottom:4px">Source returned a web page, not video</div>
                             <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
-                                This TorBox source redirected to a download page. Try a different source, or tap Download again and pick a Torrentio source.
+                                This source redirected to a download page instead of a video file.<br>
+                                Go back and pick a different source — <strong>Torrentio</strong> sources usually work.
                             </div>
                             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                                <button class="btn btn-sm btn-primary" onclick="closePlayer();retryDownload(${index})">Try Again</button>
-                                <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                                <button class="btn btn-sm btn-primary" onclick="closePlayer()">Close</button>
                             </div>`;
                         errorEl.classList.remove('hidden');
                         return;
                     }
-                    if (streamErr.message === 'STREAM_TOO_SMALL') {
+                    if (fetchErr.message === 'STREAM_TOO_SMALL') {
                         loadingEl.classList.add('hidden');
                         errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
-                            <div style="font-weight:600;margin-bottom:4px">Download too small — not a real video</div>
-                            <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Try a different source.</div>
-                            <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>`;
+                            <div style="font-weight:600;margin-bottom:4px">File too small — not a real video</div>
+                            <div style="font-size:12px;color:var(--muted)">Try a different source.</div>
+                            <button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
                         errorEl.classList.remove('hidden');
                         return;
                     }
-                    // Network error — fall through to try setting src directly as last resort
-                    console.warn('Stream fetch failed, trying direct URL:', streamErr.message);
+                    // Network/CORS error — show helpful message
+                    loadingEl.classList.add('hidden');
+                    const isCors = fetchErr.message.includes('Failed to fetch') || fetchErr.message === 'Load failed' || fetchErr.message.includes('NetworkError');
+                    errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                        <div style="font-weight:600;margin-bottom:4px">${isCors ? 'Source blocked by browser' : 'Cannot load video'}</div>
+                        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${esc(fetchErr.message)}</div>
+                        <div style="font-size:11px;color:var(--warn);margin-bottom:12px">
+                            ${isCors ? 'This source blocks direct browser access (CORS). Try a different source.' : 'Check your internet connection and try again.'}
+                        </div>
+                        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                            <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                        </div>`;
+                    errorEl.classList.remove('hidden');
+                    return;
                 }
             }
 
