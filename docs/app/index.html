@@ -468,9 +468,9 @@
                     <a href="#" id="login-toggle">Sign Up</a>
                 </div>
                 <div style="text-align:center;margin-top:18px">
-                    <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
+                    <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.removeItem('merlot_auth');location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.2</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.3</div>
             </form>
         </div>
 
@@ -682,7 +682,7 @@
                 <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>Browse
             </button>
             <button class="nav-item" onclick="showView('downloads')" data-view="downloads">
-                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Downloads
+                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>Downloads<span id="dl-badge" style="display:none;background:var(--accent);color:#000;font-size:9px;font-weight:700;border-radius:10px;padding:0 5px;margin-left:2px"></span>
             </button>
             <button class="nav-item" onclick="showView('favorites')" data-view="favorites">
                 <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>Favs
@@ -1837,18 +1837,74 @@
     // Detect file format from URL and metadata
     function detectFormat(url, title, filename) {
         const allText = (url + ' ' + title + ' ' + (filename || '')).toLowerCase();
-        // Check URL path for extension
         const urlPath = url.split('?')[0].split('#')[0].toLowerCase();
         if (urlPath.endsWith('.mkv') || allText.includes('.mkv')) return 'MKV';
         if (urlPath.endsWith('.avi') || allText.includes('.avi')) return 'AVI';
         if (urlPath.endsWith('.webm') || allText.includes('.webm')) return 'WEBM';
         if (urlPath.endsWith('.mov') || allText.includes('.mov')) return 'MOV';
         if (urlPath.endsWith('.mp4') || allText.includes('.mp4')) return 'MP4';
-        // Check for common indicators in title
-        if (allText.includes('x265') || allText.includes('hevc')) return 'MKV'; // x265 is usually MKV
+        if (allText.includes('x265') || allText.includes('hevc')) return 'MKV';
         if (allText.includes('x264') || allText.includes('h.264') || allText.includes('h264')) return 'MP4';
-        // Default assumption for direct download links
         return 'MP4';
+    }
+
+    // ─── TorBox API: Get real direct download URLs ───
+    async function torboxGetDirectUrl(stremioUrl) {
+        // TorBox Stremio addon URLs look like:
+        // https://stremio.torbox.app/{key}/playback/{hash}/{fileIdx}
+        // or https://stremio.torbox.app/{key}/stream/{type}/{id}
+        // We need to follow the redirect chain to get the real CDN URL
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 8000);
+            // Fetch the page that TorBox redirects to
+            const resp = await fetch(stremioUrl, {
+                signal: ctrl.signal, redirect: 'follow', credentials: 'omit'
+            });
+            clearTimeout(t);
+            const finalUrl = resp.url; // the URL after all redirects
+            const ct = resp.headers.get('content-type') || '';
+
+            // If we got redirected to a video file directly, great!
+            if (ct.includes('video/') || ct.includes('application/octet-stream')) {
+                const cl = resp.headers.get('content-length');
+                resp.body?.cancel?.();
+                return { url: finalUrl, size: cl ? parseInt(cl) : 0, contentType: ct };
+            }
+
+            // If it's HTML (TorBox download page), try to extract the direct link
+            if (ct.includes('text/html')) {
+                const html = await resp.text();
+                // Look for direct download URLs in the page
+                const patterns = [
+                    // TorBox CDN links
+                    /https?:\/\/[^"'\s]*(?:dl|download|cdn|relay|debrid)[^"'\s]*\.(?:mp4|mkv|avi|webm)[^"'\s]*/gi,
+                    // Generic video file links
+                    /https?:\/\/[^"'\s]+\.(?:mp4|mkv|avi|webm)(?:\?[^"'\s]*)?/gi,
+                    // JSON data with URL field
+                    /"(?:url|download_url|direct_link|downloadUrl)":\s*"(https?:\/\/[^"]+)"/gi,
+                    // href attributes with video extensions
+                    /href=["'](https?:\/\/[^"']+\.(?:mp4|mkv|avi|webm)[^"']*)["']/gi,
+                    // window.location redirects
+                    /window\.location(?:\.href)?\s*=\s*["'](https?:\/\/[^"']+)["']/gi,
+                ];
+                for (const pattern of patterns) {
+                    const matches = [...html.matchAll(pattern)];
+                    for (const m of matches) {
+                        const foundUrl = m[1] || m[0];
+                        if (foundUrl && foundUrl.startsWith('http') && !foundUrl.includes('text/html')) {
+                            return { url: foundUrl, size: 0, contentType: '' };
+                        }
+                    }
+                }
+            }
+
+            resp.body?.cancel?.();
+            return null;
+        } catch (e) {
+            console.warn('TorBox direct URL resolution failed:', e.message);
+            return null;
+        }
     }
 
     async function resolveStreams(type, imdbId) {
@@ -1860,11 +1916,12 @@
                 const url = `${addon.url}/stream/${type}/${imdbId}.json`;
                 console.log('Resolving streams from:', addon.name, url);
                 const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 7000);
+                const timer = setTimeout(() => controller.abort(), 10000);
                 const resp = await fetch(url, { signal: controller.signal });
                 clearTimeout(timer);
                 if (!resp.ok) return;
                 const data = await resp.json();
+                console.log('Raw stream response from', addon.name, ':', JSON.stringify(data).substring(0, 500));
                 const streams = data.streams || [];
                 streams.forEach(s => {
                     const streamUrl = s.url || '';
@@ -1883,31 +1940,37 @@
                     else if (text.includes('720') || text.includes('hd')) quality = '720p';
                     else if (text.includes('480')) quality = '480p';
 
-                    // Detect file format
                     const format = detectFormat(finalUrl, text, filename);
 
-                    // Extract size from metadata — but ONLY trust sizes > 50 MB
-                    // (small sizes like 4.3 MB are metadata/torrent file sizes, not the actual video)
-                    const sizeText = title + ' ' + name + ' ' + filename;
-                    const sizeMatch = sizeText.match(/(\d+\.?\d*)\s*(GB|MB|gb|mb|Gb|Mb)/i)
-                        || sizeText.match(/💾\s*(\d+\.?\d*)\s*(GB|MB)/i)
-                        || sizeText.match(/size[:\s]+(\d+\.?\d*)\s*(GB|MB)/i);
+                    // Extract size from ALL metadata text — accept any size found
+                    // We'll show whatever the addon reports
+                    const allMeta = title + '\n' + name + '\n' + filename + '\n' + JSON.stringify(s.behaviorHints || {});
                     let size = '';
                     let sizeBytes = 0;
-                    if (sizeMatch) {
-                        const num = parseFloat(sizeMatch[1]);
-                        const unit = sizeMatch[2].toUpperCase();
-                        const bytes = unit === 'GB' ? num * 1073741824 : num * 1048576;
-                        // Only trust sizes >= 50 MB for video files
-                        if (bytes >= 50 * 1048576) {
-                            size = `${sizeMatch[1]} ${unit}`;
-                            sizeBytes = bytes;
+                    // Try multiple size patterns
+                    const sizePatterns = [
+                        /(\d+\.?\d*)\s*(GB|MB)/gi,
+                        /💾\s*(\d+\.?\d*)\s*(GB|MB)/gi,
+                    ];
+                    for (const pat of sizePatterns) {
+                        const matches = [...allMeta.matchAll(pat)];
+                        // Pick the LARGEST size found (most likely the video size, not metadata)
+                        for (const m of matches) {
+                            const num = parseFloat(m[1]);
+                            const unit = m[2].toUpperCase();
+                            const bytes = unit === 'GB' ? num * 1073741824 : num * 1048576;
+                            if (bytes > sizeBytes) {
+                                sizeBytes = bytes;
+                                size = `${num} ${unit}`;
+                            }
                         }
                     }
 
                     results.push({
                         url: finalUrl, title: title || name || finalUrl.split('/').pop(),
-                        name, quality, size, sizeBytes, format, addon: addon.name
+                        name, quality, size, sizeBytes, format, addon: addon.name,
+                        isTorbox: addon.name.toLowerCase().includes('torbox'),
+                        rawStream: s // keep raw data for debugging
                     });
                 });
             } catch (e) {
@@ -1917,81 +1980,81 @@
 
         await Promise.all(fetches);
 
-        // Sort: MP4 first (playable offline), then by quality, then prefer TorBox
-        const qOrder = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3, 'SD': 4 };
-        results.sort((a, b) => {
-            // MP4 always first (plays offline in browser)
-            const fa = a.format === 'MP4' ? 0 : 1;
-            const fb = b.format === 'MP4' ? 0 : 1;
-            if (fa !== fb) return fa - fb;
-            const qa = qOrder[a.quality] ?? 5;
-            const qb = qOrder[b.quality] ?? 5;
-            if (qa !== qb) return qa - qb;
-            const ta = a.addon.toLowerCase().includes('torbox') ? 0 : 1;
-            const tb = b.addon.toLowerCase().includes('torbox') ? 0 : 1;
-            return ta - tb;
+        // For TorBox streams, try to resolve the actual direct download URL
+        // (TorBox Stremio URLs redirect to a download page, not the actual video)
+        const torboxResolves = results.map(async (r) => {
+            if (!r.isTorbox) return;
+            try {
+                const direct = await torboxGetDirectUrl(r.url);
+                if (direct && direct.url && direct.url !== r.url) {
+                    console.log('TorBox resolved:', r.url, '→', direct.url);
+                    r.originalUrl = r.url;
+                    r.url = direct.url;
+                    if (direct.size > 10 * 1048576) {
+                        r.sizeBytes = direct.size;
+                        r.size = formatBytes(direct.size);
+                    }
+                    if (direct.contentType) {
+                        if (direct.contentType.includes('matroska') || direct.contentType.includes('mkv')) r.format = 'MKV';
+                        else if (direct.contentType.includes('mp4')) r.format = 'MP4';
+                        else if (direct.contentType.includes('webm')) r.format = 'WEBM';
+                    }
+                    // Update format from resolved URL
+                    r.format = detectFormat(direct.url, r.title, '');
+                }
+            } catch (_) {}
         });
+        await Promise.all(torboxResolves);
 
-        // Probe ALL items for real file size via HEAD requests (parallel)
-        // Don't skip items with metadata sizes — those are often wrong (4.3 MB = torrent metadata)
+        // For streams that still don't have a size, try HEAD probe
         const sizeProbes = results.map(async (r) => {
+            if (r.sizeBytes > 10 * 1048576) return; // already have a good size
             try {
                 const ctrl = new AbortController();
-                const t = setTimeout(() => ctrl.abort(), 6000);
+                const t = setTimeout(() => ctrl.abort(), 5000);
                 let cl = null;
                 let finalContentType = '';
                 try {
                     const head = await fetch(r.url, { method: 'HEAD', signal: ctrl.signal, credentials: 'omit', redirect: 'follow' });
                     cl = head.headers.get('content-length');
                     finalContentType = head.headers.get('content-type') || '';
-                    // If we followed a redirect, update format detection
-                    if (head.url) {
-                        const newFmt = detectFormat(head.url, r.title, '');
-                        if (newFmt !== r.format) r.format = newFmt;
-                    }
-                } catch (_) {
-                    try {
-                        const rangeResp = await fetch(r.url, {
-                            method: 'GET', signal: ctrl.signal, credentials: 'omit', redirect: 'follow',
-                            headers: { 'Range': 'bytes=0-0' }
-                        });
-                        const cr = rangeResp.headers.get('content-range') || '';
-                        const totalMatch = cr.match(/\/(\d+)/);
-                        if (totalMatch) cl = totalMatch[1];
-                        else cl = rangeResp.headers.get('content-length');
-                        finalContentType = rangeResp.headers.get('content-type') || '';
-                        rangeResp.body?.cancel?.();
-                    } catch (_) {}
-                }
+                    if (head.url) r.format = detectFormat(head.url, r.title, '');
+                } catch (_) {}
                 clearTimeout(t);
 
-                // Detect format from content-type
-                if (finalContentType.includes('video/x-matroska') || finalContentType.includes('mkv')) r.format = 'MKV';
+                if (finalContentType.includes('video/x-matroska')) r.format = 'MKV';
                 else if (finalContentType.includes('video/mp4')) r.format = 'MP4';
                 else if (finalContentType.includes('video/webm')) r.format = 'WEBM';
-                else if (finalContentType.includes('video/avi') || finalContentType.includes('video/x-msvideo')) r.format = 'AVI';
-                // If content-type is text/html, this is a redirect page — mark it
                 if (finalContentType.includes('text/html')) r.isRedirectPage = true;
 
                 if (cl) {
                     const bytes = parseInt(cl);
-                    // Real video files are > 10 MB. Anything smaller is likely metadata/redirect page
                     if (bytes > 10 * 1048576) {
                         r.sizeBytes = bytes;
                         r.size = formatBytes(bytes);
-                    } else if (bytes > 0 && bytes < 1048576) {
-                        // Very small = probably redirect page or metadata
-                        r.isRedirectPage = true;
                     }
                 }
             } catch (_) {}
         });
         await Promise.all(sizeProbes);
 
-        // Filter out known redirect pages, and de-duplicate by URL
+        // Sort: MP4 first, then by quality, then prefer TorBox, then by size (bigger = better quality)
+        const qOrder = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3, 'SD': 4 };
+        results.sort((a, b) => {
+            const fa = a.format === 'MP4' ? 0 : 1;
+            const fb = b.format === 'MP4' ? 0 : 1;
+            if (fa !== fb) return fa - fb;
+            const qa = qOrder[a.quality] ?? 5;
+            const qb = qOrder[b.quality] ?? 5;
+            if (qa !== qb) return qa - qb;
+            // Bigger files first (usually better quality)
+            if (a.sizeBytes !== b.sizeBytes) return (b.sizeBytes || 0) - (a.sizeBytes || 0);
+            return 0;
+        });
+
+        // De-duplicate by URL, but DON'T filter redirect pages (we resolved those)
         const seen = new Set();
         const filtered = results.filter(r => {
-            if (r.isRedirectPage) return false;
             if (seen.has(r.url)) return false;
             seen.add(r.url);
             return true;
@@ -2076,21 +2139,29 @@
         }
     }
 
-    // ─── Download History (localStorage) ───
-    let downloadHistory = JSON.parse(localStorage.getItem('merlot_downloads') || '[]');
+    // ─── Download History (localStorage — persists across sessions) ───
+    let downloadHistory = [];
+    try {
+        downloadHistory = JSON.parse(localStorage.getItem('merlot_downloads') || '[]');
+    } catch (e) {
+        console.error('Failed to load download history:', e);
+        downloadHistory = [];
+    }
+    console.log('Download history loaded:', downloadHistory.length, 'items');
 
-    // On page load: entries stuck at 'downloading' that do NOT have a completedAt
-    // timestamp were genuinely interrupted (page closed/suspended mid-download).
-    // Entries WITH completedAt were completed but status didn't save — fix those.
+    // On page load: fix stuck entries
+    let fixedCount = 0;
     downloadHistory.forEach(d => {
         if (d.status === 'downloading') {
             if (d.completedAt) {
-                d.status = 'complete'; // download actually finished
+                d.status = 'complete';
             } else {
                 d.status = 'interrupted';
             }
+            fixedCount++;
         }
     });
+    if (fixedCount > 0) console.log('Fixed', fixedCount, 'stuck downloads');
     localStorage.setItem('merlot_downloads', JSON.stringify(downloadHistory));
 
     function saveDownloadHistory() {
@@ -2125,6 +2196,17 @@
         const list = document.getElementById('downloads-list');
         const empty = document.getElementById('downloads-empty');
         if (!list) return;
+
+        // Update nav badge
+        const badge = document.getElementById('dl-badge');
+        if (badge) {
+            if (downloadHistory.length > 0) {
+                badge.textContent = downloadHistory.length;
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
 
         // Render MerlotTV playlist section
         const playlist = JSON.parse(localStorage.getItem('merlot_playlist') || '[]');
@@ -2310,7 +2392,21 @@
             let downloadUrl = stream.url;
             const infoEl = () => document.getElementById('dl-size-info');
 
-            // Try HEAD to follow redirects and check content type
+            // Step 1: For TorBox URLs, use the dedicated resolver first
+            if (stream.isTorbox || downloadUrl.includes('torbox.app') || stream.originalUrl) {
+                if (infoEl()) infoEl().textContent = 'Resolving TorBox download link...';
+                console.log('TorBox stream detected, resolving direct URL...');
+                const tbUrl = stream.originalUrl || downloadUrl;
+                const direct = await torboxGetDirectUrl(tbUrl);
+                if (direct && direct.url) {
+                    console.log('TorBox resolved for download:', direct.url);
+                    downloadUrl = direct.url;
+                } else {
+                    console.warn('TorBox resolution failed, trying original URL with fallback...');
+                }
+            }
+
+            // Step 2: HEAD probe to follow redirects and verify content type
             try {
                 if (infoEl()) infoEl().textContent = 'Resolving download link...';
                 const headResp = await fetch(downloadUrl, {
@@ -2322,16 +2418,19 @@
                 }
                 const ct = headResp.headers.get('content-type') || '';
                 if (ct.includes('text/html')) {
-                    console.warn('HEAD returned HTML, trying to extract direct link...');
+                    console.warn('HEAD returned HTML, trying to extract direct link from page...');
                     const pageResp = await fetch(downloadUrl, { signal: controller.signal });
                     const pageText = await pageResp.text();
-                    const urlMatch = pageText.match(/https?:\/\/[^"'\s]+\.(?:mp4|mkv|avi|webm)[^"'\s]*/i)
-                        || pageText.match(/"(https?:\/\/(?:relay|dl|cdn|download)[^"]+)"/i)
-                        || pageText.match(/window\.location\s*=\s*["']([^"']+)["']/i)
-                        || pageText.match(/href=["'](https?:\/\/[^"']+\.(?:mp4|mkv|avi|webm)[^"']*)["']/i);
+                    // Try multiple patterns to find direct video URL in HTML
+                    const urlMatch = pageText.match(/https?:\/\/[^"'\s]*(?:dl|download|cdn|relay|debrid)[^"'\s]*\.(?:mp4|mkv|avi|webm)[^"'\s]*/i)
+                        || pageText.match(/https?:\/\/[^"'\s]+\.(?:mp4|mkv|avi|webm)(?:\?[^"'\s]*)?/i)
+                        || pageText.match(/"(?:url|download_url|direct_link|downloadUrl)":\s*"(https?:\/\/[^"]+)"/i)
+                        || pageText.match(/href=["'](https?:\/\/[^"']+\.(?:mp4|mkv|avi|webm)[^"']*)["']/i)
+                        || pageText.match(/window\.location(?:\.href)?\s*=\s*["'](https?:\/\/[^"']+)["']/i)
+                        || pageText.match(/"(https?:\/\/(?:relay|dl|cdn|download)[^"]+)"/i);
                     if (urlMatch) {
                         downloadUrl = urlMatch[1] || urlMatch[0];
-                        console.log('Extracted direct URL:', downloadUrl);
+                        console.log('Extracted direct URL from HTML:', downloadUrl);
                     } else {
                         throw new Error('REDIRECT_PAGE');
                     }
@@ -2388,7 +2487,18 @@
                 }
             }
 
-            // Done — create blob and store PERSISTENTLY
+            // Done — validate we actually got a video file and not an HTML page
+            const totalDownloaded = downloaded;
+            const testBlob = new Blob(chunks.slice(0, 1));
+            const testArr = new Uint8Array(await testBlob.arrayBuffer());
+            const firstBytes = String.fromCharCode(...testArr.slice(0, 30));
+            const looksLikeHtml = firstBytes.includes('<!DOCTYPE') || firstBytes.includes('<html') || firstBytes.includes('<HTML');
+            if (looksLikeHtml || (totalDownloaded > 0 && totalDownloaded < 1 * 1048576)) {
+                // Downloaded file is HTML or suspiciously small (<1MB) — not a real video
+                console.error('Download appears to be HTML or too small:', totalDownloaded, 'bytes, first bytes:', firstBytes.substring(0, 50));
+                throw new Error('REDIRECT_PAGE');
+            }
+
             // CRITICAL: Set completedAt FIRST as a safety net before anything else
             updateDownloadHistory(dlIndex, { completedAt: Date.now() });
 
