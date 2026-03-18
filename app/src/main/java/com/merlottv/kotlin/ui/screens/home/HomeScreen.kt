@@ -244,9 +244,9 @@ private fun ContinueWatchingRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(items, key = { it.id }) { item ->
-                val isFirst = item == items.first()
+                val isFirst = items.firstOrNull()?.id == item.id
                 val defaultReq = if (isFirst) (firstCardFocusRequester ?: focusRequester) else null
-                val itemFocusRequester = remember {
+                val itemFocusRequester = remember(item.id) {
                     if (defaultReq != null) {
                         focusRequesters[item.id] = defaultReq
                         defaultReq
@@ -254,7 +254,9 @@ private fun ContinueWatchingRow(
                         focusRequesters.getOrPut(item.id) { FocusRequester() }
                     }
                 }
-                val itemIndex = items.indexOf(item)
+                val itemIndex = remember(item.id, items.size) {
+                    items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+                }
 
                 ContinueWatchingCard(
                     item = item,
@@ -263,12 +265,16 @@ private fun ContinueWatchingRow(
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
                         {
-                            val prevIndex = itemIndex - 1
-                            val prevId = items[prevIndex].id
-                            scope.launch {
-                                lazyRowState.animateScrollToItem(prevIndex)
-                                focusRequesters[prevId]?.let {
-                                    try { it.requestFocus() } catch (_: Exception) {}
+                            val prevIndex = (itemIndex - 1).coerceAtLeast(0)
+                            val prevId = items.getOrNull(prevIndex)?.id
+                            if (prevId != null) {
+                                scope.launch {
+                                    try {
+                                        lazyRowState.animateScrollToItem(prevIndex)
+                                        focusRequesters[prevId]?.let {
+                                            try { it.requestFocus() } catch (_: Exception) {}
+                                        }
+                                    } catch (_: Exception) {}
                                 }
                             }
                         }
@@ -639,11 +645,12 @@ private fun CatalogRowSection(
         }
     }
 
-    // Limit focus requesters map size to prevent memory leak
-    LaunchedEffect(Unit) {
-        if (focusRequesters.size > 200) {
-            val keysToRemove = focusRequesters.keys.take(focusRequesters.size - 100)
-            keysToRemove.forEach { focusRequesters.remove(it) }
+    // Periodically clean focus requesters map to prevent memory leak
+    LaunchedEffect(items.size) {
+        if (focusRequesters.size > 150) {
+            // Keep only IDs that exist in current items
+            val validIds = items.map { it.id }.toSet()
+            focusRequesters.keys.removeAll { it !in validIds }
         }
     }
 
@@ -661,8 +668,8 @@ private fun CatalogRowSection(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(items, key = { it.id }) { item ->
-                val isFirst = firstCardFocusRequester != null && item == items.first()
-                val itemFocusRequester = remember {
+                val isFirst = firstCardFocusRequester != null && items.firstOrNull()?.id == item.id
+                val itemFocusRequester = remember(item.id) {
                     if (isFirst && firstCardFocusRequester != null) {
                         focusRequesters[item.id] = firstCardFocusRequester
                         firstCardFocusRequester
@@ -670,7 +677,9 @@ private fun CatalogRowSection(
                         focusRequesters.getOrPut(item.id) { FocusRequester() }
                     }
                 }
-                val itemIndex = items.indexOf(item)
+                val itemIndex = remember(item.id, items.size) {
+                    items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+                }
 
                 PosterCard(
                     meta = item,
@@ -681,12 +690,16 @@ private fun CatalogRowSection(
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
                         {
-                            val prevIndex = itemIndex - 1
-                            val prevId = items[prevIndex].id
-                            scope.launch {
-                                lazyRowState.animateScrollToItem(prevIndex)
-                                focusRequesters[prevId]?.let {
-                                    try { it.requestFocus() } catch (_: Exception) {}
+                            val prevIndex = (itemIndex - 1).coerceAtLeast(0)
+                            val prevId = items.getOrNull(prevIndex)?.id
+                            if (prevId != null) {
+                                scope.launch {
+                                    try {
+                                        lazyRowState.animateScrollToItem(prevIndex)
+                                        focusRequesters[prevId]?.let {
+                                            try { it.requestFocus() } catch (_: Exception) {}
+                                        }
+                                    } catch (_: Exception) {}
                                 }
                             }
                         }
