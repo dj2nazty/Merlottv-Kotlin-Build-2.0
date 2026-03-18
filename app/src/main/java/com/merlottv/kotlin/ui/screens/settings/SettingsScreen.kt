@@ -25,6 +25,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -1555,13 +1558,13 @@ private fun VodCategorySystemOverlay(
                     CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
                 }
             } else {
-                // Scrollable category list
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
+                // Use LazyColumn with stable keys to prevent crash on reorder
+                val lazyState = rememberLazyListState()
+                LazyColumn(
+                    state = lazyState,
+                    modifier = Modifier.weight(1f)
                 ) {
-                    items.forEachIndexed { index, item ->
+                    itemsIndexed(items, key = { _, item -> item.key }) { index, item ->
                         val isMoving = movingIndex == index
                         var isFocused by remember { mutableStateOf(false) }
                         Row(

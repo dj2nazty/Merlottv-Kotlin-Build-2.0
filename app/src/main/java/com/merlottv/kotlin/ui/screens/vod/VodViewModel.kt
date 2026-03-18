@@ -282,12 +282,9 @@ class VodViewModel @Inject constructor(
                 val visible = sections.filter { it.key !in hiddenKeys }
 
                 val sorted = if (savedOrder.isNotEmpty()) {
+                    // Use saved order exactly — no secondary sort that would reshuffle
                     val orderMap = savedOrder.withIndex().associate { (i, key) -> key to i }
-                    visible.sortedWith(compareBy(
-                        { orderMap[it.key] ?: (1000 + getCategoryOrder(it.title, it.catalogId)) },
-                        { when (it.type) { "movie" -> 0; "series" -> 1; else -> 2 } },
-                        { it.title }
-                    ))
+                    visible.sortedBy { orderMap[it.key] ?: (1000 + getCategoryOrder(it.title, it.catalogId)) }
                 } else {
                     visible.sortedWith(compareBy(
                         { getCategoryOrder(it.title, it.catalogId) },
