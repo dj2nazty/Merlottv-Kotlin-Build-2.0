@@ -60,6 +60,23 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Catch Compose focus-search crash on TV: "LayoutCoordinate operations are only
+        // valid when isAttached is true" — happens when D-pad navigation tries to measure
+        // an item that was scrolled out of the LazyRow viewport. This is a known Compose
+        // bug; swallowing it here prevents the app from crashing.
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            if (throwable is IllegalStateException &&
+                throwable.message?.contains("isAttached") == true
+            ) {
+                android.util.Log.w("MerlotTV", "Suppressed Compose focus crash", throwable)
+                // Don't kill the app — the UI recovers on its own
+            } else {
+                defaultHandler?.uncaughtException(thread, throwable)
+            }
+        }
+
         setContent {
             MerlotTVTheme {
                 MerlotApp()

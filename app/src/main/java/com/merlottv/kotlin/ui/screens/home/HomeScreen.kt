@@ -665,7 +665,10 @@ private fun CatalogRowSection(
         LazyRow(
             state = lazyRowState,
             contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            // Limit beyond-bounds items to prevent Compose focus crash
+            // when D-pad tries to measure detached items
+            userScrollEnabled = true
         ) {
             items(items, key = { it.id }) { item ->
                 val isFirst = firstCardFocusRequester != null && items.firstOrNull()?.id == item.id

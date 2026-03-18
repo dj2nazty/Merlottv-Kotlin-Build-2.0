@@ -432,8 +432,8 @@ private fun CatalogSectionRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(section.items, key = { it.id }) { item ->
-                val isFirst = firstCardFocusRequester != null && item == section.items.first()
-                val itemFocusRequester = remember {
+                val isFirst = firstCardFocusRequester != null && section.items.firstOrNull()?.id == item.id
+                val itemFocusRequester = remember(item.id) {
                     if (isFirst && firstCardFocusRequester != null) {
                         focusRequesters[item.id] = firstCardFocusRequester
                         firstCardFocusRequester
@@ -441,7 +441,9 @@ private fun CatalogSectionRow(
                         focusRequesters.getOrPut(item.id) { FocusRequester() }
                     }
                 }
-                val itemIndex = section.items.indexOf(item)
+                val itemIndex = remember(item.id, section.items.size) {
+                    section.items.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+                }
 
                 VodCard(
                     item = item,
@@ -452,12 +454,16 @@ private fun CatalogSectionRow(
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
                         {
-                            val prevIndex = itemIndex - 1
-                            val prevId = section.items[prevIndex].id
-                            scope.launch {
-                                lazyRowState.animateScrollToItem(prevIndex)
-                                focusRequesters[prevId]?.let {
-                                    try { it.requestFocus() } catch (_: Exception) {}
+                            val prevIndex = (itemIndex - 1).coerceAtLeast(0)
+                            val prevId = section.items.getOrNull(prevIndex)?.id
+                            if (prevId != null) {
+                                scope.launch {
+                                    try {
+                                        lazyRowState.animateScrollToItem(prevIndex)
+                                        focusRequesters[prevId]?.let {
+                                            try { it.requestFocus() } catch (_: Exception) {}
+                                        }
+                                    } catch (_: Exception) {}
                                 }
                             }
                         }
