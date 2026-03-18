@@ -77,8 +77,8 @@ class HomeViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             Log.d("HomeViewModel", "Starting loadCatalogs")
             try {
-                val addons = addonRepository.getAllAddons().first()
-                Log.d("HomeViewModel", "Got ${addons.size} addons: ${addons.map { it.name }}")
+                val addons = addonRepository.getEnabledAddons().first()
+                Log.d("HomeViewModel", "Got ${addons.size} enabled addons: ${addons.map { it.name }}")
 
                 val manifests = supervisorScope {
                     addons.map { addon ->
@@ -96,6 +96,7 @@ class HomeViewModel @Inject constructor(
                 }
 
                 data class CatalogJob(
+                    val addonId: String,
                     val addonName: String,
                     val catalogName: String,
                     val catalogId: String,
@@ -110,7 +111,7 @@ class HomeViewModel @Inject constructor(
                             it.isRequired && it.name != "genre" && it.name != "search"
                         }
                         if (requiresSpecial) continue
-                        jobs.add(CatalogJob(manifest.name, catalog.name, catalog.id, catalog.type, manifest.url))
+                        jobs.add(CatalogJob(manifest.id, manifest.name, catalog.name, catalog.id, catalog.type, manifest.url))
                     }
                 }
                 // Hide Torbox "Your Media" catalogs from display
@@ -143,9 +144,8 @@ class HomeViewModel @Inject constructor(
                                             "series" -> "Series"
                                             else -> job.type
                                         }
-                                        val manifest = manifests.find { it.url == job.addonUrl }
                                         val row = CatalogRow(
-                                            key = "${manifest?.id ?: job.addonName}:${job.catalogId}:${job.type}",
+                                            key = "${job.addonId}:${job.catalogId}:${job.type}",
                                             title = "${job.catalogName} $typeLabel — ${job.addonName}",
                                             items = items
                                         )
@@ -219,17 +219,21 @@ class HomeViewModel @Inject constructor(
 
     fun toggleFavorite(item: MetaPreview) {
         viewModelScope.launch {
-            favoritesRepository.toggleFavoriteVodWithMeta(
-                item.id,
-                FavoriteVodMeta(
-                    id = item.id,
-                    name = item.name,
-                    poster = item.poster,
-                    type = item.type,
-                    imdbRating = item.imdbRating,
-                    description = item.description
+            try {
+                favoritesRepository.toggleFavoriteVodWithMeta(
+                    item.id,
+                    FavoriteVodMeta(
+                        id = item.id,
+                        name = item.name,
+                        poster = item.poster,
+                        type = item.type,
+                        imdbRating = item.imdbRating,
+                        description = item.description
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                Log.w("HomeViewModel", "toggleFavorite failed: ${e.message}")
+            }
         }
     }
 

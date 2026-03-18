@@ -454,16 +454,12 @@ private fun CatalogSectionRow(
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
                         {
-                            val prevIndex = (itemIndex - 1).coerceAtLeast(0)
-                            val prevId = section.items.getOrNull(prevIndex)?.id
+                            val prevId = section.items.getOrNull(itemIndex - 1)?.id
                             if (prevId != null) {
-                                scope.launch {
-                                    try {
-                                        lazyRowState.animateScrollToItem(prevIndex)
-                                        focusRequesters[prevId]?.let {
-                                            try { it.requestFocus() } catch (_: Exception) {}
-                                        }
-                                    } catch (_: Exception) {}
+                                // Just move focus — Compose's BringIntoView scrolls
+                                // only enough to reveal the one card, not the whole row.
+                                focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
                                 }
                             }
                         }

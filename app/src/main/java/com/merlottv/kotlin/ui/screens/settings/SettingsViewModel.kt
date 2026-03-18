@@ -691,7 +691,8 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingVodCategories = true)
             try {
-                val addons = addonRepository.getAllAddons().first()
+                // Use getEnabledAddons() to match what Home/VOD screens actually show
+                val addons = addonRepository.getEnabledAddons().first()
                 val manifests = supervisorScope {
                     addons.map { addon ->
                         async(Dispatchers.IO) {

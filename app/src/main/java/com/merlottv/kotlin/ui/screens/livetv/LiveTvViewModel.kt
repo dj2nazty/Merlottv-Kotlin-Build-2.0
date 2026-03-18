@@ -408,7 +408,7 @@ class LiveTvViewModel @Inject constructor(
     }
 
     /** Stop VLC player and release resources */
-    private fun stopVlc() {
+    fun stopVlc() {
         vlcBufferTimeout?.cancel()
         try {
             vlcPlayer?.stop()
@@ -1503,6 +1503,7 @@ class LiveTvViewModel @Inject constructor(
     fun stopPlayback() {
         if (isPlayerReleased) return
         try { player.stop() } catch (_: Exception) {}
+        try { gentlePlayer.stop() } catch (_: Exception) {}
     }
 
     fun resumePlayback() {

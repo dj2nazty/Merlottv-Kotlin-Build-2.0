@@ -390,17 +390,21 @@ class VodViewModel @Inject constructor(
 
     fun toggleFavorite(item: MetaPreview) {
         viewModelScope.launch {
-            favoritesRepository.toggleFavoriteVodWithMeta(
-                item.id,
-                FavoriteVodMeta(
-                    id = item.id,
-                    name = item.name,
-                    poster = item.poster,
-                    type = item.type,
-                    imdbRating = item.imdbRating,
-                    description = item.description
+            try {
+                favoritesRepository.toggleFavoriteVodWithMeta(
+                    item.id,
+                    FavoriteVodMeta(
+                        id = item.id,
+                        name = item.name,
+                        poster = item.poster,
+                        type = item.type,
+                        imdbRating = item.imdbRating,
+                        description = item.description
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                android.util.Log.w("VodViewModel", "toggleFavorite failed: ${e.message}")
+            }
         }
     }
 }

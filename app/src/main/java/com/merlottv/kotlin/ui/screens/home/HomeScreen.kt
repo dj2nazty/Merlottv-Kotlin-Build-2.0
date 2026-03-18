@@ -102,10 +102,10 @@ fun HomeScreen(
                 }
             } ?: false
             if (!restored) {
-                // Default to first content row below hero, not the hero carousel itself
-                try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {
-                    // Fallback to hero if first row not available yet
-                    try { heroFocusRequester.requestFocus() } catch (_: Exception) {}
+                // Default to hero carousel at the TOP of the screen
+                try { heroFocusRequester.requestFocus() } catch (_: Exception) {
+                    // Fallback to first content row if hero not available
+                    try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {}
                 }
             }
         }
@@ -265,16 +265,12 @@ private fun ContinueWatchingRow(
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
                         {
-                            val prevIndex = (itemIndex - 1).coerceAtLeast(0)
-                            val prevId = items.getOrNull(prevIndex)?.id
+                            val prevId = items.getOrNull(itemIndex - 1)?.id
                             if (prevId != null) {
-                                scope.launch {
-                                    try {
-                                        lazyRowState.animateScrollToItem(prevIndex)
-                                        focusRequesters[prevId]?.let {
-                                            try { it.requestFocus() } catch (_: Exception) {}
-                                        }
-                                    } catch (_: Exception) {}
+                                // Just move focus — Compose's BringIntoView scrolls
+                                // only enough to reveal the one card, not the whole row.
+                                focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
                                 }
                             }
                         }
@@ -693,16 +689,12 @@ private fun CatalogRowSection(
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
                         {
-                            val prevIndex = (itemIndex - 1).coerceAtLeast(0)
-                            val prevId = items.getOrNull(prevIndex)?.id
+                            val prevId = items.getOrNull(itemIndex - 1)?.id
                             if (prevId != null) {
-                                scope.launch {
-                                    try {
-                                        lazyRowState.animateScrollToItem(prevIndex)
-                                        focusRequesters[prevId]?.let {
-                                            try { it.requestFocus() } catch (_: Exception) {}
-                                        }
-                                    } catch (_: Exception) {}
+                                // Just move focus — Compose's BringIntoView scrolls
+                                // only enough to reveal the one card, not the whole row.
+                                focusRequesters[prevId]?.let {
+                                    try { it.requestFocus() } catch (_: Exception) {}
                                 }
                             }
                         }

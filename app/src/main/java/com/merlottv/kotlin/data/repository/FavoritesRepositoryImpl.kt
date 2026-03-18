@@ -9,6 +9,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,6 +21,9 @@ class FavoritesRepositoryImpl @Inject constructor(
     private val profileDataStore: ProfileDataStore,
     private val cloudSyncManager: CloudSyncManager
 ) : FavoritesRepository {
+
+    // Mutex to serialize favorite toggles and prevent race conditions on rapid clicks
+    private val favoriteMutex = Mutex()
 
     // Profile-aware: automatically re-emits when active profile changes
     override fun getFavoriteChannelIds(): Flow<Set<String>> =
@@ -49,15 +54,17 @@ class FavoritesRepositoryImpl @Inject constructor(
     }
 
     override suspend fun toggleFavoriteVodWithMeta(vodId: String, meta: FavoriteVodMeta) {
-        val profileId = profileDataStore.getActiveProfileId()
-        val isFav = favoritesDataStore.favoriteVod(profileId).first().contains(vodId)
-        favoritesDataStore.toggleFavoriteVod(vodId, profileId)
-        if (!isFav) {
-            favoritesDataStore.saveVodMeta(meta, profileId)
-        } else {
-            favoritesDataStore.removeVodMeta(vodId, profileId)
+        favoriteMutex.withLock {
+            val profileId = profileDataStore.getActiveProfileId()
+            val isFav = favoritesDataStore.favoriteVod(profileId).first().contains(vodId)
+            favoritesDataStore.toggleFavoriteVod(vodId, profileId)
+            if (!isFav) {
+                favoritesDataStore.saveVodMeta(meta, profileId)
+            } else {
+                favoritesDataStore.removeVodMeta(vodId, profileId)
+            }
+            try { cloudSyncManager.notifyFavoritesChanged(profileId) } catch (_: Exception) {}
         }
-        cloudSyncManager.notifyFavoritesChanged(profileId)
     }
 
     override suspend fun saveVodMeta(meta: FavoriteVodMeta) {

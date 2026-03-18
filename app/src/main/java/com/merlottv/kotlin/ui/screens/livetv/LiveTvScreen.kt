@@ -103,12 +103,15 @@ import java.util.Locale
 fun LiveTvScreen(
     viewModel: LiveTvViewModel = hiltViewModel()
 ) {
-    // Keep screen awake while Live TV is active
+    // Keep screen awake while Live TV is active; stop playback on navigation away
     val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
     androidx.compose.runtime.DisposableEffect(Unit) {
         activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
             activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            // Stop all audio/video playback immediately when leaving Live TV
+            try { viewModel.stopPlayback() } catch (_: Exception) {}
+            try { viewModel.stopVlc() } catch (_: Exception) {}
         }
     }
 
