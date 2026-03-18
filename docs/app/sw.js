@@ -1,4 +1,4 @@
-const CACHE_NAME = 'merlottv-v4.1';
+const CACHE_NAME = 'merlottv-v4.2';
 const CACHE_URLS = [
   './',
   './index.html',

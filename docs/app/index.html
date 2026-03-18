@@ -470,7 +470,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.clear();location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.1</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.2</div>
             </form>
         </div>
 
@@ -1834,6 +1834,23 @@
         }));
     }
 
+    // Detect file format from URL and metadata
+    function detectFormat(url, title, filename) {
+        const allText = (url + ' ' + title + ' ' + (filename || '')).toLowerCase();
+        // Check URL path for extension
+        const urlPath = url.split('?')[0].split('#')[0].toLowerCase();
+        if (urlPath.endsWith('.mkv') || allText.includes('.mkv')) return 'MKV';
+        if (urlPath.endsWith('.avi') || allText.includes('.avi')) return 'AVI';
+        if (urlPath.endsWith('.webm') || allText.includes('.webm')) return 'WEBM';
+        if (urlPath.endsWith('.mov') || allText.includes('.mov')) return 'MOV';
+        if (urlPath.endsWith('.mp4') || allText.includes('.mp4')) return 'MP4';
+        // Check for common indicators in title
+        if (allText.includes('x265') || allText.includes('hevc')) return 'MKV'; // x265 is usually MKV
+        if (allText.includes('x264') || allText.includes('h.264') || allText.includes('h264')) return 'MP4';
+        // Default assumption for direct download links
+        return 'MP4';
+    }
+
     async function resolveStreams(type, imdbId) {
         const addons = getStreamAddons();
         const results = [];
@@ -1853,28 +1870,45 @@
                     const streamUrl = s.url || '';
                     const externalUrl = s.externalUrl || '';
                     const finalUrl = streamUrl || externalUrl;
-                    // Only direct HTTP(S) links — skip magnet:, .torrent, empty
                     if (!finalUrl || !finalUrl.startsWith('http')) return;
-                    // Skip HLS/M3U8 streams (can't download as single file)
                     if (finalUrl.includes('.m3u8') || finalUrl.includes('/hls/')) return;
 
                     const title = s.title || s.name || '';
                     const name = s.name || '';
-                    const text = (title + ' ' + name).toLowerCase();
+                    const filename = s.behaviorHints?.filename || '';
+                    const text = (title + ' ' + name + ' ' + filename).toLowerCase();
                     let quality = 'SD';
                     if (text.includes('4k') || text.includes('2160')) quality = '4K';
                     else if (text.includes('1080') || text.includes('bluray') || text.includes('remux')) quality = '1080p';
                     else if (text.includes('720') || text.includes('hd')) quality = '720p';
                     else if (text.includes('480')) quality = '480p';
 
-                    // Extract size from metadata (multiple patterns)
-                    const sizeText = title + ' ' + name + ' ' + (s.behaviorHints?.filename || '');
+                    // Detect file format
+                    const format = detectFormat(finalUrl, text, filename);
+
+                    // Extract size from metadata — but ONLY trust sizes > 50 MB
+                    // (small sizes like 4.3 MB are metadata/torrent file sizes, not the actual video)
+                    const sizeText = title + ' ' + name + ' ' + filename;
                     const sizeMatch = sizeText.match(/(\d+\.?\d*)\s*(GB|MB|gb|mb|Gb|Mb)/i)
                         || sizeText.match(/💾\s*(\d+\.?\d*)\s*(GB|MB)/i)
                         || sizeText.match(/size[:\s]+(\d+\.?\d*)\s*(GB|MB)/i);
-                    const size = sizeMatch ? `${sizeMatch[1]} ${sizeMatch[2].toUpperCase()}` : '';
+                    let size = '';
+                    let sizeBytes = 0;
+                    if (sizeMatch) {
+                        const num = parseFloat(sizeMatch[1]);
+                        const unit = sizeMatch[2].toUpperCase();
+                        const bytes = unit === 'GB' ? num * 1073741824 : num * 1048576;
+                        // Only trust sizes >= 50 MB for video files
+                        if (bytes >= 50 * 1048576) {
+                            size = `${sizeMatch[1]} ${unit}`;
+                            sizeBytes = bytes;
+                        }
+                    }
 
-                    results.push({ url: finalUrl, title: title || name || finalUrl.split('/').pop(), name, quality, size, addon: addon.name });
+                    results.push({
+                        url: finalUrl, title: title || name || finalUrl.split('/').pop(),
+                        name, quality, size, sizeBytes, format, addon: addon.name
+                    });
                 });
             } catch (e) {
                 console.warn('Stream addon failed:', addon.name, e.message);
@@ -1883,58 +1917,87 @@
 
         await Promise.all(fetches);
 
-        // Sort: 4K > 1080p > 720p > 480p > SD, prefer TorBox
+        // Sort: MP4 first (playable offline), then by quality, then prefer TorBox
         const qOrder = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3, 'SD': 4 };
         results.sort((a, b) => {
+            // MP4 always first (plays offline in browser)
+            const fa = a.format === 'MP4' ? 0 : 1;
+            const fb = b.format === 'MP4' ? 0 : 1;
+            if (fa !== fb) return fa - fb;
             const qa = qOrder[a.quality] ?? 5;
             const qb = qOrder[b.quality] ?? 5;
             if (qa !== qb) return qa - qb;
-            // Prefer torbox
             const ta = a.addon.toLowerCase().includes('torbox') ? 0 : 1;
             const tb = b.addon.toLowerCase().includes('torbox') ? 0 : 1;
             return ta - tb;
         });
 
-        // Probe actual file sizes via HEAD requests (best-effort, parallel)
+        // Probe ALL items for real file size via HEAD requests (parallel)
+        // Don't skip items with metadata sizes — those are often wrong (4.3 MB = torrent metadata)
         const sizeProbes = results.map(async (r) => {
-            if (r.size) return; // already have size from metadata
             try {
                 const ctrl = new AbortController();
-                const t = setTimeout(() => ctrl.abort(), 5000);
-                // Try HEAD first
+                const t = setTimeout(() => ctrl.abort(), 6000);
                 let cl = null;
+                let finalContentType = '';
                 try {
                     const head = await fetch(r.url, { method: 'HEAD', signal: ctrl.signal, credentials: 'omit', redirect: 'follow' });
                     cl = head.headers.get('content-length');
+                    finalContentType = head.headers.get('content-type') || '';
+                    // If we followed a redirect, update format detection
+                    if (head.url) {
+                        const newFmt = detectFormat(head.url, r.title, '');
+                        if (newFmt !== r.format) r.format = newFmt;
+                    }
                 } catch (_) {
-                    // HEAD blocked (CORS) — try GET with range header to get just 1 byte + content-range
                     try {
                         const rangeResp = await fetch(r.url, {
                             method: 'GET', signal: ctrl.signal, credentials: 'omit', redirect: 'follow',
                             headers: { 'Range': 'bytes=0-0' }
                         });
-                        // content-range: bytes 0-0/TOTAL
                         const cr = rangeResp.headers.get('content-range') || '';
                         const totalMatch = cr.match(/\/(\d+)/);
                         if (totalMatch) cl = totalMatch[1];
                         else cl = rangeResp.headers.get('content-length');
-                        // Abort the body
+                        finalContentType = rangeResp.headers.get('content-type') || '';
                         rangeResp.body?.cancel?.();
                     } catch (_) {}
                 }
                 clearTimeout(t);
+
+                // Detect format from content-type
+                if (finalContentType.includes('video/x-matroska') || finalContentType.includes('mkv')) r.format = 'MKV';
+                else if (finalContentType.includes('video/mp4')) r.format = 'MP4';
+                else if (finalContentType.includes('video/webm')) r.format = 'WEBM';
+                else if (finalContentType.includes('video/avi') || finalContentType.includes('video/x-msvideo')) r.format = 'AVI';
+                // If content-type is text/html, this is a redirect page — mark it
+                if (finalContentType.includes('text/html')) r.isRedirectPage = true;
+
                 if (cl) {
                     const bytes = parseInt(cl);
-                    if (bytes > 1000) { // sanity check
+                    // Real video files are > 10 MB. Anything smaller is likely metadata/redirect page
+                    if (bytes > 10 * 1048576) {
                         r.sizeBytes = bytes;
                         r.size = formatBytes(bytes);
+                    } else if (bytes > 0 && bytes < 1048576) {
+                        // Very small = probably redirect page or metadata
+                        r.isRedirectPage = true;
                     }
                 }
             } catch (_) {}
         });
         await Promise.all(sizeProbes);
 
-        return results;
+        // Filter out known redirect pages, and de-duplicate by URL
+        const seen = new Set();
+        const filtered = results.filter(r => {
+            if (r.isRedirectPage) return false;
+            if (seen.has(r.url)) return false;
+            seen.add(r.url);
+            return true;
+        });
+
+        return filtered;
     }
 
     function formatBytes(bytes) {
@@ -2112,9 +2175,10 @@
                 ${d.poster ? `<img class="dl-item-poster" src="${esc(d.poster)}" alt="" onerror="this.style.background='var(--surface2)'">` : '<div class="dl-item-poster"></div>'}
                 <div class="dl-item-info">
                     <div class="dl-item-title">${esc(d.title)}</div>
-                    <div class="dl-item-meta">
-                        <span class="stream-quality ${qualityClass(d.quality)}" style="display:inline-block;margin-right:6px">${d.quality || ''}</span>
-                        ${d.size ? d.size + ' · ' : ''}
+                    <div class="dl-item-meta" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+                        <span class="stream-quality ${qualityClass(d.quality)}" style="display:inline-block">${d.quality || ''}</span>
+                        ${d.format ? formatBadge(d.format) : ''}
+                        ${d.size ? '<span>' + d.size + '</span>' : ''}
                         <span style="color:${statusColor}">${statusLabel}</span>
                     </div>
                     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
@@ -2130,16 +2194,33 @@
         list.innerHTML = html;
     }
 
-    // ─── Stream Picker (redesigned) ───
+    // ─── Stream Picker (with format + real size) ───
+    function formatBadge(fmt) {
+        const isPlayable = fmt === 'MP4' || fmt === 'WEBM' || fmt === 'MOV';
+        const color = isPlayable ? 'var(--success)' : 'var(--warn)';
+        const bg = isPlayable ? 'rgba(0,214,143,0.15)' : 'rgba(255,215,64,0.15)';
+        return `<span style="font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;background:${bg};color:${color}">${fmt}</span>`;
+    }
+
     function renderStreamList(streams, title) {
+        const mp4Count = streams.filter(s => s.format === 'MP4').length;
         let html = `<h3 style="margin-bottom:4px">Download</h3>
-            <p style="color:var(--muted);font-size:12px;margin-bottom:14px">${esc(title)}</p>
+            <p style="color:var(--muted);font-size:12px;margin-bottom:6px">${esc(title)}</p>
+            <p style="color:var(--muted);font-size:11px;margin-bottom:14px">
+                <span style="color:var(--success)">MP4</span> = plays offline in app &nbsp;|&nbsp;
+                <span style="color:var(--warn)">MKV</span> = may need external player
+            </p>
             <div class="stream-list">`;
         streams.forEach((s, i) => {
+            const sizeDisplay = s.size || '<span style="color:var(--muted);font-style:italic">size unknown</span>';
             html += `<div class="stream-item" onclick="selectStream(this,${i})">
                 <div class="stream-info">
                     <div class="stream-title">${esc(s.title)}</div>
-                    <div class="stream-meta">${esc(s.addon)}${s.size ? ' · <strong style="color:var(--text)">' + s.size + '</strong>' : ''}</div>
+                    <div class="stream-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px">
+                        ${formatBadge(s.format)}
+                        <span>${esc(s.addon)}</span>
+                        <strong style="color:var(--text)">${sizeDisplay}</strong>
+                    </div>
                 </div>
                 <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
                 <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
@@ -2193,6 +2274,7 @@
             filename,
             quality: stream.quality,
             size: stream.size || '',
+            format: stream.format || 'MP4',
             poster: meta.poster || '',
             date: new Date().toLocaleDateString(),
             url: stream.url,
