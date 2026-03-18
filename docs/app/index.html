@@ -477,7 +477,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.removeItem('merlot_auth');location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.5</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.6</div>
             </form>
         </div>
 
@@ -1864,44 +1864,154 @@
         return null;
     }
 
-    // ─── TorBox API: Get real direct download URLs ───
+    // ─── TorBox REST API: Get real direct CDN download URLs ───
+    // Uses TorBox's official API instead of scraping redirect pages
+    function getTorBoxApiKey() {
+        return (settingsData.torboxKey || DEFAULT_TORBOX_KEY).trim();
+    }
+
+    // Extract hash and file index from TorBox stremio addon URL
+    // Format: https://stremio.torbox.app/{key}/playback/{hash}/{fileIdx}
+    function parseTorBoxStremioUrl(url) {
+        const m = url.match(/stremio\.torbox\.app\/[^/]+\/playback\/([a-fA-F0-9]+)\/(\d+)/);
+        if (m) return { hash: m[1], fileIdx: parseInt(m[2]) };
+        return null;
+    }
+
+    // TorBox API: check if torrent is cached, get torrent_id + file_id
+    async function torboxCheckCached(hash) {
+        const key = getTorBoxApiKey();
+        try {
+            const resp = await fetch(`https://api.torbox.app/v1/api/torrents/checkcached?hash=${hash}&format=object&list_files=true`, {
+                headers: { 'Authorization': `Bearer ${key}` },
+                signal: AbortSignal.timeout(10000)
+            });
+            if (!resp.ok) { console.warn('TorBox checkcached failed:', resp.status); return null; }
+            const data = await resp.json();
+            console.log('TorBox checkcached response:', JSON.stringify(data).substring(0, 300));
+            if (data.success && data.data) {
+                // data.data is keyed by hash
+                const entry = data.data[hash.toLowerCase()] || data.data[hash.toUpperCase()] || Object.values(data.data)[0];
+                return entry || null;
+            }
+            return null;
+        } catch (e) {
+            console.warn('TorBox checkcached error:', e.message);
+            return null;
+        }
+    }
+
+    // TorBox API: request a direct CDN download link
+    async function torboxRequestDl(torrentId, fileId) {
+        const key = getTorBoxApiKey();
+        try {
+            const resp = await fetch(`https://api.torbox.app/v1/api/torrents/requestdl?token=${key}&torrent_id=${torrentId}&file_id=${fileId}&zip_link=false`, {
+                headers: { 'Authorization': `Bearer ${key}` },
+                signal: AbortSignal.timeout(10000)
+            });
+            if (!resp.ok) { console.warn('TorBox requestdl failed:', resp.status); return null; }
+            const data = await resp.json();
+            console.log('TorBox requestdl response:', JSON.stringify(data).substring(0, 300));
+            if (data.success && data.data) {
+                return data.data; // This is the direct CDN URL string
+            }
+            return null;
+        } catch (e) {
+            console.warn('TorBox requestdl error:', e.message);
+            return null;
+        }
+    }
+
+    // Main function: resolve a TorBox stremio URL to a direct CDN download link
     async function torboxGetDirectUrl(stremioUrl) {
-        // TorBox Stremio addon URLs look like:
-        // https://stremio.torbox.app/{key}/playback/{hash}/{fileIdx}
-        // or https://stremio.torbox.app/{key}/stream/{type}/{id}
-        // We need to follow the redirect chain to get the real CDN URL
+        // Method 1: Use TorBox REST API (preferred — returns real CDN URLs)
+        const parsed = parseTorBoxStremioUrl(stremioUrl);
+        if (parsed) {
+            console.log('TorBox API: resolving hash', parsed.hash, 'fileIdx', parsed.fileIdx);
+            const cached = await torboxCheckCached(parsed.hash);
+            if (cached) {
+                // Find the right file — cached response has file list
+                let torrentId = null;
+                let fileId = null;
+                let fileSize = 0;
+
+                if (Array.isArray(cached)) {
+                    // Array of cached items
+                    for (const item of cached) {
+                        if (item.id) torrentId = item.id;
+                        if (item.files && Array.isArray(item.files)) {
+                            const f = item.files[parsed.fileIdx] || item.files.find(f => f.id === parsed.fileIdx);
+                            if (f) { fileId = f.id; fileSize = f.size || 0; }
+                        }
+                    }
+                } else if (cached.id) {
+                    torrentId = cached.id;
+                    if (cached.files && Array.isArray(cached.files)) {
+                        const f = cached.files[parsed.fileIdx] || cached.files.find(f => f.id === parsed.fileIdx);
+                        if (f) { fileId = f.id; fileSize = f.size || 0; }
+                    }
+                }
+
+                if (torrentId && fileId !== null) {
+                    const cdnUrl = await torboxRequestDl(torrentId, fileId);
+                    if (cdnUrl) {
+                        console.log('TorBox API resolved to CDN:', cdnUrl.substring(0, 100));
+                        return { url: cdnUrl, size: fileSize, contentType: 'video/mp4' };
+                    }
+                }
+
+                // If we have torrent_id but couldn't find fileId, try with fileIdx directly
+                if (torrentId) {
+                    const cdnUrl = await torboxRequestDl(torrentId, parsed.fileIdx);
+                    if (cdnUrl) {
+                        console.log('TorBox API resolved (fallback):', cdnUrl.substring(0, 100));
+                        return { url: cdnUrl, size: fileSize, contentType: 'video/mp4' };
+                    }
+                }
+            }
+        }
+
+        // Method 2: Use redirect permalink (TorBox API redirect=true)
+        if (parsed) {
+            const key = getTorBoxApiKey();
+            // Try creating a redirect permalink — the video element can follow this
+            // This doesn't give us size info but gives a working URL
+            try {
+                const resp = await fetch(stremioUrl, {
+                    redirect: 'follow', credentials: 'omit',
+                    signal: AbortSignal.timeout(8000)
+                });
+                const ct = resp.headers.get('content-type') || '';
+                if (ct.includes('video/') || ct.includes('application/octet-stream')) {
+                    const cl = resp.headers.get('content-length');
+                    resp.body?.cancel?.();
+                    return { url: resp.url, size: cl ? parseInt(cl) : 0, contentType: ct };
+                }
+                resp.body?.cancel?.();
+            } catch (_) {}
+        }
+
+        // Method 3: Follow redirect and parse HTML (legacy fallback)
         try {
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), 8000);
-            // Fetch the page that TorBox redirects to
             const resp = await fetch(stremioUrl, {
                 signal: ctrl.signal, redirect: 'follow', credentials: 'omit'
             });
             clearTimeout(t);
-            const finalUrl = resp.url; // the URL after all redirects
             const ct = resp.headers.get('content-type') || '';
-
-            // If we got redirected to a video file directly, great!
             if (ct.includes('video/') || ct.includes('application/octet-stream')) {
                 const cl = resp.headers.get('content-length');
                 resp.body?.cancel?.();
-                return { url: finalUrl, size: cl ? parseInt(cl) : 0, contentType: ct };
+                return { url: resp.url, size: cl ? parseInt(cl) : 0, contentType: ct };
             }
-
-            // If it's HTML (TorBox download page), try to extract the direct link
             if (ct.includes('text/html')) {
                 const html = await resp.text();
-                // Look for direct download URLs in the page
                 const patterns = [
-                    // TorBox CDN links
                     /https?:\/\/[^"'\s]*(?:dl|download|cdn|relay|debrid)[^"'\s]*\.(?:mp4|mkv|avi|webm)[^"'\s]*/gi,
-                    // Generic video file links
                     /https?:\/\/[^"'\s]+\.(?:mp4|mkv|avi|webm)(?:\?[^"'\s]*)?/gi,
-                    // JSON data with URL field
                     /"(?:url|download_url|direct_link|downloadUrl)":\s*"(https?:\/\/[^"]+)"/gi,
-                    // href attributes with video extensions
                     /href=["'](https?:\/\/[^"']+\.(?:mp4|mkv|avi|webm)[^"']*)["']/gi,
-                    // window.location redirects
                     /window\.location(?:\.href)?\s*=\s*["'](https?:\/\/[^"']+)["']/gi,
                 ];
                 for (const pattern of patterns) {
@@ -1914,7 +2024,6 @@
                     }
                 }
             }
-
             resp.body?.cancel?.();
             return null;
         } catch (e) {
@@ -2844,8 +2953,11 @@
         currentPlayerUrl = d.url || '';
         currentPlaylistIndex = -1;
         errorEl.classList.add('hidden');
-        loadingEl.classList.remove('hidden');
         playerEl.classList.remove('hidden');
+
+        // Show loading
+        loadingEl.innerHTML = '<span class="spinner" style="width:32px;height:32px;border-width:3px"></span><div style="margin-top:8px">Loading video...</div>';
+        loadingEl.classList.remove('hidden');
 
         try {
             const result = await getPlayableUrl(d);
@@ -2867,8 +2979,115 @@
 
             if (!result.url) throw new Error('No video available — try re-downloading');
 
-            const playUrl = result.url;
+            let playUrl = result.url;
             const isStream = result.source === 'stream';
+
+            // ─── KEY FIX: For stream URLs, fetch video into memory first ───
+            // Stream URLs (especially TorBox) often redirect to HTML pages.
+            // The <video> element can't handle this. So we fetch the video as
+            // a blob and play from a blob URL instead.
+            if (isStream) {
+                loadingEl.innerHTML = '<span class="spinner" style="width:32px;height:32px;border-width:3px"></span><div style="margin-top:8px">Preparing video stream...</div><div style="margin-top:4px;font-size:11px;color:var(--muted)" id="vp-stream-progress">Connecting...</div>';
+
+                try {
+                    const resp = await fetch(playUrl, { redirect: 'follow', credentials: 'omit' });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+                    const ct = resp.headers.get('content-type') || '';
+                    // If we got HTML back, this isn't a video
+                    if (ct.includes('text/html')) {
+                        throw new Error('STREAM_IS_HTML');
+                    }
+
+                    const totalBytes = parseInt(resp.headers.get('content-length') || '0');
+                    const reader = resp.body.getReader();
+                    const chunks = [];
+                    let downloaded = 0;
+                    const startTime = Date.now();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        chunks.push(value);
+                        downloaded += value.length;
+
+                        const progEl = document.getElementById('vp-stream-progress');
+                        if (progEl) {
+                            const elapsed = (Date.now() - startTime) / 1000;
+                            const speed = elapsed > 0 ? downloaded / elapsed : 0;
+                            if (totalBytes > 0) {
+                                const pct = Math.round((downloaded / totalBytes) * 100);
+                                progEl.textContent = `${pct}% — ${formatBytes(downloaded)} / ${formatBytes(totalBytes)} · ${formatBytes(Math.round(speed))}/s`;
+                            } else {
+                                progEl.textContent = `${formatBytes(downloaded)} loaded · ${formatBytes(Math.round(speed))}/s`;
+                            }
+                        }
+
+                        // For playback, we can start once we have enough data
+                        // But for reliability, let's load the whole thing
+                    }
+
+                    // Validate it's not HTML
+                    if (chunks.length > 0) {
+                        const firstChunk = new Uint8Array(chunks[0].slice(0, 30));
+                        const firstText = String.fromCharCode(...firstChunk);
+                        if (firstText.includes('<!DOCTYPE') || firstText.includes('<html')) {
+                            throw new Error('STREAM_IS_HTML');
+                        }
+                    }
+
+                    if (downloaded < 1 * 1048576) {
+                        throw new Error('STREAM_TOO_SMALL');
+                    }
+
+                    // Create blob and play
+                    const blob = new Blob(chunks, { type: 'video/mp4' });
+                    playUrl = URL.createObjectURL(blob);
+
+                    // Save to IndexedDB for offline playback later
+                    const idbKey = 'vid_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                    try {
+                        await saveVideoBlob(idbKey, blob, d.filename || d.title);
+                        if (!window._dlBlobs) window._dlBlobs = {};
+                        window._dlBlobs[idbKey] = playUrl;
+                        updateDownloadHistory(index, {
+                            status: 'complete', completedAt: Date.now(),
+                            idbKey, savedLocally: true, blobId: idbKey,
+                            size: formatBytes(downloaded)
+                        });
+                        renderDownloads();
+                        console.log('Stream fetched and saved to IndexedDB:', idbKey, formatBytes(downloaded));
+                    } catch (saveErr) {
+                        console.warn('Could not save to IndexedDB:', saveErr);
+                    }
+                } catch (streamErr) {
+                    if (streamErr.message === 'STREAM_IS_HTML') {
+                        loadingEl.classList.add('hidden');
+                        errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                            <div style="font-weight:600;margin-bottom:4px">Source returned a web page, not video</div>
+                            <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+                                This TorBox source redirected to a download page. Try a different source, or tap Download again and pick a Torrentio source.
+                            </div>
+                            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                                <button class="btn btn-sm btn-primary" onclick="closePlayer();retryDownload(${index})">Try Again</button>
+                                <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                            </div>`;
+                        errorEl.classList.remove('hidden');
+                        return;
+                    }
+                    if (streamErr.message === 'STREAM_TOO_SMALL') {
+                        loadingEl.classList.add('hidden');
+                        errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                            <div style="font-weight:600;margin-bottom:4px">Download too small — not a real video</div>
+                            <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Try a different source.</div>
+                            <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>`;
+                        errorEl.classList.remove('hidden');
+                        return;
+                    }
+                    // Network error — fall through to try setting src directly as last resort
+                    console.warn('Stream fetch failed, trying direct URL:', streamErr.message);
+                }
+            }
 
             loadingEl.classList.add('hidden');
 
@@ -2901,7 +3120,6 @@
                         Format: ${d.format || '?'} | Source: ${result.source}${result.size ? ' | Size: ' + formatBytes(result.size) : ''}
                     </div>
                     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                        ${isStream ? `<button class="btn btn-sm btn-primary" onclick="closePlayer();window.open('${esc(playUrl)}','_blank')">Open in Browser</button>` : ''}
                         <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
                     </div>`;
                 errorEl.classList.remove('hidden');
