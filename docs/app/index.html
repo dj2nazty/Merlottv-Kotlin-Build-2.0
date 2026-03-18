@@ -470,7 +470,7 @@
                 <div style="text-align:center;margin-top:18px">
                     <a href="#" style="font-size:11px;color:var(--muted)" onclick="event.preventDefault();localStorage.removeItem('merlot_auth');location.reload()">Having trouble? Tap to reset &amp; retry</a>
                 </div>
-                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.3</div>
+                <div style="text-align:center;margin-top:8px;font-size:10px;color:var(--border)">v4.4</div>
             </form>
         </div>
 
@@ -1848,6 +1848,15 @@
         return 'MP4';
     }
 
+    // Check if codec is Safari-compatible (x265/HEVC won't play even in MP4 container)
+    function detectCodecWarning(title) {
+        const text = (title || '').toLowerCase();
+        if (text.includes('x265') || text.includes('hevc') || text.includes('h.265') || text.includes('h265')) {
+            return 'x265';
+        }
+        return null;
+    }
+
     // ─── TorBox API: Get real direct download URLs ───
     async function torboxGetDirectUrl(stremioUrl) {
         // TorBox Stremio addon URLs look like:
@@ -1966,10 +1975,13 @@
                         }
                     }
 
+                    const codecWarn = detectCodecWarning(title + ' ' + name + ' ' + filename);
+
                     results.push({
                         url: finalUrl, title: title || name || finalUrl.split('/').pop(),
                         name, quality, size, sizeBytes, format, addon: addon.name,
                         isTorbox: addon.name.toLowerCase().includes('torbox'),
+                        codecWarn, // 'x265' if HEVC detected
                         rawStream: s // keep raw data for debugging
                     });
                 });
@@ -2038,12 +2050,13 @@
         });
         await Promise.all(sizeProbes);
 
-        // Sort: MP4 first, then by quality, then prefer TorBox, then by size (bigger = better quality)
+        // Sort: playable MP4 x264 first, then MP4 x265, then MKV, then by quality, then by size
         const qOrder = { '4K': 0, '1080p': 1, '720p': 2, '480p': 3, 'SD': 4 };
         results.sort((a, b) => {
-            const fa = a.format === 'MP4' ? 0 : 1;
-            const fb = b.format === 'MP4' ? 0 : 1;
-            if (fa !== fb) return fa - fb;
+            // Playable (MP4 + no x265) first
+            const pa = (a.format === 'MP4' && !a.codecWarn) ? 0 : (a.format === 'MP4' ? 1 : 2);
+            const pb = (b.format === 'MP4' && !b.codecWarn) ? 0 : (b.format === 'MP4' ? 1 : 2);
+            if (pa !== pb) return pa - pb;
             const qa = qOrder[a.quality] ?? 5;
             const qb = qOrder[b.quality] ?? 5;
             if (qa !== qb) return qa - qb;
@@ -2260,6 +2273,7 @@
                     <div class="dl-item-meta" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
                         <span class="stream-quality ${qualityClass(d.quality)}" style="display:inline-block">${d.quality || ''}</span>
                         ${d.format ? formatBadge(d.format) : ''}
+                        ${d.codecWarn ? '<span style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(255,71,87,0.15);color:var(--danger);font-weight:700">x265 &#10005;</span>' : ''}
                         ${d.size ? '<span>' + d.size + '</span>' : ''}
                         <span style="color:${statusColor}">${statusLabel}</span>
                     </div>
@@ -2285,21 +2299,28 @@
     }
 
     function renderStreamList(streams, title) {
-        const mp4Count = streams.filter(s => s.format === 'MP4').length;
+        const playableCount = streams.filter(s => s.format === 'MP4' && !s.codecWarn).length;
         let html = `<h3 style="margin-bottom:4px">Download</h3>
             <p style="color:var(--muted);font-size:12px;margin-bottom:6px">${esc(title)}</p>
             <p style="color:var(--muted);font-size:11px;margin-bottom:14px">
-                <span style="color:var(--success)">MP4</span> = plays offline in app &nbsp;|&nbsp;
-                <span style="color:var(--warn)">MKV</span> = may need external player
+                <span style="color:var(--success)">&#9989; MP4 x264</span> = plays in app &nbsp;|&nbsp;
+                <span style="color:var(--danger)">&#9888; x265/HEVC</span> = won't play in Safari &nbsp;|&nbsp;
+                <span style="color:var(--warn)">MKV</span> = needs external player
             </p>
+            ${playableCount === 0 ? '<div style="background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.3);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--danger)">&#9888; No Safari-playable sources found. Look for x264/H.264 MP4 files.</div>' : ''}
             <div class="stream-list">`;
         streams.forEach((s, i) => {
             const sizeDisplay = s.size || '<span style="color:var(--muted);font-style:italic">size unknown</span>';
-            html += `<div class="stream-item" onclick="selectStream(this,${i})">
+            const isPlayable = s.format === 'MP4' && !s.codecWarn;
+            const codecBadge = s.codecWarn
+                ? '<span style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(255,71,87,0.15);color:var(--danger);font-weight:700">x265 &#10005;</span>'
+                : (s.format === 'MP4' ? '<span style="font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(0,214,143,0.15);color:var(--success);font-weight:700">x264 &#10003;</span>' : '');
+            html += `<div class="stream-item${isPlayable ? '' : ' stream-warn'}" style="${!isPlayable ? 'opacity:0.6;' : 'border-left:3px solid var(--success);'}" onclick="selectStream(this,${i})">
                 <div class="stream-info">
                     <div class="stream-title">${esc(s.title)}</div>
                     <div class="stream-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px">
                         ${formatBadge(s.format)}
+                        ${codecBadge}
                         <span>${esc(s.addon)}</span>
                         <strong style="color:var(--text)">${sizeDisplay}</strong>
                     </div>
@@ -2357,6 +2378,8 @@
             quality: stream.quality,
             size: stream.size || '',
             format: stream.format || 'MP4',
+            codecWarn: stream.codecWarn || null,
+            isTorbox: stream.isTorbox || false,
             poster: meta.poster || '',
             date: new Date().toLocaleDateString(),
             url: stream.url,
@@ -2742,20 +2765,62 @@
     async function getPlayableUrl(d) {
         // 1. In-memory blob (current session downloads)
         if (d.blobId && window._dlBlobs && window._dlBlobs[d.blobId]) {
-            return window._dlBlobs[d.blobId];
+            console.log('Playing from in-memory blob:', d.blobId);
+            return { url: window._dlBlobs[d.blobId], source: 'memory' };
         }
         // 2. IndexedDB (persisted across sessions — works offline!)
         if (d.idbKey) {
             const record = await getVideoBlob(d.idbKey);
             if (record && record.blob) {
+                // Validate the blob isn't HTML
+                const slice = record.blob.slice(0, 50);
+                const text = await slice.text();
+                if (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<HTML')) {
+                    console.error('Stored blob is HTML, not video! Deleting bad entry...');
+                    await deleteVideoBlob(d.idbKey);
+                    // Clear the saved flags so we don't try again
+                    d.idbKey = null;
+                    d.savedLocally = false;
+                    d.status = 'failed';
+                    d.error = 'Downloaded file was a web page, not a video';
+                    saveDownloadHistory();
+                    return { url: null, source: 'bad_blob', error: 'The downloaded file was a web page, not a video. This source needs to be re-downloaded.' };
+                }
+                // Check if blob is too small to be a real video (< 1MB)
+                if (record.blob.size < 1 * 1048576) {
+                    console.error('Stored blob too small:', formatBytes(record.blob.size));
+                    await deleteVideoBlob(d.idbKey);
+                    d.idbKey = null;
+                    d.savedLocally = false;
+                    d.status = 'failed';
+                    d.error = 'Downloaded file too small (' + formatBytes(record.blob.size) + ')';
+                    saveDownloadHistory();
+                    return { url: null, source: 'bad_blob', error: 'Downloaded file was only ' + formatBytes(record.blob.size) + ' — not a real video. Try a different source.' };
+                }
+                console.log('Playing from IndexedDB:', d.idbKey, formatBytes(record.blob.size));
                 const url = URL.createObjectURL(record.blob);
                 if (!window._dlBlobs) window._dlBlobs = {};
                 window._dlBlobs[d.idbKey] = url;
-                return url;
+                return { url, source: 'indexeddb', size: record.blob.size };
             }
         }
         // 3. Fall back to stream URL (needs internet)
-        return d.url || null;
+        if (d.url) {
+            let streamUrl = d.url;
+            // For TorBox URLs, try to resolve the direct URL first
+            if (streamUrl.includes('torbox.app') || d.isTorbox) {
+                console.log('Resolving TorBox URL for playback...');
+                try {
+                    const direct = await torboxGetDirectUrl(streamUrl);
+                    if (direct && direct.url) {
+                        console.log('TorBox resolved for playback:', direct.url);
+                        streamUrl = direct.url;
+                    }
+                } catch (_) {}
+            }
+            return { url: streamUrl, source: 'stream' };
+        }
+        return { url: null, source: 'none' };
     }
 
     async function playVideo(index) {
@@ -2776,24 +2841,66 @@
         playerEl.classList.remove('hidden');
 
         try {
-            const playUrl = await getPlayableUrl(d);
-            if (!playUrl) throw new Error('No video available');
+            const result = await getPlayableUrl(d);
+
+            // Check for bad blob (HTML or too small)
+            if (result.source === 'bad_blob') {
+                loadingEl.classList.add('hidden');
+                errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                    <div style="font-weight:600;margin-bottom:6px">Bad Download</div>
+                    <div style="font-size:13px;color:var(--muted)">${esc(result.error)}</div>
+                    <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+                        <button class="btn btn-sm btn-primary" onclick="closePlayer();retryDownload(${index})">Re-download</button>
+                        <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                    </div>`;
+                errorEl.classList.remove('hidden');
+                renderDownloads();
+                return;
+            }
+
+            if (!result.url) throw new Error('No video available — try re-downloading');
+
+            const playUrl = result.url;
+            const isStream = result.source === 'stream';
 
             loadingEl.classList.add('hidden');
-            videoEl.src = playUrl;
 
-            // Set up error handler
+            // Set up error handler with helpful info
             videoEl.onerror = () => {
                 const mediaErr = videoEl.error;
-                let msg = 'Cannot play this video format in the browser.';
+                let msg = 'Cannot play this video.';
+                let detail = '';
                 if (mediaErr) {
-                    if (mediaErr.code === 4) msg = 'This video format is not supported by your browser. Try downloading an MP4 version.';
-                    else if (mediaErr.code === 2) msg = 'Network error — check your connection.';
-                    else if (mediaErr.code === 3) msg = 'Video decoding failed — file may be corrupt.';
+                    if (mediaErr.code === 4) {
+                        msg = 'Unsupported video format';
+                        detail = d.format === 'MKV'
+                            ? 'MKV files cannot play in the browser. Download an MP4 version instead.'
+                            : 'This file may be encoded with x265/HEVC which Safari cannot decode, or it may not be a real video file. Try a different source with x264/H.264.';
+                    }
+                    else if (mediaErr.code === 2) {
+                        msg = 'Network error';
+                        detail = isStream ? 'The stream URL may have expired. Try re-downloading.' : 'Check your connection.';
+                    }
+                    else if (mediaErr.code === 3) {
+                        msg = 'Video decoding failed';
+                        detail = 'The file may be corrupt or use an unsupported codec (x265). Try a different source.';
+                    }
                 }
-                errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>${msg}<br><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
+                console.error('Video playback error:', mediaErr?.code, mediaErr?.message, 'source:', result.source, 'url:', playUrl.substring(0, 100));
+                errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                    <div style="font-weight:600;margin-bottom:4px">${msg}</div>
+                    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${detail}</div>
+                    <div style="font-size:10px;color:var(--border);margin-bottom:12px">
+                        Format: ${d.format || '?'} | Source: ${result.source}${result.size ? ' | Size: ' + formatBytes(result.size) : ''}
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                        ${isStream ? `<button class="btn btn-sm btn-primary" onclick="closePlayer();window.open('${esc(playUrl)}','_blank')">Open in Browser</button>` : ''}
+                        <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                    </div>`;
                 errorEl.classList.remove('hidden');
             };
+
+            videoEl.src = playUrl;
 
             // Try to go fullscreen on iOS
             if (videoEl.webkitEnterFullscreen) {
@@ -2805,7 +2912,9 @@
             }
         } catch (e) {
             loadingEl.classList.add('hidden');
-            errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>${esc(e.message)}<br><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
+            errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                <div style="font-weight:600;margin-bottom:4px">${esc(e.message)}</div>
+                <button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
             errorEl.classList.remove('hidden');
         }
     }
@@ -2834,9 +2943,20 @@
         let playUrl = null;
 
         if (match) {
-            playUrl = await getPlayableUrl(match);
+            const result = await getPlayableUrl(match);
+            if (result && result.url) playUrl = result.url;
         }
-        if (!playUrl) playUrl = item.url; // fall back to streaming
+        if (!playUrl) {
+            // Fall back to streaming — resolve TorBox URLs if needed
+            let streamUrl = item.url;
+            if (streamUrl && streamUrl.includes('torbox.app')) {
+                try {
+                    const direct = await torboxGetDirectUrl(streamUrl);
+                    if (direct && direct.url) streamUrl = direct.url;
+                } catch (_) {}
+            }
+            playUrl = streamUrl;
+        }
 
         loadingEl.classList.add('hidden');
         videoEl.src = playUrl;
@@ -2850,7 +2970,12 @@
         };
 
         videoEl.onerror = () => {
-            errorEl.innerHTML = `<div>Cannot play this video.</div><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
+            const mediaErr = videoEl.error;
+            let msg = 'Cannot play this video.';
+            if (mediaErr && mediaErr.code === 4) msg = 'Unsupported format — try an MP4 with x264/H.264 codec.';
+            else if (mediaErr && mediaErr.code === 2) msg = 'Network error — stream may have expired.';
+            else if (mediaErr && mediaErr.code === 3) msg = 'Decoding failed — file may use x265/HEVC.';
+            errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div><div>${msg}</div><button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
             errorEl.classList.remove('hidden');
         };
 
@@ -2860,10 +2985,14 @@
     async function saveToFiles(index) {
         const d = downloadHistory[index];
         if (!d) return;
-        const blobUrl = await getPlayableUrl(d);
-        if (!blobUrl) { alert('Video not in storage. Re-download while on WiFi.'); return; }
+        const result = await getPlayableUrl(d);
+        if (!result || !result.url || result.source === 'bad_blob') {
+            alert(result?.error || 'Video not in storage. Re-download while on WiFi.');
+            renderDownloads();
+            return;
+        }
         const a = document.createElement('a');
-        a.href = blobUrl;
+        a.href = result.url;
         a.download = d.filename || `${d.title || 'video'}.mp4`;
         document.body.appendChild(a);
         a.click();
