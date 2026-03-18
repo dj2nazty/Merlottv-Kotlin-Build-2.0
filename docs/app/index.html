@@ -649,6 +649,13 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- About -->
+                <div class="card" style="text-align:center;padding:16px;color:var(--muted)">
+                    <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px">MerlotTV Web</div>
+                    <div style="font-size:12px" id="app-version-display">v4.8</div>
+                    <div style="font-size:11px;margin-top:4px" id="sw-version-display">Service Worker: checking...</div>
+                </div>
             </div>
         </div>
 
@@ -753,6 +760,12 @@
     </div>
 
     <script>
+    // ═══════════════════════════════════════════
+    //  App Version (visible in Settings → About)
+    // ═══════════════════════════════════════════
+    const APP_VERSION = '4.8';
+    console.log('MerlotTV Web v' + APP_VERSION);
+
     // ═══════════════════════════════════════════
     //  Firebase Config
     // ═══════════════════════════════════════════
@@ -3528,7 +3541,40 @@
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js').then(reg => {
             console.log('SW registered:', reg.scope);
+            // Force check for updates immediately
+            reg.update().catch(() => {});
+            // If a new SW is waiting, activate it right away
+            if (reg.waiting) {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+            reg.addEventListener('updatefound', () => {
+                const newSW = reg.installing;
+                if (newSW) {
+                    newSW.addEventListener('statechange', () => {
+                        if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New version available — activate it
+                            newSW.postMessage({ type: 'SKIP_WAITING' });
+                            console.log('New SW version installed — refreshing...');
+                            // Auto-reload so the user gets the latest version
+                            setTimeout(() => window.location.reload(), 500);
+                        }
+                    });
+                }
+            });
         }).catch(err => console.warn('SW registration failed:', err));
+        // When the new SW takes over, reload to get fresh content
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('SW controller changed — page will use new version');
+        });
+        // Display SW cache version in Settings
+        setTimeout(() => {
+            caches.keys().then(keys => {
+                const swKey = keys.find(k => k.startsWith('merlottv-'));
+                const swEl = document.getElementById('sw-version-display');
+                if (swEl && swKey) swEl.textContent = 'Service Worker: ' + swKey;
+                else if (swEl) swEl.textContent = 'Service Worker: not cached yet';
+            }).catch(() => {});
+        }, 1500);
     }
 
     // ═══════════════════════════════════════════

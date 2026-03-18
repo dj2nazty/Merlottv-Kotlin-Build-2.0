@@ -10,10 +10,26 @@ const CACHE_URLS = [
   './favicon-16.png'
 ];
 
-// Install: cache the app shell immediately
+// Listen for skip-waiting message from the page
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+// Install: cache the app shell immediately (forces fresh fetch, bypasses old cache)
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(CACHE_URLS))
+    caches.open(CACHE_NAME).then(cache => {
+      // Force network fetch for all app shell files (don't use stale cache)
+      return Promise.all(
+        CACHE_URLS.map(url =>
+          fetch(url, { cache: 'no-cache' })
+            .then(resp => cache.put(url, resp))
+            .catch(() => cache.add(url)) // fallback if no-cache fails
+        )
+      );
+    })
   );
   self.skipWaiting();
 });
