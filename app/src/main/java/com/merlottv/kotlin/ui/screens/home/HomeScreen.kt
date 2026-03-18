@@ -633,9 +633,17 @@ private fun CatalogRowSection(
                         .data(posterUrl)
                         .size(130, 195)
                         .build()
-                    ImageLoader(context).enqueue(request)
+                    ImageLoader.Builder(context).build().enqueue(request)
                 }
             }
+        }
+    }
+
+    // Limit focus requesters map size to prevent memory leak
+    LaunchedEffect(Unit) {
+        if (focusRequesters.size > 200) {
+            val keysToRemove = focusRequesters.keys.take(focusRequesters.size - 100)
+            keysToRemove.forEach { focusRequesters.remove(it) }
         }
     }
 

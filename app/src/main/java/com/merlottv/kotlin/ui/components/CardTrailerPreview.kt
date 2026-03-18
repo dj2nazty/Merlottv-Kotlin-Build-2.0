@@ -121,7 +121,7 @@ fun CardTrailerPreview(
     // Show inline trailer player when resolved
     if (shouldShowTrailer && trailerResult != null && trailerAlpha > 0f) {
         InlineTrailerPlayer(
-            trailerResult = trailerResult!!,
+            trailerResult = trailerResult ?: return,
             modifier = modifier
                 .fillMaxSize()
                 .alpha(trailerAlpha)

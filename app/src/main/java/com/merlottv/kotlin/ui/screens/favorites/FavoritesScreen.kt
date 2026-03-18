@@ -385,7 +385,7 @@ fun FavoritesScreen(
 
     // ═══ Item context menu (Menu button on poster) ═══
     if (uiState.showItemMenu && uiState.itemMenuTarget != null) {
-        val target = uiState.itemMenuTarget!!
+        val target = uiState.itemMenuTarget ?: return
         val isWatched = uiState.watchedVodIds.contains(target.id)
         val currentTabIsCustom = uiState.customLists.containsKey(uiState.selectedTab)
 

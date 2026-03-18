@@ -623,8 +623,9 @@ fun PlayerScreen(
                         player.seekTo(savedPos)
                         player.playWhenReady = true
                         // Re-apply subtitle if active
-                        if (subtitlesEnabled && activeSubtitle != null) {
-                            applySubtitle(player, activeSubtitle!!, newUrl)
+                        val sub = activeSubtitle
+                        if (subtitlesEnabled && sub != null) {
+                            applySubtitle(player, sub, newUrl)
                         }
                     }
                     showSubtitleMenu = false
@@ -740,7 +741,7 @@ fun PlayerScreen(
         // Subtitle size indicator at bottom when active
         if (subtitlesEnabled && activeSubtitle != null && showControls) {
             Text(
-                text = "CC: ${activeSubtitle!!.label} (${(subtitleSize * 100).toInt()}%)",
+                text = "CC: ${activeSubtitle?.label ?: "CC"} (${(subtitleSize * 100).toInt()}%)",
                 color = MerlotColors.Accent.copy(alpha = 0.7f),
                 fontSize = 10.sp,
                 modifier = Modifier

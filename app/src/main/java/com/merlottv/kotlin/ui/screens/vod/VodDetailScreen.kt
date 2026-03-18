@@ -104,7 +104,7 @@ fun VodDetailScreen(
             val episode = uiState.selectedEpisode
             val contentId = if (episode != null) episode.id else (meta?.id ?: id)
             onPlay(
-                uiState.selectedStreamUrl!!,
+                uiState.selectedStreamUrl ?: return@LaunchedEffect,
                 uiState.selectedStreamTitle ?: "",
                 contentId,
                 meta?.poster ?: "",
@@ -142,7 +142,7 @@ fun VodDetailScreen(
                 )
             }
             uiState.meta != null -> {
-                val meta = uiState.meta!!
+                val meta = uiState.meta ?: return
                 val isSeries = meta.videos.isNotEmpty() && uiState.seasons.isNotEmpty()
 
                 Column(

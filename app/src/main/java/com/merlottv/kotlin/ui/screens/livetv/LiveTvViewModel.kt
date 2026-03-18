@@ -208,7 +208,7 @@ class LiveTvViewModel @Inject constructor(
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     val gentlePlayer: ExoPlayer = run {
         val userBufferMs = try {
-            runBlocking { settingsDataStore.bufferDurationMs.first() }
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { settingsDataStore.bufferDurationMs.first() }
         } catch (e: Exception) { 1000 }
 
         val gentleLoadControl = DefaultLoadControl.Builder()
@@ -465,7 +465,7 @@ class LiveTvViewModel @Inject constructor(
     val player: ExoPlayer = run {
         // Read user's buffer preference (synchronous — only runs once at ViewModel creation)
         val userBufferMs = try {
-            runBlocking { settingsDataStore.bufferDurationMs.first() }
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { settingsDataStore.bufferDurationMs.first() }
         } catch (e: Exception) {
             Log.e("LiveTvVM", "Failed to read buffer setting, using default", e)
             1000
@@ -1539,7 +1539,7 @@ class LiveTvViewModel @Inject constructor(
                 it.group.contains(query, ignoreCase = true)
             }
         } else if (hasGroup) {
-            val group = state.selectedGroup!!
+            val group = state.selectedGroup ?: ""
             if (group == "★ Favorites") {
                 val favIds = state.favoriteIds
                 filtered = filtered.filter { favIds.contains(it.id) }
@@ -1618,7 +1618,7 @@ class LiveTvViewModel @Inject constructor(
                 Log.d("LiveTvVM", "Pre-warm DNS: ${channel.name} → $host resolved")
 
                 // Step 2+3: Open connection and fetch first bytes
-                val connection = url.openConnection() as java.net.HttpURLConnection
+                val connection = (url.openConnection() as? java.net.HttpURLConnection) ?: continue
                 connection.apply {
                     connectTimeout = 5_000
                     readTimeout = 5_000

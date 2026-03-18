@@ -143,7 +143,8 @@ class WeatherRepositoryImpl @Inject constructor(
                     val dayOfWeek = try {
                         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                         val date = sdf.parse(dateStr)
-                        val cal = Calendar.getInstance().apply { time = date!! }
+                        val d = date ?: throw Exception("parse failed")
+                        val cal = Calendar.getInstance().apply { time = d }
                         val dayNames = arrayOf("", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
                         dayNames[cal.get(Calendar.DAY_OF_WEEK)]
                     } catch (_: Exception) { "?" }

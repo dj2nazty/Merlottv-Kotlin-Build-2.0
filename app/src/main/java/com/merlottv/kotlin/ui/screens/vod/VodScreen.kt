@@ -420,7 +420,7 @@ private fun CatalogSectionRow(
                             .data(posterUrl)
                             .size(130, 195)
                             .build()
-                        ImageLoader(context).enqueue(request)
+                        ImageLoader.Builder(context).build().enqueue(request)
                     }
                 }
             }

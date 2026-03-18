@@ -112,8 +112,8 @@ fun WeatherScreen(
             RadarMapComposable(
                 frames = uiState.radarFrames,
                 currentIndex = uiState.radarAnimIndex,
-                lat = uiState.currentWeather!!.lat,
-                lon = uiState.currentWeather!!.lon,
+                lat = uiState.currentWeather?.lat ?: 0.0,
+                lon = uiState.currentWeather?.lon ?: 0.0,
                 isFullscreen = true,
                 onToggleFullscreen = { viewModel.dismissFullscreenRadar() }
             )
@@ -270,8 +270,8 @@ fun WeatherScreen(
                                 RadarMapComposable(
                                     frames = uiState.radarFrames,
                                     currentIndex = uiState.radarAnimIndex,
-                                    lat = uiState.currentWeather!!.lat,
-                                    lon = uiState.currentWeather!!.lon,
+                                    lat = uiState.currentWeather?.lat ?: 0.0,
+                                    lon = uiState.currentWeather?.lon ?: 0.0,
                                     isFullscreen = false,
                                     onToggleFullscreen = { viewModel.toggleFullscreenRadar() }
                                 )
@@ -1171,7 +1171,7 @@ private fun AlertDetailCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = alert.instruction!!.trim(),
+                        text = (alert.instruction ?: "").trim(),
                         color = MerlotColors.TextPrimary,
                         fontSize = 12.sp,
                         lineHeight = 18.sp

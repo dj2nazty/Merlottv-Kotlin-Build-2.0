@@ -1460,7 +1460,7 @@ private fun ChannelListView(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val ch = uiState.selectedChannel!!
+                val ch = uiState.selectedChannel ?: return
                 if (ch.logoUrl.isNotEmpty()) {
                     AsyncImage(
                         model = ch.logoUrl,
