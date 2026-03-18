@@ -754,6 +754,47 @@
     let currentFavTab = 'vod';
 
     // ═══════════════════════════════════════════
+    //  VLC Integration — stream any format directly in VLC app
+    // ═══════════════════════════════════════════
+    function openInVlc(url) {
+        const vlcUrl = 'vlc-x-callback://x-callback-url/stream?url=' + encodeURIComponent(url);
+        debugLog('Opening in VLC: ' + url.substring(0, 80));
+        window.location.href = vlcUrl;
+    }
+
+    async function streamInVlc(streamIndex) {
+        const stream = window._resolvedStreams && window._resolvedStreams[streamIndex];
+        if (!stream || !stream.url) return;
+        let url = stream.url;
+        // Resolve TorBox URLs to direct CDN link first
+        if (url.includes('torbox.app') || stream.isTorbox) {
+            try {
+                const direct = await torboxGetDirectUrl(url);
+                if (direct && direct.url) url = direct.url;
+            } catch (_) {}
+        }
+        openInVlc(url);
+    }
+
+    async function vlcFromHistory(historyIndex) {
+        const d = downloadHistory[historyIndex];
+        if (!d) return;
+        let url = d.url || d.streamUrl;
+        if (!url) {
+            debugLog('vlcFromHistory: no URL for item ' + historyIndex);
+            return;
+        }
+        // Resolve TorBox URLs to direct CDN link
+        if (url.includes('torbox.app') || d.isTorbox) {
+            try {
+                const direct = await torboxGetDirectUrl(url);
+                if (direct && direct.url) url = direct.url;
+            } catch (_) {}
+        }
+        openInVlc(url);
+    }
+
+    // ═══════════════════════════════════════════
     //  Firestore REST helpers
     // ═══════════════════════════════════════════
     function toFsValue(v) {
@@ -2448,8 +2489,9 @@
                     </div>
                     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
                         <button style="padding:5px 12px;border-radius:6px;border:none;background:var(--accent);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="playVideo(${i})">&#9654; Play${hasLocal ? '' : ' (Stream)'}</button>
+                        <button style="padding:5px 10px;border-radius:6px;border:none;background:rgba(255,140,0,0.15);color:#ff8c00;font-size:12px;font-weight:600;cursor:pointer" onclick="vlcFromHistory(${i})">&#9654; VLC</button>
                         <button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="addToPlaylist(${i})">+ Playlist</button>
-                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveToFiles(${i})">Save</button>` : ''}
+                        ${hasLocal ? `<button style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;cursor:pointer" onclick="saveToFiles(${i})">&#x2B07; Save</button>` : ''}
                         ${isFail ? `<button style="padding:5px 12px;border-radius:6px;border:none;background:var(--warn);color:#000;font-size:12px;font-weight:600;cursor:pointer" onclick="retryDownload(${i})">Retry</button>` : ''}
                     </div>
                 </div>
@@ -2472,9 +2514,10 @@
         let html = `<h3 style="margin-bottom:4px">Download</h3>
             <p style="color:var(--muted);font-size:12px;margin-bottom:6px">${esc(title)}</p>
             <p style="color:var(--muted);font-size:11px;margin-bottom:14px">
-                <span style="color:var(--success)">&#9989; MP4 x264</span> = plays in app &nbsp;|&nbsp;
-                <span style="color:var(--danger)">&#9888; x265/HEVC</span> = won't play in Safari &nbsp;|&nbsp;
-                <span style="color:var(--warn)">MKV</span> = needs external player
+                <span style="color:#ff8c00;font-weight:600">▶ VLC</span> = stream live in VLC app &nbsp;|&nbsp;
+                <span style="font-weight:600">⬇</span> = download to Files app<br>
+                <span style="color:var(--success)">&#9989; MP4 x264</span> = also plays in Safari &nbsp;|&nbsp;
+                <span style="color:var(--danger)">&#9888; x265/MKV</span> = use VLC
             </p>
             ${playableCount === 0 ? '<div style="background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.3);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--danger)">&#9888; No Safari-playable sources found. Look for x264/H.264 MP4 files.</div>' : ''}
             <div class="stream-list">`;
@@ -2495,7 +2538,8 @@
                     </div>
                 </div>
                 <span class="stream-quality ${qualityClass(s.quality)}">${s.quality}</span>
-                <button class="stream-dl-btn" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
+                <button class="stream-dl-btn" title="Stream in VLC" onclick="event.stopPropagation();streamInVlc(${i})" style="font-size:10px;background:rgba(255,140,0,0.15);color:#ff8c00;padding:4px 6px">▶ VLC</button>
+                <button class="stream-dl-btn" title="Download to Files" onclick="event.stopPropagation();startDownload(${i})">&#x2B07;</button>
             </div>`;
         });
         html += `</div>
@@ -2538,7 +2582,8 @@
         if (!stream) return;
 
         const meta = window._dlMeta || {};
-        const filename = `${meta.title || 'video'}${meta.year ? ' (' + meta.year + ')' : ''} [${stream.quality}].mp4`;
+        const ext = (stream.format === 'MKV') ? 'mkv' : (stream.format === 'WEBM') ? 'webm' : 'mp4';
+        const filename = `${meta.title || 'video'}${meta.year ? ' (' + meta.year + ')' : ''} [${stream.quality}].${ext}`;
 
         // IMMEDIATELY save to download history so it never disappears
         addToDownloadHistory({
@@ -2743,8 +2788,9 @@
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:8px">
                     ${formatBytes(downloaded)} saved to device. Ready for offline playback!
                 </div>
-                <div style="text-align:center;margin-top:10px">
+                <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="playVideo(0)">&#9654; Play Now</button>
+                    <button class="btn btn-sm" style="background:rgba(255,140,0,0.15);color:#ff8c00;border:1px solid rgba(255,140,0,0.3);font-weight:600" onclick="vlcFromHistory(0)">&#9654; Open in VLC</button>
                 </div>
             </div>`;
 
@@ -2771,7 +2817,8 @@
                     <div style="text-align:center;color:var(--danger);font-weight:600">Download failed</div>
                     <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">${esc((e&&e.message)||String(e||'Error'))}</div>
                     ${isCors ? `<div style="font-size:11px;color:var(--warn);margin-top:6px;text-align:center">This source blocks direct browser downloads. Try a different source.</div>` : ''}
-                    <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center">
+                    <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                        <button class="btn btn-sm" style="background:rgba(255,140,0,0.15);color:#ff8c00;border:1px solid rgba(255,140,0,0.3);font-weight:600" onclick="openInVlc('${esc(stream.url)}')">&#9654; Stream in VLC</button>
                         <button class="btn btn-sm btn-secondary" onclick="openDownloadPage('${esc(stream.url)}')">Open Link</button>
                     </div>
                 </div>`;
@@ -3139,18 +3186,18 @@
                     debugLog('  ✘ Stream fetch error: ' + errMsg);
                     if (errMsg === 'UNSUPPORTED_FORMAT_MKV') {
                         loadingEl.classList.add('hidden');
-                        errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
-                            <div style="font-weight:600;color:#ff6b6b;margin-bottom:4px">Unsupported video format</div>
-                            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
-                                This file is <strong>MKV (Matroska)</strong> which Safari cannot play.<br>
-                                Go back and pick a source with <strong>MP4</strong> format, or look for <strong>x264/H.264</strong> codec.
-                            </div>
-                            <div style="font-size:11px;color:var(--warn);margin-bottom:12px">
-                                Tip: In the stream list, avoid sources labeled "x265" or "HEVC" — they won't play in Safari either.
+                        const streamUrl = d.url || currentPlayerUrl || '';
+                        errorEl.innerHTML = `<div style="font-size:28px;margin-bottom:8px">🎬</div>
+                            <div style="font-weight:600;color:#ff8c00;margin-bottom:4px">MKV Video Detected</div>
+                            <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+                                This video is MKV format. Safari can't play it directly, but <strong>VLC</strong> can!
                             </div>
                             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                                ${d.url ? `<button class="btn btn-sm btn-primary" onclick="window.open('${esc(d.url)}','_blank')">Open in Browser</button>` : ''}
+                                ${streamUrl ? `<button class="btn btn-sm btn-primary" onclick="openInVlc('${esc(streamUrl)}')" style="background:#ff8c00">▶ Stream in VLC</button>` : ''}
                                 <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                            </div>
+                            <div style="font-size:10px;color:var(--muted);margin-top:10px">
+                                Don't have VLC? <a href="https://apps.apple.com/app/vlc-media-player/id650377962" target="_blank" style="color:var(--accent)">Get it free on App Store</a>
                             </div>`;
                         errorEl.classList.remove('hidden');
                         return;
@@ -3219,14 +3266,20 @@
                     }
                 }
                 console.error('Video playback error:', mediaErr?.code, mediaErr?.message, 'source:', result.source, 'url:', playUrl.substring(0, 100));
-                errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                const vlcStreamUrl = d.url || currentPlayerUrl || '';
+                errorEl.innerHTML = `<div style="font-size:28px;margin-bottom:8px">🎬</div>
                     <div style="font-weight:600;margin-bottom:4px">${msg}</div>
                     <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${detail}</div>
+                    ${vlcStreamUrl ? `<div style="font-size:12px;color:#ff8c00;margin-bottom:8px;font-weight:600">VLC can play this!</div>` : ''}
                     <div style="font-size:10px;color:var(--border);margin-bottom:12px">
                         Format: ${d.format || '?'} | Source: ${result.source}${result.size ? ' | Size: ' + formatBytes(result.size) : ''}
                     </div>
                     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                        ${vlcStreamUrl ? `<button class="btn btn-sm btn-primary" onclick="openInVlc('${esc(vlcStreamUrl)}')" style="background:#ff8c00">▶ Stream in VLC</button>` : ''}
                         <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                    </div>
+                    <div style="font-size:10px;color:var(--muted);margin-top:8px">
+                        <a href="https://apps.apple.com/app/vlc-media-player/id650377962" target="_blank" style="color:var(--accent)">Get VLC free</a>
                     </div>`;
                 errorEl.classList.remove('hidden');
             };
