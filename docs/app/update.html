@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MerlotTV Update</title>
+<style>
+body { background: #0D0D0D; color: #E8E8F0; font-family: -apple-system, sans-serif; padding: 40px 20px; text-align: center; }
+h2 { color: #00E5FF; margin-bottom: 20px; }
+.status { margin: 16px 0; font-size: 14px; color: #aaa; min-height: 200px; text-align: left; padding: 16px; background: #161620; border-radius: 12px; white-space: pre-wrap; word-break: break-all; overflow-y: auto; }
+button { padding: 14px 32px; border-radius: 10px; border: none; font-size: 16px; font-weight: 700; cursor: pointer; margin: 8px; }
+.btn-update { background: #00E5FF; color: #000; }
+.btn-open { background: #1E1E2A; color: #E8E8F0; border: 1px solid #333; display: none; }
+</style>
+</head>
+<body>
+<h2>MerlotTV Updater</h2>
+<p style="color:#aaa;font-size:14px;margin-bottom:20px">This will force-update the app to the latest version without clearing your data.</p>
+<button class="btn-update" onclick="doUpdate()">🔄 Update Now</button>
+<button class="btn-open" id="btn-open" onclick="window.location.href='./index.html'">✓ Open MerlotTV</button>
+<div class="status" id="status">Ready to update...</div>
+
+<script>
+const log = document.getElementById('status');
+function addLog(msg) { log.textContent += '\n' + msg; log.scrollTop = log.scrollHeight; }
+
+async function doUpdate() {
+    try {
+        addLog('Step 1: Checking current service worker...');
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+            addLog('  Found SW: scope=' + reg.scope);
+            addLog('  Active: ' + (reg.active ? reg.active.scriptURL : 'none'));
+
+            // Unregister the old one completely
+            addLog('\nStep 2: Unregistering old service worker...');
+            const ok = await reg.unregister();
+            addLog('  Unregistered: ' + ok);
+        } else {
+            addLog('  No service worker found.');
+        }
+
+        // Delete ALL old caches
+        addLog('\nStep 3: Clearing old caches...');
+        const keys = await caches.keys();
+        addLog('  Found caches: ' + JSON.stringify(keys));
+        for (const key of keys) {
+            await caches.delete(key);
+            addLog('  Deleted: ' + key);
+        }
+
+        // Now register the new SW fresh
+        addLog('\nStep 4: Registering fresh service worker...');
+        const newReg = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
+        addLog('  Registered! scope=' + newReg.scope);
+
+        // Wait for it to install
+        addLog('\nStep 5: Waiting for new SW to install...');
+        await new Promise((resolve) => {
+            if (newReg.active) {
+                addLog('  SW already active!');
+                resolve();
+                return;
+            }
+            const sw = newReg.installing || newReg.waiting;
+            if (sw) {
+                sw.addEventListener('statechange', () => {
+                    addLog('  SW state: ' + sw.state);
+                    if (sw.state === 'activated') resolve();
+                });
+            } else {
+                resolve();
+            }
+            // Timeout safety
+            setTimeout(resolve, 5000);
+        });
+
+        // Verify new cache
+        addLog('\nStep 6: Verifying new cache...');
+        const newKeys = await caches.keys();
+        addLog('  Caches now: ' + JSON.stringify(newKeys));
+
+        addLog('\n✅ UPDATE COMPLETE!');
+        addLog('Tap "Open MerlotTV" to launch the updated app.');
+        addLog('Check Settings → scroll to bottom → should show v4.8');
+
+        document.getElementById('btn-open').style.display = 'inline-block';
+
+    } catch (e) {
+        addLog('\n❌ Error: ' + e.message);
+        addLog('\nTry closing all MerlotTV tabs/windows and try again.');
+    }
+}
+</script>
+</body>
+</html>
