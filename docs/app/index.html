@@ -1035,7 +1035,7 @@
             if (statusEl) statusEl.textContent = '';
         } catch (e) {
             console.error('Load failed:', e);
-            if (statusEl) statusEl.innerHTML = `<div class="error-msg">Failed to load data: ${esc(e.message)}</div>`;
+            if (statusEl) statusEl.innerHTML = `<div class="error-msg">Failed to load data: ${esc((e&&e.message)||String(e||'Error'))}</div>`;
         }
     }
 
@@ -1087,7 +1087,7 @@
             setTimeout(() => statusEl.textContent = '', 3000);
         } catch (e) {
             console.error('Sync failed:', e);
-            statusEl.innerHTML = `<div class="error-msg">Sync failed: ${esc(e.message)}</div>`;
+            statusEl.innerHTML = `<div class="error-msg">Sync failed: ${esc((e&&e.message)||String(e||'Error'))}</div>`;
         } finally {
             btn.disabled = false;
             btn.innerHTML = '&#x21bb; Sync Now';
@@ -1633,7 +1633,7 @@
                     : '';
             }
         } catch (e) {
-            if (reset) grid.innerHTML = `<div class="browse-empty">Error loading: ${esc(e.message)}</div>`;
+            if (reset) grid.innerHTML = `<div class="browse-empty">Error loading: ${esc((e&&e.message)||String(e||'Error'))}</div>`;
         } finally {
             loading.classList.add('hidden');
         }
@@ -2521,7 +2521,7 @@
             window._dlMeta = { title, year, poster: poster || '' };
             openModal(renderStreamList(streams, title));
         } catch (e) {
-            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
+            openModal(`<h3>Error</h3><div class="error-msg">${esc((e&&e.message)||String(e||'Error'))}</div>
                 <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
         }
     }
@@ -2769,7 +2769,7 @@
                 const isCors = e.message.includes('Failed to fetch') || e.message.includes('NetworkError') || e.message.includes('CORS') || e.message === 'Load failed';
                 activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--danger)">
                     <div style="text-align:center;color:var(--danger);font-weight:600">Download failed</div>
-                    <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">${esc(e.message)}</div>
+                    <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:6px">${esc((e&&e.message)||String(e||'Error'))}</div>
                     ${isCors ? `<div style="font-size:11px;color:var(--warn);margin-top:6px;text-align:center">This source blocks direct browser downloads. Try a different source.</div>` : ''}
                     <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center">
                         <button class="btn btn-sm btn-secondary" onclick="openDownloadPage('${esc(stream.url)}')">Open Link</button>
@@ -2827,7 +2827,7 @@
             window._epShow = { tmdbId, imdbId, title, year, poster: poster || '', seasons };
             renderEpisodePicker(seasons[0].season_number);
         } catch (e) {
-            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
+            openModal(`<h3>Error</h3><div class="error-msg">${esc((e&&e.message)||String(e||'Error'))}</div>
                 <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
         }
     }
@@ -2885,7 +2885,7 @@
             container.innerHTML = html;
         } catch (e) {
             const container = document.getElementById('ep-list-container');
-            if (container) container.innerHTML = `<div class="error-msg">Failed to load: ${esc(e.message)}</div>`;
+            if (container) container.innerHTML = `<div class="error-msg">Failed to load: ${esc((e&&e.message)||String(e||'Error'))}</div>`;
         }
     }
 
@@ -2921,7 +2921,7 @@
             window._resolvedStreams = streams;
             openModal(renderStreamList(streams, fullTitle));
         } catch (e) {
-            openModal(`<h3>Error</h3><div class="error-msg">${esc(e.message)}</div>
+            openModal(`<h3>Error</h3><div class="error-msg">${esc((e&&e.message)||String(e||'Error'))}</div>
                 <button class="btn btn-secondary" style="margin-top:12px" onclick="closeModal()">Close</button>`);
         }
     }
@@ -3063,11 +3063,34 @@
                     let downloaded = 0;
                     const startTime = Date.now();
 
+                    let formatChecked = false;
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
                         chunks.push(value);
                         downloaded += value.length;
+
+                        // Early format detection on first chunk — abort before downloading hundreds of MB
+                        if (!formatChecked && chunks.length === 1 && value.length > 12) {
+                            formatChecked = true;
+                            const magic = new Uint8Array(value.slice(0, 50));
+                            const magicStr = String.fromCharCode(...magic);
+                            const headPreview = magicStr.substring(0, 30).replace(/[^\x20-\x7E]/g, '.');
+                            debugLog('  First bytes: ' + headPreview);
+                            // MKV/Matroska: magic bytes 1A 45 DF A3
+                            if ((magic[0] === 0x1A && magic[1] === 0x45 && magic[2] === 0xDF && magic[3] === 0xA3) || magicStr.includes('matros')) {
+                                debugLog('  ✘ MKV/Matroska detected — aborting download');
+                                reader.cancel();
+                                d.format = 'MKV';
+                                throw new Error('UNSUPPORTED_FORMAT_MKV');
+                            }
+                            // HTML redirect page
+                            if (magicStr.includes('<!DOCTYPE') || magicStr.includes('<html') || magicStr.includes('<HTML')) {
+                                debugLog('  ✘ HTML page detected — aborting download');
+                                reader.cancel();
+                                throw new Error('STREAM_IS_HTML');
+                            }
+                        }
                         const progEl = document.getElementById('vp-stream-progress');
                         if (progEl) {
                             const elapsed = (Date.now() - startTime) / 1000;
@@ -3080,18 +3103,18 @@
 
                     debugLog('  Downloaded: ' + formatBytes(downloaded));
 
-                    // Validate
-                    if (chunks.length > 0) {
-                        const head = new Uint8Array(chunks[0].slice(0, 50));
-                        const headStr = String.fromCharCode(...head);
-                        debugLog('  First bytes: ' + headStr.substring(0, 30).replace(/[^\x20-\x7E]/g, '.'));
-                        if (headStr.includes('<!DOCTYPE') || headStr.includes('<html') || headStr.includes('<HTML')) {
-                            throw new Error('STREAM_IS_HTML');
-                        }
-                    }
                     if (downloaded < 500000) throw new Error('STREAM_TOO_SMALL');
 
-                    const blob = new Blob(chunks, { type: ct || 'video/mp4' });
+                    // Detect MIME from magic bytes (content-type is often generic octet-stream)
+                    let detectedMime = ct || 'video/mp4';
+                    if (chunks.length > 0) {
+                        const magic = new Uint8Array(chunks[0].slice(0, 12));
+                        const magicStr = String.fromCharCode(...magic);
+                        if (magicStr.substring(4, 12).includes('ftyp')) detectedMime = 'video/mp4';
+                        else if (detectedMime === 'application/octet-stream') detectedMime = 'video/mp4';
+                    }
+
+                    const blob = new Blob(chunks, { type: detectedMime });
                     playUrl = URL.createObjectURL(blob);
                     fetchedAsBlob = true;
                     debugLog('  ✓ Blob created: ' + formatBytes(blob.size));
@@ -3112,8 +3135,27 @@
                     } catch (e) { debugLog('  ⚠ IDB save failed: ' + e.message); }
 
                 } catch (fetchErr) {
-                    debugLog('  ✘ Stream fetch error: ' + fetchErr.message);
-                    if (fetchErr.message === 'STREAM_IS_HTML') {
+                    const errMsg = (fetchErr && fetchErr.message) ? fetchErr.message : String(fetchErr || 'Unknown error');
+                    debugLog('  ✘ Stream fetch error: ' + errMsg);
+                    if (errMsg === 'UNSUPPORTED_FORMAT_MKV') {
+                        loadingEl.classList.add('hidden');
+                        errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
+                            <div style="font-weight:600;color:#ff6b6b;margin-bottom:4px">Unsupported video format</div>
+                            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+                                This file is <strong>MKV (Matroska)</strong> which Safari cannot play.<br>
+                                Go back and pick a source with <strong>MP4</strong> format, or look for <strong>x264/H.264</strong> codec.
+                            </div>
+                            <div style="font-size:11px;color:var(--warn);margin-bottom:12px">
+                                Tip: In the stream list, avoid sources labeled "x265" or "HEVC" — they won't play in Safari either.
+                            </div>
+                            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                                ${d.url ? `<button class="btn btn-sm btn-primary" onclick="window.open('${esc(d.url)}','_blank')">Open in Browser</button>` : ''}
+                                <button class="btn btn-sm btn-secondary" onclick="closePlayer()">Close</button>
+                            </div>`;
+                        errorEl.classList.remove('hidden');
+                        return;
+                    }
+                    if (errMsg === 'STREAM_IS_HTML') {
                         loadingEl.classList.add('hidden');
                         errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
                             <div style="font-weight:600;margin-bottom:4px">Source returned a web page, not video</div>
@@ -3127,7 +3169,7 @@
                         errorEl.classList.remove('hidden');
                         return;
                     }
-                    if (fetchErr.message === 'STREAM_TOO_SMALL') {
+                    if (errMsg === 'STREAM_TOO_SMALL') {
                         loadingEl.classList.add('hidden');
                         errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
                             <div style="font-weight:600;margin-bottom:4px">File too small — not a real video</div>
@@ -3138,10 +3180,10 @@
                     }
                     // Network/CORS error — show helpful message
                     loadingEl.classList.add('hidden');
-                    const isCors = fetchErr.message.includes('Failed to fetch') || fetchErr.message === 'Load failed' || fetchErr.message.includes('NetworkError');
+                    const isCors = errMsg.includes('Failed to fetch') || errMsg === 'Load failed' || errMsg.includes('NetworkError');
                     errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
                         <div style="font-weight:600;margin-bottom:4px">${isCors ? 'Source blocked by browser' : 'Cannot load video'}</div>
-                        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${esc(fetchErr.message)}</div>
+                        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${esc(errMsg)}</div>
                         <div style="font-size:11px;color:var(--warn);margin-bottom:12px">
                             ${isCors ? 'This source blocks direct browser access (CORS). Try a different source.' : 'Check your internet connection and try again.'}
                         </div>
@@ -3201,8 +3243,9 @@
             }
         } catch (e) {
             loadingEl.classList.add('hidden');
+            const eMsg = (e && e.message) ? e.message : String(e || 'Unknown error');
             errorEl.innerHTML = `<div style="font-size:18px;margin-bottom:8px">&#9888;</div>
-                <div style="font-weight:600;margin-bottom:4px">${esc(e.message)}</div>
+                <div style="font-weight:600;margin-bottom:4px">${esc(eMsg)}</div>
                 <button class="btn btn-sm btn-secondary" style="margin-top:12px" onclick="closePlayer()">Close</button>`;
             errorEl.classList.remove('hidden');
         }
