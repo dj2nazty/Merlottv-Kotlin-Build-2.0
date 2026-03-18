@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -406,22 +406,42 @@
             cursor: pointer; padding: 8px;
         }
 
-        /* ─── Video Player (fullscreen) ─── */
+        /* ─── Video Player (fullscreen, landscape-ready) ─── */
         .video-player-overlay {
             position: fixed; inset: 0; background: #000; z-index: 600;
             display: flex; flex-direction: column;
+            /* Safe areas for notch in landscape */
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
         }
         .video-player-bar {
             display: flex; align-items: center; justify-content: space-between;
             padding: 8px 12px; background: linear-gradient(rgba(0,0,0,0.9), transparent);
             z-index: 2; position: absolute; top: 0; left: 0; right: 0;
             padding-top: calc(8px + env(safe-area-inset-top));
+            padding-left: calc(12px + env(safe-area-inset-left));
+            padding-right: calc(12px + env(safe-area-inset-right));
             transition: opacity 0.3s;
         }
         .video-player-bar .vp-title { font-size: 14px; font-weight: 600; color: #fff; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 12px; }
         .video-player-bar button { background: none; border: none; color: #fff; font-size: 16px; cursor: pointer; padding: 8px; }
         .video-player-overlay video {
             flex: 1; width: 100%; height: 100%; background: #000; object-fit: contain;
+        }
+
+        /* Landscape: hide browser chrome hints, maximize video */
+        @media (orientation: landscape) {
+            .video-player-overlay {
+                /* In landscape the video should fill the entire screen */
+                padding: 0;
+            }
+            .video-player-overlay video {
+                object-fit: contain;
+            }
+            .video-player-bar {
+                padding-top: calc(4px + env(safe-area-inset-top));
+                padding-left: calc(8px + env(safe-area-inset-left));
+                padding-right: calc(8px + env(safe-area-inset-right));
+            }
         }
         .vp-loading {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
@@ -2781,17 +2801,9 @@
             const blobId = idbKey;
             window._dlBlobs[blobId] = URL.createObjectURL(blob);
 
-            // 3. Auto-save to Files app (triggers download dialog on Safari)
-            try {
-                const a = document.createElement('a');
-                a.href = window._dlBlobs[blobId];
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => document.body.removeChild(a), 200);
-            } catch (e) {
-                console.warn('Auto-save to Files failed:', e);
-            }
+            // Note: Video is saved to IndexedDB for offline playback in the app.
+            // User can explicitly tap "⬇ Save" in Downloads to save to Files app.
+            // (Removed auto-save a.click() which triggered a confusing Safari download dialog)
 
             // Update the history entry to complete with IDB key
             updateDownloadHistory(dlIndex, {
@@ -2807,7 +2819,11 @@
             activeEl.innerHTML = `<div class="dl-progress-wrap" style="border-color:var(--success)">
                 <div style="text-align:center;color:var(--success);font-weight:600;font-size:16px">&#x2713; Download complete!</div>
                 <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:8px">
-                    ${formatBytes(downloaded)} saved to device. Ready for offline playback!
+                    ${formatBytes(downloaded)} saved for offline playback.
+                </div>
+                <div style="text-align:center;font-size:11px;color:var(--border);margin-top:4px">
+                    Stored in MerlotTV app storage — plays offline even in airplane mode.<br>
+                    Tap <strong>⬇ Save</strong> in Downloads to also save to your Files app.
                 </div>
                 <div style="text-align:center;margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="playVideo(0)">&#9654; Play Now</button>
@@ -3307,7 +3323,14 @@
 
             videoEl.src = playUrl;
 
-            // Try to go fullscreen on iOS
+            // Request landscape orientation for video playback
+            try {
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('landscape').catch(_ => {});
+                }
+            } catch (_) {}
+
+            // Play — use native fullscreen on iOS Safari for best landscape experience
             if (videoEl.webkitEnterFullscreen) {
                 videoEl.play().then(() => {
                     try { videoEl.webkitEnterFullscreen(); } catch(_) {}
@@ -3417,6 +3440,12 @@
         currentPlaylistIndex = -1;
         document.getElementById('vp-loading').classList.add('hidden');
         document.getElementById('vp-error').classList.add('hidden');
+        // Unlock orientation back to any (allow portrait again)
+        try {
+            if (screen.orientation && screen.orientation.unlock) {
+                screen.orientation.unlock();
+            }
+        } catch (_) {}
     }
 
     function togglePiP() {
