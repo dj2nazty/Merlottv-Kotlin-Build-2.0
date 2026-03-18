@@ -83,10 +83,26 @@ fun MerlotApp() {
         splashTimerDone = true
     }
 
-    // Dismiss splash when timer is done AND we've navigated past ProfilePicker to Home
-    LaunchedEffect(splashTimerDone, currentRoute) {
-        if (splashTimerDone && currentRoute == Screen.Home.route) {
+    // Hard timeout: force-dismiss splash after 12 seconds no matter what
+    // This prevents infinite splash if navigation gets stuck
+    LaunchedEffect(Unit) {
+        delay(12000)
+        if (showSplash) {
             showSplash = false
+        }
+    }
+
+    // Dismiss splash when timer is done AND we've navigated past ProfilePicker
+    // Also dismiss if we're still on ProfilePicker (first-time user needs to pick a profile)
+    LaunchedEffect(splashTimerDone, currentRoute) {
+        if (splashTimerDone && currentRoute != null) {
+            if (currentRoute == Screen.Home.route) {
+                showSplash = false
+            } else if (currentRoute == Screen.ProfilePicker.route) {
+                // First-time user — dismiss splash so they can pick a profile
+                delay(500) // short extra delay for smooth transition
+                showSplash = false
+            }
         }
     }
     var isLiveTvFullscreen by remember { mutableStateOf(false) }
