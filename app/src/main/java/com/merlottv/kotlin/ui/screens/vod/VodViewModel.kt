@@ -119,7 +119,7 @@ val PLATFORM_TABS = listOf(
         name = "Crunchyroll",
         iconRes = com.merlottv.kotlin.R.drawable.ic_crunchyroll,
         bgColor = 0xFFF47521,   // Crunchyroll orange
-        mdbListUrl = "https://mdblist.com/lists/jukebox8786/crunchyroll-anime/json"
+        mdbListUrl = "https://mdblist.com/lists/dj2nazty/crunchyroll/json"
     ),
     PlatformTab(
         id = "appletv",
@@ -148,6 +148,20 @@ val PLATFORM_TABS = listOf(
         iconRes = com.merlottv.kotlin.R.drawable.ic_kids,
         bgColor = 0xFFFFFFFF,   // Kids white
         mdbListUrl = "https://mdblist.com/lists/dj2nazty/animated-kids-movies/json"
+    ),
+    PlatformTab(
+        id = "foodnetwork",
+        name = "Food Network",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_food_network,
+        bgColor = 0xFFCC0000,   // Food Network red
+        mdbListUrl = "https://mdblist.com/lists/dj2nazty/food-network/json"
+    ),
+    PlatformTab(
+        id = "imdbtop250",
+        name = "IMDB Top 250",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_imdb_top250,
+        bgColor = 0xFFE6B91E,   // IMDB gold
+        mdbListUrl = "https://mdblist.com/lists/snoak/imdb-top-250-movies/json"
     )
 )
 
