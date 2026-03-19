@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -77,11 +78,13 @@ import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.components.CardTrailerPreview
 import com.merlottv.kotlin.ui.screens.vod.PLATFORM_TABS
+import com.merlottv.kotlin.ui.screens.vod.PlatformTab
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 @Composable
 fun HomeScreen(
     onNavigateToDetail: (String, String) -> Unit,
+    onPlatformTabClick: (PlatformTab) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -170,12 +173,14 @@ fun HomeScreen(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
                                 )
+                                val platformListState = rememberLazyListState()
                                 LazyRow(
+                                    state = platformListState,
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     contentPadding = PaddingValues(horizontal = 16.dp)
                                 ) {
-                                    items(PLATFORM_TABS) { tab ->
+                                    itemsIndexed(PLATFORM_TABS) { index, tab ->
                                         var isFocused by remember { mutableStateOf(false) }
                                         Box(
                                             modifier = Modifier
@@ -189,6 +194,21 @@ fun HomeScreen(
                                                     shape = RoundedCornerShape(12.dp)
                                                 )
                                                 .onFocusChanged { isFocused = it.isFocused }
+                                                .onPreviewKeyEvent { event ->
+                                                    if (event.type == KeyEventType.KeyDown) {
+                                                        when (event.key) {
+                                                            Key.DirectionCenter, Key.Enter -> {
+                                                                onPlatformTabClick(tab)
+                                                                true
+                                                            }
+                                                            Key.DirectionLeft -> {
+                                                                // Consume LEFT unless at first item — prevents sidebar opening
+                                                                index > 0
+                                                            }
+                                                            else -> false
+                                                        }
+                                                    } else false
+                                                }
                                                 .focusable(),
                                             contentAlignment = Alignment.Center
                                         ) {

@@ -57,7 +57,7 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     // Limit concurrent catalog HTTP requests — max 12 for faster startup
-    private val catalogDispatcher = Dispatchers.IO.limitedParallelism(12)
+    private val catalogDispatcher = Dispatchers.IO.limitedParallelism(4)
 
     init {
         loadCatalogs()

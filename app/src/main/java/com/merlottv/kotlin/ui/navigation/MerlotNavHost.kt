@@ -68,6 +68,9 @@ fun MerlotNavHost(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
                     navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
+                },
+                onPlatformTabClick = { tab ->
+                    navController.navigate("${Screen.Vod.route}?platform=${tab.id}")
                 }
             )
         }
@@ -111,13 +114,18 @@ fun MerlotNavHost(
             )
         }
 
-        composable(Screen.Vod.route) {
+        composable(
+            route = "${Screen.Vod.route}?platform={platform}",
+            arguments = listOf(navArgument("platform") { type = NavType.StringType; defaultValue = "" })
+        ) { backStackEntry ->
             onLiveTvFullscreenChanged(false)
+            val platformId = backStackEntry.arguments?.getString("platform") ?: ""
             VodScreen(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
                     navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
-                }
+                },
+                initialPlatformId = platformId
             )
         }
 

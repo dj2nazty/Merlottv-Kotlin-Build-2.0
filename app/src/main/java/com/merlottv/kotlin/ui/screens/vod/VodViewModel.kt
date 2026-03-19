@@ -177,6 +177,15 @@ class VodViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(VodUiState())
     val uiState: StateFlow<VodUiState> = _uiState.asStateFlow()
 
+    // Shared OkHttpClient — reuses connections, much faster than creating new ones
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
+    // Limit Cinemeta parallelism to avoid overwhelming the device
+    private val cinemetaDispatcher = Dispatchers.IO.limitedParallelism(6)
+
     val favoriteVodIds: StateFlow<Set<String>> = favoritesRepository.getFavoriteVodIds()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -278,9 +287,8 @@ class VodViewModel @Inject constructor(
                 }
 
                 // Fetch MDBList JSON
-                val client = OkHttpClient()
                 val request = Request.Builder().url(tab.mdbListUrl).build()
-                val response = client.newCall(request).execute()
+                val response = httpClient.newCall(request).execute()
                 val body = response.body?.string() ?: throw Exception("Empty response")
                 val jsonArray = JSONArray(body)
 
@@ -316,7 +324,7 @@ class VodViewModel @Inject constructor(
 
                     val batchResults = supervisorScope {
                         chunk.map { mdbItem ->
-                            async(Dispatchers.IO) {
+                            async(cinemetaDispatcher) {
                                 withTimeoutOrNull(4000L) {
                                     // Map MDBList mediatype → Cinemeta type
                                     val cinemetaType = when (mdbItem.mediaType) {
@@ -327,7 +335,7 @@ class VodViewModel @Inject constructor(
                                     try {
                                         val url = "$cinemetaBase/meta/$cinemetaType/${mdbItem.imdbId}.json"
                                         val req = Request.Builder().url(url).build()
-                                        val resp = client.newCall(req).execute()
+                                        val resp = httpClient.newCall(req).execute()
                                         if (resp.isSuccessful) {
                                             val metaBody = resp.body?.string() ?: return@withTimeoutOrNull null
                                             val metaJson = org.json.JSONObject(metaBody).optJSONObject("meta")

@@ -84,10 +84,21 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 @Composable
 fun VodScreen(
     onNavigateToDetail: (String, String) -> Unit,
+    initialPlatformId: String = "",
     viewModel: VodViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val favoriteIds by viewModel.favoriteVodIds.collectAsState()
+
+    // Auto-select platform tab if navigated from Home with a platform ID
+    LaunchedEffect(initialPlatformId) {
+        if (initialPlatformId.isNotEmpty()) {
+            val tab = PLATFORM_TABS.find { it.id == initialPlatformId }
+            if (tab != null) {
+                viewModel.onPlatformTabSelected(tab)
+            }
+        }
+    }
     val firstCardFocusRequester = remember { FocusRequester() }
 
     // Focus restoration: track the last focused item ID across navigation
