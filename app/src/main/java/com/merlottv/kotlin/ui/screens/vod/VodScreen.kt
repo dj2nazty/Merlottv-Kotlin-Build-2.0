@@ -93,6 +93,8 @@ fun VodScreen(
     // Auto-select platform tab if navigated from Home with a platform ID
     LaunchedEffect(initialPlatformId) {
         if (initialPlatformId.isNotEmpty()) {
+            // Small delay to let ViewModel init finish
+            delay(200)
             val tab = PLATFORM_TABS.find { it.id == initialPlatformId }
             if (tab != null) {
                 viewModel.onPlatformTabSelected(tab)

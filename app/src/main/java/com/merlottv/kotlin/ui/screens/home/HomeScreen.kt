@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,12 +92,13 @@ fun HomeScreen(
     val favoriteIds by viewModel.favoriteVodIds.collectAsState()
     val heroFocusRequester = remember { FocusRequester() }
     val firstRowFocusRequester = remember { FocusRequester() }
+    val firstPlatformTabFocusRequester = remember { FocusRequester() }
 
     // Focus restoration: track the last focused item ID across navigation
     var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
     val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
 
-    // Restore focus to the previously selected item, or default to first content row (NOT hero carousel)
+    // Default focus to first streaming service tab
     LaunchedEffect(uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
         if (uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
             delay(300)
@@ -106,10 +108,11 @@ fun HomeScreen(
                 }
             } ?: false
             if (!restored) {
-                // Default to hero carousel at the TOP of the screen
-                try { heroFocusRequester.requestFocus() } catch (_: Exception) {
-                    // Fallback to first content row if hero not available
-                    try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {}
+                // Default to first streaming service tab
+                try { firstPlatformTabFocusRequester.requestFocus() } catch (_: Exception) {
+                    try { heroFocusRequester.requestFocus() } catch (_: Exception) {
+                        try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {}
+                    }
                 }
             }
         }
@@ -157,7 +160,7 @@ fun HomeScreen(
                                 items = uiState.featuredItems,
                                 onItemClick = { meta -> onNavigateToDetail(meta.type, meta.id) },
                                 focusRequester = heroFocusRequester,
-                                onDownPressed = firstRowFocusRequester
+                                onDownPressed = firstPlatformTabFocusRequester
                             )
                         }
                     }
@@ -182,9 +185,14 @@ fun HomeScreen(
                                 ) {
                                     itemsIndexed(PLATFORM_TABS) { index, tab ->
                                         var isFocused by remember { mutableStateOf(false) }
+                                        val scope = rememberCoroutineScope()
                                         Box(
                                             modifier = Modifier
                                                 .size(56.dp)
+                                                .then(
+                                                    if (index == 0) Modifier.focusRequester(firstPlatformTabFocusRequester)
+                                                    else Modifier
+                                                )
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .background(Color(tab.bgColor))
                                                 .border(
@@ -193,8 +201,15 @@ fun HomeScreen(
                                                             else Color.Transparent,
                                                     shape = RoundedCornerShape(12.dp)
                                                 )
-                                                .onFocusChanged { isFocused = it.isFocused }
-                                                .onPreviewKeyEvent { event ->
+                                                .onFocusChanged { state ->
+                                                    isFocused = state.isFocused
+                                                    // Auto-scroll LazyRow to keep focused item visible
+                                                    if (state.isFocused) {
+                                                        scope.launch { platformListState.animateScrollToItem(index) }
+                                                    }
+                                                }
+                                                .onKeyEvent { event ->
+                                                    // Bubble phase: handle Enter/Center click
                                                     if (event.type == KeyEventType.KeyDown) {
                                                         when (event.key) {
                                                             Key.DirectionCenter, Key.Enter -> {
@@ -202,7 +217,8 @@ fun HomeScreen(
                                                                 true
                                                             }
                                                             Key.DirectionLeft -> {
-                                                                // Consume LEFT unless at first item — prevents sidebar opening
+                                                                // At first item, let it bubble up to open sidebar
+                                                                // Otherwise consume to stay in row
                                                                 index > 0
                                                             }
                                                             else -> false
