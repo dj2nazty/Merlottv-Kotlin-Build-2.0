@@ -20,6 +20,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 import javax.inject.Inject
 
 data class CatalogSection(
@@ -33,10 +38,126 @@ data class CatalogSection(
     val items: List<MetaPreview>
 )
 
+/**
+ * Hardcoded platform sub-tabs that appear under Movies/Series.
+ * Each pulls content from an MDBList or filters existing catalogs.
+ */
+data class PlatformTab(
+    val id: String,
+    val name: String,
+    val iconRes: Int,           // R.drawable resource ID (real brand icon)
+    val bgColor: Long,          // Brand background color (ARGB)
+    val mdbListUrl: String      // MDBList JSON endpoint
+)
+
+val PLATFORM_TABS = listOf(
+    PlatformTab(
+        id = "discovery",
+        name = "Discovery+",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_discovery_plus,
+        bgColor = 0xFF00237A,   // Discovery+ dark blue
+        mdbListUrl = "https://mdblist.com/lists/shaunatkins11/discovery-tv/json"
+    ),
+    PlatformTab(
+        id = "hallmark",
+        name = "Hallmark",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_hallmark,
+        bgColor = 0xFF1A1A2E,   // Dark navy
+        mdbListUrl = "https://mdblist.com/lists/hakomed/hallmark-movies/json"
+    ),
+    PlatformTab(
+        id = "netflix",
+        name = "Netflix",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_netflix,
+        bgColor = 0xFF000000,   // Netflix black
+        mdbListUrl = "https://mdblist.com/lists/garycrawfordgc/netflix-movies/json"
+    ),
+    PlatformTab(
+        id = "hgtv",
+        name = "HGTV",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_hgtv,
+        bgColor = 0xFFFFFFFF,   // HGTV white
+        mdbListUrl = "https://mdblist.com/lists/bigred777/hgtv-magnolia-diy-shows/json"
+    ),
+    PlatformTab(
+        id = "disney",
+        name = "Disney+",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_disney_plus,
+        bgColor = 0xFF0B1D3A,   // Disney+ dark blue
+        mdbListUrl = "https://mdblist.com/lists/mdatum/disney/json"
+    ),
+    PlatformTab(
+        id = "prime",
+        name = "Prime",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_prime,
+        bgColor = 0xFF00A8E1,   // Prime Video blue
+        mdbListUrl = "https://mdblist.com/lists/garycrawfordgc/amazon-prime-shows/json"
+    ),
+    PlatformTab(
+        id = "hbomax",
+        name = "Max",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_hbo_max,
+        bgColor = 0xFF6B32C8,   // HBO Max purple
+        mdbListUrl = "https://mdblist.com/lists/exmachinadeo/hbo-movies-list/json"
+    ),
+    PlatformTab(
+        id = "paramount",
+        name = "Paramount+",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_paramount_plus,
+        bgColor = 0xFF0064FF,   // Paramount+ blue
+        mdbListUrl = "https://mdblist.com/lists/sig1878/movies-paramount-plus/json"
+    ),
+    PlatformTab(
+        id = "peacock",
+        name = "Peacock",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_peacock,
+        bgColor = 0xFF000000,   // Peacock black
+        mdbListUrl = "https://mdblist.com/lists/k0meta/peacock-originals/json"
+    ),
+    PlatformTab(
+        id = "crunchyroll",
+        name = "Crunchyroll",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_crunchyroll,
+        bgColor = 0xFFF47521,   // Crunchyroll orange
+        mdbListUrl = "https://mdblist.com/lists/jukebox8786/crunchyroll-anime/json"
+    ),
+    PlatformTab(
+        id = "appletv",
+        name = "Apple TV+",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_apple_tv,
+        bgColor = 0xFF000000,   // Apple TV+ black
+        mdbListUrl = "https://mdblist.com/lists/k0meta/appletv-originals/json"
+    ),
+    PlatformTab(
+        id = "starz",
+        name = "Starz",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_starz,
+        bgColor = 0xFF000000,   // Starz black
+        mdbListUrl = "https://mdblist.com/lists/ryankeast/tv-shows-providers-starz/json"
+    ),
+    PlatformTab(
+        id = "pbs",
+        name = "PBS",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_pbs,
+        bgColor = 0xFF000000,   // PBS black
+        mdbListUrl = ""         // TODO: User will provide MDBList URL later
+    ),
+    PlatformTab(
+        id = "kids",
+        name = "Kids",
+        iconRes = com.merlottv.kotlin.R.drawable.ic_kids,
+        bgColor = 0xFFFFFFFF,   // Kids white
+        mdbListUrl = "https://mdblist.com/lists/dj2nazty/animated-kids-movies/json"
+    )
+)
+
 data class VodUiState(
     val isLoading: Boolean = true,
     val isFilterLoading: Boolean = false,
     val selectedTab: String = "All",
+    val selectedPlatformTab: PlatformTab? = null,
+    val platformSections: List<CatalogSection> = emptyList(),
+    val isPlatformLoading: Boolean = false,
     val sections: List<CatalogSection> = emptyList(),
     val filteredSections: List<CatalogSection> = emptyList(),
     val error: String? = null,
@@ -77,12 +198,201 @@ class VodViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(
             selectedTab = tab,
+            selectedPlatformTab = null,
+            platformSections = emptyList(),
             selectedGenre = null,
             selectedYear = null,
             availableGenres = genres,
             availableYears = if (tab != "All") yearOptions else emptyList()
         )
         applyFilter(tab)
+    }
+
+    fun onPlatformTabSelected(tab: PlatformTab?) {
+        if (tab == null || tab == _uiState.value.selectedPlatformTab) {
+            // Deselect — go back to All view
+            _uiState.value = _uiState.value.copy(
+                selectedTab = "All",
+                selectedPlatformTab = null,
+                platformSections = emptyList(),
+                availableGenres = emptyList(),
+                availableYears = emptyList()
+            )
+            applyFilter("All")
+            return
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedTab = "All",  // Clear main tab highlight
+            selectedPlatformTab = tab,
+            isPlatformLoading = true,
+            platformSections = emptyList(),
+            selectedGenre = null,
+            selectedYear = null,
+            availableGenres = emptyList(),
+            availableYears = emptyList()
+        )
+        loadMdbListContent(tab)
+    }
+
+    private val mdbListCache = mutableMapOf<String, List<MetaPreview>>()
+
+    private fun loadMdbListContent(tab: PlatformTab) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (tab.mdbListUrl.isBlank()) {
+                    withContext(Dispatchers.Main) {
+                        _uiState.value = _uiState.value.copy(
+                            isPlatformLoading = false,
+                            platformSections = listOf(
+                                CatalogSection(
+                                    key = "mdblist:${tab.id}",
+                                    title = "${tab.name} — Coming Soon",
+                                    addonName = "MDBList",
+                                    type = "movie",
+                                    catalogId = tab.id,
+                                    items = emptyList()
+                                )
+                            )
+                        )
+                    }
+                    return@launch
+                }
+                val cacheKey = tab.id
+
+                // Check cache first
+                mdbListCache[cacheKey]?.let { cached ->
+                    val section = CatalogSection(
+                        key = "mdblist:${tab.id}",
+                        title = "${tab.name} — ${cached.size} titles",
+                        addonName = "MDBList",
+                        brandLogo = "",
+                        type = "movie",
+                        catalogId = tab.id,
+                        items = cached
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        isPlatformLoading = false,
+                        platformSections = listOf(section)
+                    )
+                    return@launch
+                }
+
+                // Fetch MDBList JSON
+                val client = OkHttpClient()
+                val request = Request.Builder().url(tab.mdbListUrl).build()
+                val response = client.newCall(request).execute()
+                val body = response.body?.string() ?: throw Exception("Empty response")
+                val jsonArray = JSONArray(body)
+
+                // Extract ALL IMDB IDs with their MDBList mediatype
+                data class MdbItem(val imdbId: String, val mediaType: String)
+                val mdbItems = mutableListOf<MdbItem>()
+                for (i in 0 until jsonArray.length()) {
+                    val item = jsonArray.getJSONObject(i)
+                    val imdbId = item.optString("imdb_id", "")
+                    val mediaType = item.optString("mediatype", "")
+                    if (imdbId.isNotEmpty()) {
+                        mdbItems.add(MdbItem(imdbId, mediaType))
+                    }
+                }
+
+                if (mdbItems.isEmpty()) {
+                    _uiState.value = _uiState.value.copy(
+                        isPlatformLoading = false,
+                        platformSections = emptyList()
+                    )
+                    return@launch
+                }
+
+                // Resolve IMDB IDs via Cinemeta PROGRESSIVELY in chunks of 20
+                // Show results as they come in so the user sees content fast
+                val cinemetaBase = "https://v3-cinemeta.strem.io"
+                val allResolved = mutableListOf<MetaPreview>()
+                val chunks = mdbItems.chunked(20)
+
+                for ((chunkIdx, chunk) in chunks.withIndex()) {
+                    // Check if user switched away from this platform tab
+                    if (_uiState.value.selectedPlatformTab?.id != tab.id) return@launch
+
+                    val batchResults = supervisorScope {
+                        chunk.map { mdbItem ->
+                            async(Dispatchers.IO) {
+                                withTimeoutOrNull(4000L) {
+                                    // Map MDBList mediatype → Cinemeta type
+                                    val cinemetaType = when (mdbItem.mediaType) {
+                                        "show" -> "series"
+                                        "movie" -> "movie"
+                                        else -> "movie" // default fallback
+                                    }
+                                    try {
+                                        val url = "$cinemetaBase/meta/$cinemetaType/${mdbItem.imdbId}.json"
+                                        val req = Request.Builder().url(url).build()
+                                        val resp = client.newCall(req).execute()
+                                        if (resp.isSuccessful) {
+                                            val metaBody = resp.body?.string() ?: return@withTimeoutOrNull null
+                                            val metaJson = org.json.JSONObject(metaBody).optJSONObject("meta")
+                                                ?: return@withTimeoutOrNull null
+                                            MetaPreview(
+                                                id = metaJson.optString("imdb_id", mdbItem.imdbId),
+                                                type = cinemetaType,
+                                                name = metaJson.optString("name", ""),
+                                                poster = metaJson.optString("poster", ""),
+                                                description = metaJson.optString("description", ""),
+                                                imdbRating = metaJson.optString("imdbRating", ""),
+                                                background = metaJson.optString("background", ""),
+                                                logo = metaJson.optString("logo", "")
+                                            )
+                                        } else null
+                                    } catch (_: Exception) { null }
+                                }
+                            }
+                        }.awaitAll()
+                    }.filterNotNull().filter { it.name.isNotEmpty() && it.poster.isNotEmpty() }
+
+                    allResolved.addAll(batchResults)
+
+                    // Update UI progressively after each chunk
+                    val section = CatalogSection(
+                        key = "mdblist:${tab.id}",
+                        title = "${tab.name} — ${allResolved.size} of ${mdbItems.size}",
+                        addonName = "MDBList",
+                        brandLogo = "",
+                        type = "movie",
+                        catalogId = tab.id,
+                        items = allResolved.toList()
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        isPlatformLoading = chunkIdx == 0 && allResolved.isEmpty(),
+                        platformSections = listOf(section)
+                    )
+                }
+
+                // Final update with clean title
+                val finalSection = CatalogSection(
+                    key = "mdblist:${tab.id}",
+                    title = "${tab.name} — ${allResolved.size} titles",
+                    addonName = "MDBList",
+                    brandLogo = "",
+                    type = "movie",
+                    catalogId = tab.id,
+                    items = allResolved.toList()
+                )
+
+                // Cache results
+                mdbListCache[cacheKey] = allResolved.toList()
+
+                _uiState.value = _uiState.value.copy(
+                    isPlatformLoading = false,
+                    platformSections = if (allResolved.isNotEmpty()) listOf(finalSection) else emptyList()
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("VodViewModel", "MDBList load failed: ${e.message}")
+                _uiState.value = _uiState.value.copy(
+                    isPlatformLoading = false,
+                    platformSections = emptyList()
+                )
+            }
+        }
     }
 
     fun onGenreSelected(genre: String?) {

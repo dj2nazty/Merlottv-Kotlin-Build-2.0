@@ -76,6 +76,7 @@ import coil.compose.AsyncImage
 import com.merlottv.kotlin.data.local.WatchProgressItem
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.components.CardTrailerPreview
+import com.merlottv.kotlin.ui.screens.vod.PLATFORM_TABS
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
 @Composable
@@ -155,6 +156,54 @@ fun HomeScreen(
                                 focusRequester = heroFocusRequester,
                                 onDownPressed = firstRowFocusRequester
                             )
+                        }
+                    }
+
+                    // Platform streaming service shortcuts
+                    if (PLATFORM_TABS.isNotEmpty()) {
+                        item(key = "platform_tabs") {
+                            Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+                                Text(
+                                    "Streaming Services",
+                                    color = MerlotColors.TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                                )
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
+                                    items(PLATFORM_TABS) { tab ->
+                                        var isFocused by remember { mutableStateOf(false) }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(56.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color(tab.bgColor))
+                                                .border(
+                                                    width = if (isFocused) 3.dp else 0.dp,
+                                                    color = if (isFocused) Color(0xFF00BFA5)
+                                                            else Color.Transparent,
+                                                    shape = RoundedCornerShape(12.dp)
+                                                )
+                                                .onFocusChanged { isFocused = it.isFocused }
+                                                .focusable(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            androidx.compose.foundation.Image(
+                                                painter = androidx.compose.ui.res.painterResource(id = tab.iconRes),
+                                                contentDescription = tab.name,
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .clip(RoundedCornerShape(8.dp)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

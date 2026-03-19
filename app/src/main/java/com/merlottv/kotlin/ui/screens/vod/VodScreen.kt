@@ -130,9 +130,10 @@ fun VodScreen(
             )
             Spacer(modifier = Modifier.width(16.dp))
 
+            // Main tabs: All, Movies, Series
             val tabs = listOf("All", "Movies", "Series")
             tabs.forEach { tab ->
-                val isSelected = uiState.selectedTab == tab
+                val isSelected = uiState.selectedTab == tab && uiState.selectedPlatformTab == null
 
                 MerlotChip(
                     selected = isSelected,
@@ -143,7 +144,6 @@ fun VodScreen(
                             when (tab) {
                                 "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
                                 "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
-
                                 else -> {}
                             }
                             if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
@@ -155,7 +155,7 @@ fun VodScreen(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            if (!uiState.isLoading && uiState.filteredSections.isNotEmpty()) {
+            if (!uiState.isLoading && uiState.filteredSections.isNotEmpty() && uiState.selectedPlatformTab == null) {
                 Text(
                     text = "${uiState.filteredSections.size} categories",
                     color = MerlotColors.TextMuted,
@@ -241,18 +241,88 @@ fun VodScreen(
                     }
                 }
             }
-            uiState.isFilterLoading -> {
+            uiState.isFilterLoading || uiState.isPlatformLoading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = MerlotColors.Accent)
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("Loading...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                        Text(
+                            if (uiState.isPlatformLoading) "Loading ${uiState.selectedPlatformTab?.name ?: ""}..."
+                            else "Loading...",
+                            color = MerlotColors.TextMuted, fontSize = 12.sp
+                        )
                     }
                 }
             }
             uiState.error != null -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(uiState.error ?: "Failed to load", color = MerlotColors.Danger, fontSize = 13.sp)
+                }
+            }
+            // Platform tab selected with content — show as grid
+            uiState.selectedPlatformTab != null && uiState.platformSections.isNotEmpty() -> {
+                val allItems = uiState.platformSections.flatMap { it.items }
+                Column {
+                    // Header with logo + count
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(uiState.selectedPlatformTab!!.bgColor)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.foundation.Image(
+                                painter = androidx.compose.ui.res.painterResource(id = uiState.selectedPlatformTab!!.iconRes),
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "${uiState.selectedPlatformTab!!.name} — ${allItems.size} titles",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 130.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(allItems, key = { it.id }) { item ->
+                            val itemFocusRequester = remember {
+                                focusRequesters.getOrPut(item.id) { FocusRequester() }
+                            }
+                            VodCard(
+                                item = item,
+                                onClick = {
+                                    lastFocusedItemId = item.id
+                                    onNavigateToDetail(item.type, item.id)
+                                },
+                                onLongClick = { viewModel.toggleFavorite(item) },
+                                isFavorite = item.id in favoriteIds,
+                                focusRequester = itemFocusRequester,
+                                onFocused = { lastFocusedItemId = item.id }
+                            )
+                        }
+                    }
+                }
+            }
+            // Platform tab selected but no content found
+            uiState.selectedPlatformTab != null && uiState.platformSections.isEmpty() && !uiState.isPlatformLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No ${uiState.selectedPlatformTab?.name} content found for ${uiState.selectedTab}",
+                        color = MerlotColors.TextMuted, fontSize = 14.sp
+                    )
                 }
             }
             uiState.filteredSections.isEmpty() -> {
