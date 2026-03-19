@@ -625,14 +625,16 @@ class VodViewModel @Inject constructor(
                     ))
                 }
 
-                _uiState.value = VodUiState(
+                val current = _uiState.value
+                _uiState.value = current.copy(
                     isLoading = false,
-                    selectedTab = "All",
+                    selectedTab = if (current.selectedPlatformTab != null) current.selectedTab else "All",
                     sections = sorted,
                     filteredSections = sorted
                 )
             } catch (e: Exception) {
-                _uiState.value = VodUiState(
+                val current = _uiState.value
+                _uiState.value = current.copy(
                     isLoading = false,
                     error = e.message
                 )
