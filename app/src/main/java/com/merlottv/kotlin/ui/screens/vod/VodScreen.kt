@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -145,25 +146,50 @@ fun VodScreen(
 
             // Main tabs: All, Movies, Series
             val tabs = listOf("All", "Movies", "Series")
-            tabs.forEach { tab ->
+            val mainTabFocusRequesters = remember { List(tabs.size) { FocusRequester() } }
+            tabs.forEachIndexed { index, tab ->
                 val isSelected = uiState.selectedTab == tab && uiState.selectedPlatformTab == null
 
-                MerlotChip(
-                    selected = isSelected,
-                    onClick = { viewModel.onTabSelected(tab) },
-                    label = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
-                            when (tab) {
-                                "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
-                                "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
-                                else -> {}
-                            }
-                            if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
-                            Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                Box(
+                    modifier = Modifier
+                        .focusRequester(mainTabFocusRequesters[index])
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown) {
+                                when (event.key) {
+                                    Key.DirectionLeft -> {
+                                        if (index > 0) {
+                                            try { mainTabFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                            true
+                                        } else false // let sidebar open
+                                    }
+                                    Key.DirectionRight -> {
+                                        if (index < tabs.size - 1) {
+                                            try { mainTabFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                            true
+                                        } else true
+                                    }
+                                    else -> false
+                                }
+                            } else false
                         }
-                    }
-                )
+                ) {
+                    MerlotChip(
+                        selected = isSelected,
+                        onClick = { viewModel.onTabSelected(tab) },
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
+                                when (tab) {
+                                    "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
+                                    "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
+                                    else -> {}
+                                }
+                                if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
+                                Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                            }
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -189,22 +215,47 @@ fun VodScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    val genreFocusRequesters = remember(uiState.availableGenres.size) { List(uiState.availableGenres.size) { FocusRequester() } }
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         contentPadding = PaddingValues(end = 16.dp)
                     ) {
-                        items(uiState.availableGenres) { genre ->
-                            MerlotChip(
-                                selected = genre == uiState.selectedGenre,
-                                onClick = { viewModel.onGenreSelected(genre) },
-                                label = {
-                                    Text(
-                                        genre,
-                                        fontSize = 11.sp,
-                                        color = if (genre == uiState.selectedGenre) MerlotColors.Black else MerlotColors.TextPrimary
-                                    )
-                                }
-                            )
+                        itemsIndexed(uiState.availableGenres) { index, genre ->
+                            Box(
+                                modifier = Modifier
+                                    .focusRequester(genreFocusRequesters[index])
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown) {
+                                            when (event.key) {
+                                                Key.DirectionLeft -> {
+                                                    if (index > 0) {
+                                                        try { genreFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                                        true
+                                                    } else false
+                                                }
+                                                Key.DirectionRight -> {
+                                                    if (index < uiState.availableGenres.size - 1) {
+                                                        try { genreFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                                        true
+                                                    } else true
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                            ) {
+                                MerlotChip(
+                                    selected = genre == uiState.selectedGenre,
+                                    onClick = { viewModel.onGenreSelected(genre) },
+                                    label = {
+                                        Text(
+                                            genre,
+                                            fontSize = 11.sp,
+                                            color = if (genre == uiState.selectedGenre) MerlotColors.Black else MerlotColors.TextPrimary
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -220,22 +271,47 @@ fun VodScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    val yearFocusRequesters = remember(uiState.availableYears.size) { List(uiState.availableYears.size) { FocusRequester() } }
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         contentPadding = PaddingValues(end = 16.dp)
                     ) {
-                        items(uiState.availableYears) { year ->
-                            MerlotChip(
-                                selected = year == uiState.selectedYear,
-                                onClick = { viewModel.onYearSelected(year) },
-                                label = {
-                                    Text(
-                                        year,
-                                        fontSize = 11.sp,
-                                        color = if (year == uiState.selectedYear) MerlotColors.Black else MerlotColors.TextPrimary
-                                    )
-                                }
-                            )
+                        itemsIndexed(uiState.availableYears) { index, year ->
+                            Box(
+                                modifier = Modifier
+                                    .focusRequester(yearFocusRequesters[index])
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown) {
+                                            when (event.key) {
+                                                Key.DirectionLeft -> {
+                                                    if (index > 0) {
+                                                        try { yearFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                                        true
+                                                    } else false
+                                                }
+                                                Key.DirectionRight -> {
+                                                    if (index < uiState.availableYears.size - 1) {
+                                                        try { yearFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                                        true
+                                                    } else true
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                            ) {
+                                MerlotChip(
+                                    selected = year == uiState.selectedYear,
+                                    onClick = { viewModel.onYearSelected(year) },
+                                    label = {
+                                        Text(
+                                            year,
+                                            fontSize = 11.sp,
+                                            color = if (year == uiState.selectedYear) MerlotColors.Black else MerlotColors.TextPrimary
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }

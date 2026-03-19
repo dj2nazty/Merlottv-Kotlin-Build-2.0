@@ -2,9 +2,11 @@ package com.merlottv.kotlin.data.repository
 
 import android.util.Log
 import com.merlottv.kotlin.BuildConfig
+import com.merlottv.kotlin.domain.model.AirQuality
 import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
 import com.merlottv.kotlin.domain.model.HourForecast
+import com.merlottv.kotlin.domain.model.MarineData
 import com.merlottv.kotlin.domain.model.RadarFrame
 import com.merlottv.kotlin.domain.model.WeatherAlert
 import com.merlottv.kotlin.domain.repository.WeatherRepository
@@ -40,9 +42,10 @@ class WeatherRepositoryImpl @Inject constructor(
 
     // In-memory cache
     private val cache = ConcurrentHashMap<String, CacheEntry>()
-    private val WEATHER_CACHE_TTL = 15 * 60 * 1000L    // 15 minutes
-    private val RADAR_CACHE_TTL = 2 * 60 * 1000L        // 2 minutes
-    private val ALERTS_CACHE_TTL = 5 * 60 * 1000L        // 5 minutes
+    private val WEATHER_CACHE_TTL = 15 * 60 * 1000L
+    private val RADAR_CACHE_TTL = 2 * 60 * 1000L
+    private val ALERTS_CACHE_TTL = 5 * 60 * 1000L
+    private val MARINE_CACHE_TTL = 30 * 60 * 1000L  // 30 minutes
 
     private data class CacheEntry(val data: Any, val timestamp: Long)
 
@@ -65,14 +68,18 @@ class WeatherRepositoryImpl @Inject constructor(
         moshi.adapter(Map::class.java)
     }
 
-    // NWS alerts client — separate User-Agent required by api.weather.gov
+    private val listAdapter by lazy {
+        moshi.adapter(List::class.java)
+    }
+
+    // NWS alerts client
     private val nwsClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
             .callTimeout(15, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "MerlotTV/2.37 (merlottv.app)")
+                    .header("User-Agent", "MerlotTV/2.69 (merlottv.app)")
                     .header("Accept", "application/geo+json")
                     .build()
                 chain.proceed(request)
@@ -85,13 +92,14 @@ class WeatherRepositoryImpl @Inject constructor(
         private const val WEATHER_BASE = "https://api.weatherapi.com/v1"
         private const val RADAR_API = "https://api.rainviewer.com/public/weather-maps.json"
         private const val NWS_ALERTS_BASE = "https://api.weather.gov/alerts/active"
+        private const val OPEN_METEO_MARINE = "https://marine-api.open-meteo.com/v1/marine"
 
         private val SEVERITY_ORDER = mapOf(
             "Extreme" to 0, "Severe" to 1, "Moderate" to 2, "Minor" to 3, "Unknown" to 4
         )
     }
 
-    // ─── Weather + Forecast (single API call) ────────────────────────────
+    // ─── Weather + Forecast (single API call, AQI enabled) ─────────────────
 
     @Suppress("UNCHECKED_CAST")
     override suspend fun getCurrentAndForecast(zipCode: String): Pair<CurrentWeather, List<DayForecast>>? {
@@ -100,13 +108,27 @@ class WeatherRepositoryImpl @Inject constructor(
 
         return withContext(boundedIo) {
             try {
-                val url = "$WEATHER_BASE/forecast.json?key=${BuildConfig.WEATHER_API_KEY}&q=$zipCode&days=7&aqi=no&alerts=no"
+                // AQI enabled now
+                val url = "$WEATHER_BASE/forecast.json?key=${BuildConfig.WEATHER_API_KEY}&q=$zipCode&days=7&aqi=yes&alerts=no"
                 val json = fetchJson(url) ?: return@withContext null
 
-                // Parse current conditions
                 val current = json["current"] as? Map<String, Any?> ?: return@withContext null
                 val location = json["location"] as? Map<String, Any?> ?: return@withContext null
                 val conditionMap = current["condition"] as? Map<String, Any?>
+
+                // Parse air quality
+                val aqiMap = current["air_quality"] as? Map<String, Any?>
+                val airQuality = if (aqiMap != null) {
+                    AirQuality(
+                        usEpaIndex = (aqiMap["us-epa-index"] as? Number)?.toInt() ?: 0,
+                        pm25 = (aqiMap["pm2_5"] as? Number)?.toDouble() ?: 0.0,
+                        pm10 = (aqiMap["pm10"] as? Number)?.toDouble() ?: 0.0,
+                        co = (aqiMap["co"] as? Number)?.toDouble() ?: 0.0,
+                        no2 = (aqiMap["no2"] as? Number)?.toDouble() ?: 0.0,
+                        o3 = (aqiMap["o3"] as? Number)?.toDouble() ?: 0.0,
+                        so2 = (aqiMap["so2"] as? Number)?.toDouble() ?: 0.0
+                    )
+                } else null
 
                 val currentWeather = CurrentWeather(
                     tempF = (current["temp_f"] as? Number)?.toDouble() ?: 0.0,
@@ -116,17 +138,22 @@ class WeatherRepositoryImpl @Inject constructor(
                     condition = conditionMap?.get("text")?.toString() ?: "Unknown",
                     conditionIconUrl = "https:" + (conditionMap?.get("icon")?.toString() ?: ""),
                     windMph = (current["wind_mph"] as? Number)?.toDouble() ?: 0.0,
+                    windGustMph = (current["gust_mph"] as? Number)?.toDouble() ?: 0.0,
                     windDir = current["wind_dir"]?.toString() ?: "",
+                    windDegree = (current["wind_degree"] as? Number)?.toInt() ?: 0,
                     humidity = (current["humidity"] as? Number)?.toInt() ?: 0,
+                    dewPointF = (current["dewpoint_f"] as? Number)?.toDouble() ?: 0.0,
                     pressureIn = (current["pressure_in"] as? Number)?.toDouble() ?: 0.0,
                     uvIndex = (current["uv"] as? Number)?.toDouble() ?: 0.0,
                     visibilityMiles = (current["vis_miles"] as? Number)?.toDouble() ?: 0.0,
+                    cloudCover = (current["cloud"] as? Number)?.toInt() ?: 0,
                     locationName = location["name"]?.toString() ?: "",
                     region = location["region"]?.toString() ?: "",
                     localTime = location["localtime"]?.toString() ?: "",
                     isDay = (current["is_day"] as? Number)?.toInt() == 1,
                     lat = (location["lat"] as? Number)?.toDouble() ?: 0.0,
-                    lon = (location["lon"] as? Number)?.toDouble() ?: 0.0
+                    lon = (location["lon"] as? Number)?.toDouble() ?: 0.0,
+                    airQuality = airQuality
                 )
 
                 // Parse 7-day forecast
@@ -139,7 +166,6 @@ class WeatherRepositoryImpl @Inject constructor(
                     val dayCond = day["condition"] as? Map<String, Any?>
                     val astro = dayMap["astro"] as? Map<String, Any?>
 
-                    // Parse day of week from date string
                     val dayOfWeek = try {
                         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                         val date = sdf.parse(dateStr)
@@ -149,13 +175,12 @@ class WeatherRepositoryImpl @Inject constructor(
                         dayNames[cal.get(Calendar.DAY_OF_WEEK)]
                     } catch (_: Exception) { "?" }
 
-                    // Parse hourly forecast
+                    // Parse hourly forecast with extended data
                     val hours = (dayMap["hour"] as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
                     val hourlyForecasts = hours.mapNotNull { h ->
                         val timeStr = h["time"]?.toString() ?: return@mapNotNull null
                         val hCond = h["condition"] as? Map<String, Any?>
 
-                        // Format display time: "2026-03-15 14:00" → "2 PM"
                         val displayTime = try {
                             val timePart = timeStr.split(" ").getOrNull(1) ?: ""
                             val hour = timePart.split(":")[0].toInt()
@@ -172,13 +197,19 @@ class WeatherRepositoryImpl @Inject constructor(
                             condition = hCond?.get("text")?.toString() ?: "Unknown",
                             conditionIconUrl = "https:" + (hCond?.get("icon")?.toString() ?: ""),
                             windMph = (h["wind_mph"] as? Number)?.toDouble() ?: 0.0,
+                            windGustMph = (h["gust_mph"] as? Number)?.toDouble() ?: 0.0,
                             windDir = h["wind_dir"]?.toString() ?: "",
+                            windDegree = (h["wind_degree"] as? Number)?.toInt() ?: 0,
                             humidity = (h["humidity"] as? Number)?.toInt() ?: 0,
                             chanceOfRain = (h["chance_of_rain"] as? Number)?.toInt()
                                 ?: (h["chance_of_rain"]?.toString()?.toIntOrNull() ?: 0),
                             chanceOfSnow = (h["chance_of_snow"] as? Number)?.toInt()
                                 ?: (h["chance_of_snow"]?.toString()?.toIntOrNull() ?: 0),
-                            isDay = (h["is_day"] as? Number)?.toInt() == 1
+                            isDay = (h["is_day"] as? Number)?.toInt() == 1,
+                            dewPointF = (h["dewpoint_f"] as? Number)?.toDouble() ?: 0.0,
+                            pressureIn = (h["pressure_in"] as? Number)?.toDouble() ?: 0.0,
+                            cloudCover = (h["cloud"] as? Number)?.toInt() ?: 0,
+                            uvIndex = (h["uv"] as? Number)?.toDouble() ?: 0.0
                         )
                     }
 
@@ -197,8 +228,15 @@ class WeatherRepositoryImpl @Inject constructor(
                         maxWindMph = (day["maxwind_mph"] as? Number)?.toDouble() ?: 0.0,
                         sunrise = astro?.get("sunrise")?.toString() ?: "",
                         sunset = astro?.get("sunset")?.toString() ?: "",
+                        moonrise = astro?.get("moonrise")?.toString() ?: "",
+                        moonset = astro?.get("moonset")?.toString() ?: "",
+                        moonPhase = astro?.get("moon_phase")?.toString() ?: "",
+                        moonIllumination = (astro?.get("moon_illumination") as? Number)?.toInt()
+                            ?: (astro?.get("moon_illumination")?.toString()?.toIntOrNull() ?: 0),
                         uvIndex = (day["uv"] as? Number)?.toDouble() ?: 0.0,
                         avgVisibilityMiles = (day["avgvis_miles"] as? Number)?.toDouble() ?: 0.0,
+                        totalPrecipIn = (day["totalprecip_in"] as? Number)?.toDouble() ?: 0.0,
+                        avgTempF = (day["avgtemp_f"] as? Number)?.toDouble() ?: 0.0,
                         hourly = hourlyForecasts
                     )
                 }
@@ -208,6 +246,41 @@ class WeatherRepositoryImpl @Inject constructor(
                 result
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch weather for $zipCode", e)
+                null
+            }
+        }
+    }
+
+    // ─── Marine / Wave Data (Open-Meteo free API) ─────────────────────────
+
+    @Suppress("UNCHECKED_CAST")
+    override suspend fun getMarineData(lat: Double, lon: Double): MarineData? {
+        val cacheKey = "marine_${String.format("%.2f", lat)}_${String.format("%.2f", lon)}"
+        getCached<MarineData>(cacheKey, MARINE_CACHE_TTL)?.let { return it }
+
+        return withContext(boundedIo) {
+            try {
+                val url = "$OPEN_METEO_MARINE?latitude=${String.format("%.4f", lat)}&longitude=${String.format("%.4f", lon)}" +
+                    "&current=wave_height,wave_period,wave_direction,swell_wave_height,swell_wave_period,swell_wave_direction,wind_wave_height" +
+                    "&temperature_unit=fahrenheit&wind_speed_unit=mph&length_unit=imperial"
+                val json = fetchJson(url) ?: return@withContext null
+
+                val currentData = json["current"] as? Map<String, Any?> ?: return@withContext null
+
+                val marine = MarineData(
+                    waveHeightFt = (currentData["wave_height"] as? Number)?.toDouble() ?: 0.0,
+                    wavePeriodSec = (currentData["wave_period"] as? Number)?.toDouble() ?: 0.0,
+                    waveDirectionDeg = (currentData["wave_direction"] as? Number)?.toInt() ?: 0,
+                    swellHeightFt = (currentData["swell_wave_height"] as? Number)?.toDouble() ?: 0.0,
+                    swellPeriodSec = (currentData["swell_wave_period"] as? Number)?.toDouble() ?: 0.0,
+                    swellDirectionDeg = (currentData["swell_wave_direction"] as? Number)?.toInt() ?: 0,
+                    windWaveHeightFt = (currentData["wind_wave_height"] as? Number)?.toDouble() ?: 0.0
+                )
+
+                putCache(cacheKey, marine)
+                marine
+            } catch (e: Exception) {
+                Log.d(TAG, "Marine data not available for ($lat, $lon): ${e.message}")
                 null
             }
         }
@@ -293,7 +366,7 @@ class WeatherRepositoryImpl @Inject constructor(
         }
     }
 
-    // ─── ZIP → lat/lon geocoding (reuses WeatherAPI) ──────────────────────
+    // ─── ZIP → lat/lon geocoding ──────────────────────────────────────────
 
     @Suppress("UNCHECKED_CAST")
     override suspend fun getCoordinatesForZip(zipCode: String): Pair<Double, Double>? {
@@ -302,7 +375,6 @@ class WeatherRepositoryImpl @Inject constructor(
 
         return withContext(boundedIo) {
             try {
-                // Use the WeatherAPI search endpoint — lightweight, returns lat/lon
                 val url = "$WEATHER_BASE/search.json?key=${BuildConfig.WEATHER_API_KEY}&q=$zipCode"
                 val request = Request.Builder().url(url)
                     .header("Accept", "application/json")

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.CurrentWeather
 import com.merlottv.kotlin.domain.model.DayForecast
+import com.merlottv.kotlin.domain.model.MarineData
 import com.merlottv.kotlin.domain.model.RadarFrame
 import com.merlottv.kotlin.domain.model.WeatherAlert
 import com.merlottv.kotlin.domain.repository.WeatherRepository
@@ -29,9 +30,10 @@ data class WeatherUiState(
     val zipCode: String = "43616",
     val showZipDialog: Boolean = false,
     val showFullscreenRadar: Boolean = false,
-    val selectedDayIndex: Int = -1,  // -1 = no day selected (show current conditions)
+    val selectedDayIndex: Int = -1,
     val alerts: List<WeatherAlert> = emptyList(),
-    val selectedAlertIndex: Int = -1  // -1 = no alert expanded
+    val selectedAlertIndex: Int = -1,
+    val marineData: MarineData? = null
 )
 
 @HiltViewModel
@@ -45,8 +47,6 @@ class WeatherViewModel @Inject constructor(
 
     private var radarAnimJob: Job? = null
 
-    // NO init{} — lazy loading only when screen becomes visible (same as SpaceX)
-
     fun onScreenVisible() {
         if (!_uiState.value.hasLoadedOnce) {
             viewModelScope.launch {
@@ -57,9 +57,7 @@ class WeatherViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
-        loadAll()
-    }
+    fun refresh() { loadAll() }
 
     fun changeZipCode(zip: String) {
         val trimmed = zip.trim()
@@ -71,40 +69,24 @@ class WeatherViewModel @Inject constructor(
         }
     }
 
-    fun toggleZipDialog() {
-        _uiState.value = _uiState.value.copy(showZipDialog = !_uiState.value.showZipDialog)
-    }
-
-    fun dismissZipDialog() {
-        _uiState.value = _uiState.value.copy(showZipDialog = false)
-    }
-
-    fun toggleFullscreenRadar() {
-        _uiState.value = _uiState.value.copy(showFullscreenRadar = !_uiState.value.showFullscreenRadar)
-    }
-
-    fun dismissFullscreenRadar() {
-        _uiState.value = _uiState.value.copy(showFullscreenRadar = false)
-    }
+    fun toggleZipDialog() { _uiState.value = _uiState.value.copy(showZipDialog = !_uiState.value.showZipDialog) }
+    fun dismissZipDialog() { _uiState.value = _uiState.value.copy(showZipDialog = false) }
+    fun toggleFullscreenRadar() { _uiState.value = _uiState.value.copy(showFullscreenRadar = !_uiState.value.showFullscreenRadar) }
+    fun dismissFullscreenRadar() { _uiState.value = _uiState.value.copy(showFullscreenRadar = false) }
 
     fun selectDay(index: Int) {
-        // Toggle: if same day is clicked again, deselect (go back to current conditions)
         val newIndex = if (_uiState.value.selectedDayIndex == index) -1 else index
         _uiState.value = _uiState.value.copy(selectedDayIndex = newIndex)
     }
 
-    fun dismissDayDetail() {
-        _uiState.value = _uiState.value.copy(selectedDayIndex = -1)
-    }
+    fun dismissDayDetail() { _uiState.value = _uiState.value.copy(selectedDayIndex = -1) }
 
     fun selectAlert(index: Int) {
         val newIndex = if (_uiState.value.selectedAlertIndex == index) -1 else index
         _uiState.value = _uiState.value.copy(selectedAlertIndex = newIndex)
     }
 
-    fun dismissAlertDetail() {
-        _uiState.value = _uiState.value.copy(selectedAlertIndex = -1)
-    }
+    fun dismissAlertDetail() { _uiState.value = _uiState.value.copy(selectedAlertIndex = -1) }
 
     private fun loadAll() {
         viewModelScope.launch {
@@ -115,13 +97,11 @@ class WeatherViewModel @Inject constructor(
                 val radarFrames = repository.getRadarFrames()
 
                 if (weatherResult != null) {
-                    // Fetch NWS alerts using the lat/lon from weather data
-                    val alerts = try {
-                        repository.getActiveAlerts(
-                            weatherResult.first.lat,
-                            weatherResult.first.lon
-                        )
-                    } catch (_: Exception) { emptyList() }
+                    val lat = weatherResult.first.lat
+                    val lon = weatherResult.first.lon
+
+                    val alerts = try { repository.getActiveAlerts(lat, lon) } catch (_: Exception) { emptyList() }
+                    val marine = try { repository.getMarineData(lat, lon) } catch (_: Exception) { null }
 
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
@@ -131,23 +111,19 @@ class WeatherViewModel @Inject constructor(
                         radarFrames = radarFrames,
                         radarAnimIndex = 0,
                         alerts = alerts,
+                        marineData = marine,
                         error = null
                     )
-                    // Start radar animation if we have frames
-                    if (radarFrames.isNotEmpty()) {
-                        startRadarAnimation(radarFrames.size)
-                    }
+                    if (radarFrames.isNotEmpty()) { startRadarAnimation(radarFrames.size) }
                 } else {
                     _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        hasLoadedOnce = true,
+                        isLoading = false, hasLoadedOnce = true,
                         error = "Could not load weather for ZIP: $zip"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    hasLoadedOnce = true,
+                    isLoading = false, hasLoadedOnce = true,
                     error = "Failed to load weather: ${e.message}"
                 )
             }
@@ -158,7 +134,7 @@ class WeatherViewModel @Inject constructor(
         radarAnimJob?.cancel()
         radarAnimJob = viewModelScope.launch {
             while (true) {
-                delay(500) // cycle frames every 500ms
+                delay(500)
                 val nextIndex = (_uiState.value.radarAnimIndex + 1) % frameCount
                 _uiState.value = _uiState.value.copy(radarAnimIndex = nextIndex)
             }

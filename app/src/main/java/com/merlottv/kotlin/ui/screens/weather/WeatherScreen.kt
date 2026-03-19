@@ -104,6 +104,15 @@ fun WeatherScreen(
         viewModel.dismissZipDialog()
     }
 
+    // Day detail overlay (full screen)
+    if (uiState.selectedDayIndex >= 0 && uiState.selectedDayIndex < uiState.forecast.size) {
+        DayDetailOverlay(
+            day = uiState.forecast[uiState.selectedDayIndex],
+            onDismiss = { viewModel.dismissDayDetail() }
+        )
+        return
+    }
+
     // Fullscreen radar overlay
     if (uiState.showFullscreenRadar && uiState.currentWeather != null) {
         Box(
@@ -137,7 +146,20 @@ fun WeatherScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MerlotColors.Background)
+    ) {
+        // Animated weather background
+        if (uiState.currentWeather != null) {
+            WeatherAnimatedBackground(
+                condition = uiState.currentWeather?.condition ?: "",
+                isDay = uiState.currentWeather?.isDay ?: true
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize().background(MerlotColors.Background))
+        }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
             .padding(start = 16.dp, end = 16.dp, top = 16.dp)
     ) {
         when {
@@ -198,7 +220,7 @@ fun WeatherScreen(
                 // Content
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // Header
                     item {
@@ -218,7 +240,6 @@ fun WeatherScreen(
                                 onAlertClick = { index -> viewModel.selectAlert(index) }
                             )
                         }
-                        // Expanded alert detail
                         if (uiState.selectedAlertIndex in uiState.alerts.indices) {
                             item {
                                 AlertDetailCard(
@@ -229,11 +250,68 @@ fun WeatherScreen(
                         }
                     }
 
+                    // Clothing suggestion
+                    uiState.currentWeather?.let { weather ->
+                        val todayForecast = uiState.forecast.firstOrNull()
+                        val suggestion = getClothingSuggestion(
+                            tempF = weather.tempF,
+                            windMph = weather.windMph,
+                            chanceOfRain = todayForecast?.chanceOfRain ?: 0,
+                            uvIndex = weather.uvIndex,
+                            condition = weather.condition
+                        )
+                        item {
+                            val chipShape = RoundedCornerShape(8.dp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(chipShape)
+                                    .background(MerlotColors.Accent.copy(alpha = 0.1f), chipShape)
+                                    .border(1.dp, MerlotColors.Accent.copy(alpha = 0.3f), chipShape)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text("👕  $suggestion", color = MerlotColors.TextPrimary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
                     // Current conditions
                     uiState.currentWeather?.let { weather ->
+                        item { CurrentConditionsCard(weather = weather) }
+                    }
+
+                    // Row: Sun Arc + UV Gauge + Wind Compass
+                    uiState.currentWeather?.let { weather ->
+                        val todayForecast = uiState.forecast.firstOrNull()
                         item {
-                            CurrentConditionsCard(weather = weather)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                SunArcCard(
+                                    sunrise = todayForecast?.sunrise ?: "",
+                                    sunset = todayForecast?.sunset ?: "",
+                                    localTime = weather.localTime,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                UvIndexGauge(
+                                    uvIndex = weather.uvIndex,
+                                    modifier = Modifier.weight(0.6f)
+                                )
+                                WindCompass(
+                                    windDegree = weather.windDegree,
+                                    windMph = weather.windMph,
+                                    gustMph = weather.windGustMph,
+                                    windDir = weather.windDir,
+                                    modifier = Modifier.weight(0.6f)
+                                )
+                            }
                         }
+                    }
+
+                    // Air Quality
+                    uiState.currentWeather?.airQuality?.let { aq ->
+                        item { AirQualityCard(aq = aq, modifier = Modifier.fillMaxWidth()) }
                     }
 
                     // 7-day forecast
@@ -247,13 +325,49 @@ fun WeatherScreen(
                         }
                     }
 
-                    // Selected day detail
-                    if (uiState.selectedDayIndex >= 0 && uiState.selectedDayIndex < uiState.forecast.size) {
-                        item {
-                            DayDetailCard(
-                                day = uiState.forecast[uiState.selectedDayIndex],
-                                onDismiss = { viewModel.dismissDayDetail() }
-                            )
+                    // Weekly Temperature Graph
+                    if (uiState.forecast.size >= 2) {
+                        item { WeeklyTempGraph(forecast = uiState.forecast, modifier = Modifier.fillMaxWidth()) }
+                    }
+
+                    // Moon phase (from today's forecast)
+                    uiState.forecast.firstOrNull()?.let { today ->
+                        if (today.moonPhase.isNotEmpty()) {
+                            item {
+                                val moonShape = RoundedCornerShape(12.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(moonShape)
+                                        .background(MerlotColors.Surface.copy(alpha = 0.8f), moonShape)
+                                        .border(1.dp, MerlotColors.Border.copy(alpha = 0.5f), moonShape)
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(moonPhaseEmoji(today.moonPhase), fontSize = 28.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("MOON PHASE", color = MerlotColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                        Text(today.moonPhase, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("${today.moonIllumination}%", color = MerlotColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        Text("Illumination", color = MerlotColors.TextMuted, fontSize = 9.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column {
+                                        if (today.moonrise.isNotEmpty()) Text("Rise ${today.moonrise}", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                                        if (today.moonset.isNotEmpty()) Text("Set ${today.moonset}", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Marine / Wave data
+                    uiState.marineData?.let { marine ->
+                        if (marine.waveHeightFt > 0) {
+                            item { MarineCard(marine = marine, modifier = Modifier.fillMaxWidth()) }
                         }
                     }
 
@@ -261,13 +375,7 @@ fun WeatherScreen(
                     if (uiState.currentWeather != null) {
                         item {
                             Column {
-                                Text(
-                                    "RADAR",
-                                    color = MerlotColors.TextMuted,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp
-                                )
+                                Text("RADAR", color = MerlotColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 RadarMapComposable(
                                     frames = uiState.radarFrames,
@@ -287,6 +395,7 @@ fun WeatherScreen(
             }
         }
     }
+    } // outer background Box
 }
 
 // ─── Header ──────────────────────────────────────────────────────────────────
@@ -362,8 +471,8 @@ private fun CurrentConditionsCard(weather: CurrentWeather) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(MerlotColors.Surface, shape)
-            .border(1.dp, MerlotColors.Border, shape)
+            .background(MerlotColors.Surface.copy(alpha = 0.8f), shape)
+            .border(1.dp, MerlotColors.Border.copy(alpha = 0.5f), shape)
             .padding(20.dp)
     ) {
         Text(
@@ -478,34 +587,53 @@ private fun ForecastSection(
     selectedIndex: Int,
     onDayClick: (Int) -> Unit
 ) {
+    val focusRequesters = remember(forecast.size) { List(forecast.size) { FocusRequester() } }
+
     Column {
-        Text(
-            "7-DAY FORECAST",
-            color = MerlotColors.TextMuted,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            "Select a day for details",
-            color = MerlotColors.TextMuted,
-            fontSize = 11.sp
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "7-DAY FORECAST",
+                color = MerlotColors.TextMuted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                "Select a day for details",
+                color = MerlotColors.TextMuted,
+                fontSize = 10.sp
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // Use Row (not LazyRow) so all 7 cards always fit on screen
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(forecast.size) { index ->
+            forecast.forEachIndexed { index, day ->
                 ForecastDayCard(
-                    day = forecast[index],
+                    day = day,
                     isSelected = index == selectedIndex,
                     itemIndex = index,
-                    onClick = { onDayClick(index) }
+                    totalItems = forecast.size,
+                    focusRequester = focusRequesters[index],
+                    onFocusLeft = {
+                        if (index > 0) {
+                            try { focusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                        }
+                    },
+                    onFocusRight = {
+                        if (index < forecast.size - 1) {
+                            try { focusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                        }
+                    },
+                    onClick = { onDayClick(index) },
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -517,27 +645,34 @@ private fun ForecastDayCard(
     day: DayForecast,
     isSelected: Boolean = false,
     itemIndex: Int = 0,
-    onClick: () -> Unit = {}
+    totalItems: Int = 7,
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    onFocusLeft: () -> Unit = {},
+    onFocusRight: () -> Unit = {},
+    onClick: () -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(10.dp)
     var isFocused by remember { mutableStateOf(false) }
+    val isToday = itemIndex == 0
 
     val bgColor = when {
         isSelected -> Color(0xFF1A2A3A)
         isFocused -> Color(0xFF252535)
-        else -> MerlotColors.Surface
+        isToday -> Color(0xFF1A1A2E)
+        else -> MerlotColors.Surface.copy(alpha = 0.85f)
     }
 
     val borderColor = when {
         isSelected -> MerlotColors.Accent
         isFocused -> MerlotColors.Accent
+        isToday -> Color(0xFF2A4A5A)
         else -> MerlotColors.Border
     }
 
     Column(
-        modifier = Modifier
-            .width(110.dp)
-            .height(200.dp)
+        modifier = modifier
+            .height(110.dp)
             .clip(shape)
             .background(bgColor, shape)
             .border(
@@ -545,253 +680,226 @@ private fun ForecastDayCard(
                 color = borderColor,
                 shape = shape
             )
+            .focusRequester(focusRequester)
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                ) {
-                    onClick()
-                    true
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionCenter, Key.Enter -> { onClick(); true }
+                        Key.DirectionLeft -> {
+                            if (itemIndex > 0) { onFocusLeft(); true }
+                            else false // let it bubble to open sidebar
+                        }
+                        Key.DirectionRight -> {
+                            if (itemIndex < totalItems - 1) { onFocusRight(); true }
+                            else true // consume at end
+                        }
+                        else -> false
+                    }
                 } else false
             }
-            .onKeyEvent { event ->
-                // Bubble phase: consume LEFT after focus system has moved focus,
-                // preventing event from reaching sidebar handler
-                if (event.type == KeyEventType.KeyDown &&
-                    event.key == Key.DirectionLeft && itemIndex > 0
-                ) true else false
-            }
-            .padding(12.dp),
+            .focusable()
+            .padding(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Day of week
+        // Day label — "TODAY" for first item
         Text(
-            day.dayOfWeek,
-            color = if (isFocused) MerlotColors.Accent else MerlotColors.TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
+            if (isToday) "TODAY" else day.dayOfWeek,
+            color = when {
+                isToday -> MerlotColors.Accent
+                isFocused -> MerlotColors.Accent
+                else -> MerlotColors.TextPrimary
+            },
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = if (isToday) 1.sp else 0.sp
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Weather icon
-        AsyncImage(
-            model = day.conditionIconUrl,
-            contentDescription = day.condition,
-            modifier = Modifier.size(40.dp),
-            contentScale = ContentScale.Fit
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // High temp
-        Text(
-            "${day.maxTempF.toInt()}°",
-            color = MerlotColors.TextPrimary,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        // Low temp
-        Text(
-            "${day.minTempF.toInt()}°",
-            color = MerlotColors.TextMuted,
-            fontSize = 14.sp
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Rain chance — always show slot (keeps cards aligned)
-        if (day.chanceOfRain > 0) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(10.dp), tint = Color(0xFF4FC3F7))
-                Text(
-                    " ${day.chanceOfRain}%",
-                    color = Color(0xFF4FC3F7),
-                    fontSize = 11.sp
-                )
-            }
-        }
-
-        // Snow chance
-        if (day.chanceOfSnow > 0) {
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                "❄ ${day.chanceOfSnow}%",
-                color = Color(0xFFB3E5FC),
-                fontSize = 11.sp
-            )
-        }
-    }
-}
-
-// ─── Day Detail Card ─────────────────────────────────────────────────────────
-
-@Composable
-private fun DayDetailCard(
-    day: DayForecast,
-    onDismiss: () -> Unit
-) {
-    val shape = RoundedCornerShape(12.dp)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(MerlotColors.Surface, shape)
-            .border(2.dp, MerlotColors.Accent, shape)
-            .padding(20.dp)
-    ) {
-        // Header row
+        // Icon + temps row
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
         ) {
             AsyncImage(
                 model = day.conditionIconUrl,
                 contentDescription = day.condition,
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(36.dp),
                 contentScale = ContentScale.Fit
             )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "${day.dayOfWeek} — ${day.date}",
-                    color = MerlotColors.Accent,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    day.condition,
-                    color = MerlotColors.TextPrimary,
-                    fontSize = 14.sp
-                )
-            }
-
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    "H: ${day.maxTempF.toInt()}°F",
+                    "${day.maxTempF.toInt()}°",
                     color = MerlotColors.TextPrimary,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "L: ${day.minTempF.toInt()}°F",
+                    "${day.minTempF.toInt()}°",
                     color = MerlotColors.TextMuted,
-                    fontSize = 14.sp
+                    fontSize = 12.sp
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Details grid
+        // Bottom info row — rain/snow/wind
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            WeatherDetailItem(
-                icon = { Icon(Icons.Default.Air, null, modifier = Modifier.size(16.dp), tint = MerlotColors.Accent) },
-                label = "Wind",
-                value = "${day.maxWindMph.toInt()} mph"
-            )
-            WeatherDetailItem(
-                icon = { Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(16.dp), tint = MerlotColors.Accent) },
-                label = "Humidity",
-                value = "${day.avgHumidity}%"
-            )
             if (day.chanceOfRain > 0) {
-                WeatherDetailItem(
-                    icon = { Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(16.dp), tint = Color(0xFF4FC3F7)) },
-                    label = "Rain",
-                    value = "${day.chanceOfRain}%"
-                )
+                Icon(Icons.Default.WaterDrop, null, modifier = Modifier.size(9.dp), tint = Color(0xFF4FC3F7))
+                Text(" ${day.chanceOfRain}%", color = Color(0xFF4FC3F7), fontSize = 10.sp)
+                Spacer(modifier = Modifier.width(6.dp))
             }
             if (day.chanceOfSnow > 0) {
-                WeatherDetailItem(
-                    icon = { Text("❄", fontSize = 14.sp) },
-                    label = "Snow",
-                    value = "${day.chanceOfSnow}%"
-                )
+                Text("❄${day.chanceOfSnow}%", color = Color(0xFFB3E5FC), fontSize = 10.sp)
+                Spacer(modifier = Modifier.width(6.dp))
             }
-            WeatherDetailItem(
-                icon = { Text("UV", color = MerlotColors.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                label = "UV Index",
-                value = "${day.uvIndex.toInt()}"
-            )
+            Icon(Icons.Default.Air, null, modifier = Modifier.size(9.dp), tint = MerlotColors.TextMuted)
+            Text(" ${day.maxWindMph.toInt()}", color = MerlotColors.TextMuted, fontSize = 10.sp)
         }
+    }
+}
 
-        // Sunrise / Sunset
-        if (day.sunrise.isNotEmpty() || day.sunset.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                if (day.sunrise.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("☀", fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sunrise ${day.sunrise}", color = MerlotColors.TextMuted, fontSize = 12.sp)
-                    }
-                }
-                if (day.sunset.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🌙", fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sunset ${day.sunset}", color = MerlotColors.TextMuted, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
+// ─── Day Detail Overlay (Full Screen) ────────────────────────────────────────
 
-        // Hourly forecast
-        if (day.hourly.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                "HOURLY FORECAST",
-                color = MerlotColors.TextMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(day.hourly.size) { index ->
-                    HourlyCard(hour = day.hourly[index], itemIndex = index)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Close button
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
+@Composable
+private fun DayDetailOverlay(
+    day: DayForecast,
+    onDismiss: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xF0101020)).padding(20.dp)) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            MerlotChip(
-                selected = false,
-                onClick = onDismiss,
-                label = {
-                    Text("Close", fontSize = 12.sp, color = MerlotColors.TextPrimary)
+            // Header with prominent HIGH / LOW
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(
+                        model = day.conditionIconUrl, contentDescription = day.condition,
+                        modifier = Modifier.size(64.dp), contentScale = ContentScale.Fit
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("${day.dayOfWeek} — ${day.date}", color = MerlotColors.Accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(day.condition, color = MerlotColors.TextPrimary, fontSize = 14.sp)
+                    }
+                    // High / Low prominently displayed
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("HIGH", color = Color(0xFFFF6B35), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text("${day.maxTempF.toInt()}°", color = Color(0xFFFF6B35), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("LOW", color = Color(0xFF4FC3F7), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text("${day.minTempF.toInt()}°", color = Color(0xFF4FC3F7), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
-            )
+            }
+
+            // Detail cards row
+            item {
+                val cs = RoundedCornerShape(10.dp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DetailMini("Wind", "${day.maxWindMph.toInt()} mph", MerlotColors.Accent, Modifier.weight(1f), cs)
+                    DetailMini("Humidity", "${day.avgHumidity}%", MerlotColors.Accent, Modifier.weight(1f), cs)
+                    DetailMini("Rain", "${day.chanceOfRain}%", Color(0xFF4FC3F7), Modifier.weight(1f), cs)
+                    DetailMini("UV", "${day.uvIndex.toInt()}", Color(0xFFFFEB3B), Modifier.weight(1f), cs)
+                    DetailMini("Visibility", "${day.avgVisibilityMiles.toInt()} mi", MerlotColors.TextMuted, Modifier.weight(1f), cs)
+                    if (day.chanceOfSnow > 0) DetailMini("Snow", "${day.chanceOfSnow}%", Color(0xFFB3E5FC), Modifier.weight(1f), cs)
+                    if (day.totalPrecipIn > 0) DetailMini("Precip", "${String.format("%.2f", day.totalPrecipIn)}\"", Color(0xFF4FC3F7), Modifier.weight(1f), cs)
+                }
+            }
+
+            // Sunrise/Sunset + Moon row
+            item {
+                val barShape = RoundedCornerShape(10.dp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Sun info
+                    Row(
+                        modifier = Modifier.weight(1f).clip(barShape).background(MerlotColors.Surface.copy(alpha = 0.85f), barShape)
+                            .border(1.dp, MerlotColors.Border.copy(alpha = 0.5f), barShape).padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (day.sunrise.isNotEmpty()) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("☀", fontSize = 16.sp); Text(day.sunrise, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium); Text("Sunrise", color = MerlotColors.TextMuted, fontSize = 9.sp) } }
+                        if (day.sunset.isNotEmpty()) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("🌙", fontSize = 16.sp); Text(day.sunset, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium); Text("Sunset", color = MerlotColors.TextMuted, fontSize = 9.sp) } }
+                    }
+                    // Moon info
+                    if (day.moonPhase.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.weight(1f).clip(barShape).background(MerlotColors.Surface.copy(alpha = 0.85f), barShape)
+                                .border(1.dp, MerlotColors.Border.copy(alpha = 0.5f), barShape).padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(moonPhaseEmoji(day.moonPhase), fontSize = 22.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(day.moonPhase, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                Text("${day.moonIllumination}% illuminated", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                            }
+                            Column {
+                                if (day.moonrise.isNotEmpty()) Text("Rise ${day.moonrise}", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                                if (day.moonset.isNotEmpty()) Text("Set ${day.moonset}", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Hourly temperature graph
+            if (day.hourly.isNotEmpty()) {
+                item { HourlyTempGraph(hourly = day.hourly, modifier = Modifier.fillMaxWidth()) }
+            }
+
+            // Full scrollable hourly cards (all 24 hours)
+            if (day.hourly.isNotEmpty()) {
+                item {
+                    Column {
+                        Text("HOURLY FORECAST", color = MerlotColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            itemsIndexed(day.hourly) { index, hour ->
+                                HourlyCard(hour = hour, itemIndex = index, totalItems = day.hourly.size)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Back hint
+            item {
+                Text("Press BACK to return", color = MerlotColors.TextMuted, fontSize = 11.sp,
+                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            }
+            item { Spacer(modifier = Modifier.height(12.dp)) }
         }
     }
 }
 
 @Composable
-private fun HourlyCard(hour: HourForecast, itemIndex: Int = 0) {
+private fun DetailMini(label: String, value: String, accentColor: Color, modifier: Modifier, shape: RoundedCornerShape) {
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(MerlotColors.Surface.copy(alpha = 0.85f), shape)
+            .border(1.dp, MerlotColors.Border.copy(alpha = 0.5f), shape)
+            .padding(10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, color = accentColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = MerlotColors.TextMuted, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun HourlyCard(hour: HourForecast, itemIndex: Int = 0, totalItems: Int = 24) {
     val shape = RoundedCornerShape(8.dp)
     var isFocused by remember { mutableStateOf(false) }
 
@@ -810,11 +918,20 @@ private fun HourlyCard(hour: HourForecast, itemIndex: Int = 0) {
             )
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
-            .onKeyEvent { event ->
-                // Consume LEFT after focus move to prevent sidebar opening
-                if (event.type == KeyEventType.KeyDown &&
-                    event.key == Key.DirectionLeft && itemIndex > 0
-                ) true else false
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionLeft -> {
+                            if (itemIndex > 0) false // let focus system handle
+                            else false // bubble up
+                        }
+                        Key.DirectionRight -> {
+                            if (itemIndex < totalItems - 1) false
+                            else true // consume at end
+                        }
+                        else -> false
+                    }
+                } else false
             }
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
