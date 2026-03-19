@@ -177,6 +177,9 @@ fun HomeScreen(
                                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
                                 )
                                 val platformListState = rememberLazyListState()
+                                val platformFocusRequesters = remember {
+                                    List(PLATFORM_TABS.size) { FocusRequester() }
+                                }
                                 LazyRow(
                                     state = platformListState,
                                     modifier = Modifier.fillMaxWidth(),
@@ -189,6 +192,7 @@ fun HomeScreen(
                                         Box(
                                             modifier = Modifier
                                                 .size(56.dp)
+                                                .focusRequester(platformFocusRequesters[index])
                                                 .then(
                                                     if (index == 0) Modifier.focusRequester(firstPlatformTabFocusRequester)
                                                     else Modifier
@@ -203,13 +207,11 @@ fun HomeScreen(
                                                 )
                                                 .onFocusChanged { state ->
                                                     isFocused = state.isFocused
-                                                    // Auto-scroll LazyRow to keep focused item visible
                                                     if (state.isFocused) {
                                                         scope.launch { platformListState.animateScrollToItem(index) }
                                                     }
                                                 }
-                                                .onKeyEvent { event ->
-                                                    // Bubble phase: handle Enter/Center click
+                                                .onPreviewKeyEvent { event ->
                                                     if (event.type == KeyEventType.KeyDown) {
                                                         when (event.key) {
                                                             Key.DirectionCenter, Key.Enter -> {
@@ -217,9 +219,21 @@ fun HomeScreen(
                                                                 true
                                                             }
                                                             Key.DirectionLeft -> {
-                                                                // At first item, let it bubble up to open sidebar
-                                                                // Otherwise consume to stay in row
-                                                                index > 0
+                                                                if (index > 0) {
+                                                                    // Move focus to previous tab
+                                                                    try { platformFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                                                    true // consume so sidebar doesn't open
+                                                                } else {
+                                                                    true // at first item, also consume to block sidebar
+                                                                }
+                                                            }
+                                                            Key.DirectionRight -> {
+                                                                if (index < PLATFORM_TABS.size - 1) {
+                                                                    try { platformFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                                                    true
+                                                                } else {
+                                                                    true // at last item, stay put
+                                                                }
                                                             }
                                                             else -> false
                                                         }
