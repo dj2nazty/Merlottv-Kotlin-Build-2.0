@@ -224,7 +224,7 @@ fun HomeScreen(
                                                                     try { platformFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
                                                                     true // consume so sidebar doesn't open
                                                                 } else {
-                                                                    true // at first item, also consume to block sidebar
+                                                                    false // at first item, let event bubble up to open sidebar
                                                                 }
                                                             }
                                                             Key.DirectionRight -> {
