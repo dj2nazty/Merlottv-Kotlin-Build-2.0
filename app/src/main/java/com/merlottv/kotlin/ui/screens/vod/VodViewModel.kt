@@ -70,7 +70,7 @@ val PLATFORM_TABS = listOf(
         name = "Netflix",
         iconRes = com.merlottv.kotlin.R.drawable.ic_netflix,
         bgColor = 0xFF000000,   // Netflix black
-        mdbListUrl = "https://mdblist.com/lists/garycrawfordgc/netflix-movies/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/netflix-series-2/json"
     ),
     PlatformTab(
         id = "hgtv",
@@ -84,35 +84,35 @@ val PLATFORM_TABS = listOf(
         name = "Disney+",
         iconRes = com.merlottv.kotlin.R.drawable.ic_disney_plus,
         bgColor = 0xFF0B1D3A,   // Disney+ dark blue
-        mdbListUrl = "https://mdblist.com/lists/mdatum/disney/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/disney-series/json"
     ),
     PlatformTab(
         id = "prime",
         name = "Prime",
         iconRes = com.merlottv.kotlin.R.drawable.ic_prime,
         bgColor = 0xFF00A8E1,   // Prime Video blue
-        mdbListUrl = "https://mdblist.com/lists/garycrawfordgc/amazon-prime-shows/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/amazon-prime-video-series/json"
     ),
     PlatformTab(
         id = "hbomax",
         name = "Max",
         iconRes = com.merlottv.kotlin.R.drawable.ic_hbo_max,
         bgColor = 0xFF6B32C8,   // HBO Max purple
-        mdbListUrl = "https://mdblist.com/lists/exmachinadeo/hbo-movies-list/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/hbo-max-series/json"
     ),
     PlatformTab(
         id = "paramount",
         name = "Paramount+",
         iconRes = com.merlottv.kotlin.R.drawable.ic_paramount_plus,
         bgColor = 0xFF0064FF,   // Paramount+ blue
-        mdbListUrl = "https://mdblist.com/lists/sig1878/movies-paramount-plus/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/paramount-plus-series/json"
     ),
     PlatformTab(
         id = "peacock",
         name = "Peacock",
         iconRes = com.merlottv.kotlin.R.drawable.ic_peacock,
         bgColor = 0xFF000000,   // Peacock black
-        mdbListUrl = "https://mdblist.com/lists/k0meta/peacock-originals/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/peacock-premium-series/json"
     ),
     PlatformTab(
         id = "crunchyroll",
@@ -126,7 +126,7 @@ val PLATFORM_TABS = listOf(
         name = "Apple TV+",
         iconRes = com.merlottv.kotlin.R.drawable.ic_apple_tv,
         bgColor = 0xFF000000,   // Apple TV+ black
-        mdbListUrl = "https://mdblist.com/lists/k0meta/appletv-originals/json"
+        mdbListUrl = "https://mdblist.com/lists/notamongo5/apple-tv-series/json"
     ),
     PlatformTab(
         id = "starz",
