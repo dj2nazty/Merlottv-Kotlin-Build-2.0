@@ -78,6 +78,18 @@ object DefaultData {
             name = "MerlotTV+",
             url = "http://10.0.2.2:7000/manifest.json",
             isDefault = true
+        ),
+        Addon(
+            id = "comet",
+            name = "Comet",
+            url = "https://comet.feels.legal/eyJtYXhSZXN1bHRzUGVyUmVzb2x1dGlvbiI6MCwibWF4U2l6ZSI6MCwiY2FjaGVkT25seSI6ZmFsc2UsInNvcnRDYWNoZWRVbmNhY2hlZFRvZ2V0aGVyIjpmYWxzZSwicmVtb3ZlVHJhc2giOnRydWUsInJlc3VsdEZvcm1hdCI6WyJhbGwiXSwiZGVicmlkU2VydmljZXMiOlt7InNlcnZpY2UiOiJ0b3Jib3giLCJhcGlLZXkiOiI1MGM3NGE0OS1hNmJjLTQwZTktOTMxZS0xY2VlMTk0M2U4N2IifV0sImVuYWJsZVRvcnJlbnQiOnRydWUsImRlZHVwbGljYXRlU3RyZWFtcyI6ZmFsc2UsInNjcmFwZURlYnJpZEFjY291bnRUb3JyZW50cyI6ZmFsc2UsImRlYnJpZFN0cmVhbVByb3h5UGFzc3dvcmQiOiIiLCJsYW5ndWFnZXMiOnsicmVxdWlyZWQiOlsiZW4iXSwiYWxsb3dlZCI6WyJlbiJdLCJleGNsdWRlIjpbImphIiwiemgiLCJydSIsImFyIiwicHQiLCJlcyIsImZyIiwiZGUiLCJpdCIsImtvIiwiaGkiLCJibiIsInBhIiwibXIiLCJndSIsInRhIiwidGUiLCJrbiIsIm1sIiwidGgiLCJ2aSIsImlkIiwidHIiLCJoZSIsImZhIiwidWsiLCJlbCIsImx0IiwibHYiLCJldCIsInBsIiwiY3MiLCJzayIsImh1Iiwicm8iLCJiZyIsInNyIiwiaHIiLCJzbCIsIm5sIiwiZGEiLCJmaSIsInN2Iiwibm8iLCJtcyIsImxhIl0sInByZWZlcnJlZCI6WyJlbiJdfSwicmVzb2x1dGlvbnMiOnsicjU3NnAiOmZhbHNlLCJyNDgwcCI6ZmFsc2UsInIzNjBwIjpmYWxzZSwicjI0MHAiOmZhbHNlLCJ1bmtub3duIjpmYWxzZX0sIm9wdGlvbnMiOnsicmVtb3ZlX3JhbmtzX3VuZGVyIjotMTAwMDAwMDAwMDAsImFsbG93X2VuZ2xpc2hfaW5fbGFuZ3VhZ2VzIjpmYWxzZSwicmVtb3ZlX3Vua25vd25fbGFuZ3VhZ2VzIjpmYWxzZX19/manifest.json",
+            isDefault = true
+        ),
+        Addon(
+            id = "mediafusion",
+            name = "Fusion",
+            url = "https://mediafusion.elfhosted.com/D-zRJlbm56oO-Xoyd5NuONYDCRilVv-jvkthMtkVIjxcMFWqiP6UXwK69ulb6QT8sBIspMHBgZuoI78Yb32IqPSFRwVlG-mAMwx5lnIbQSY82z4LpZ6RBS1haWtOzjlQ01jssCyrG_1xMI0LjY18Po-0K1MOnwEZUrXIFYJ6KDZDQEuJ29vfpPsnh97O8PYtJbl6gAWZXLGyMbA5812-w0LAXJiyQkPJy3zDDDQGAoayZ3C-X_27DuW8wvgCgDXvBS3emhuutxNQ1Y9QJt7CLaukq5No7H7Kw5iRPbnZH0X4c/manifest.json",
+            isDefault = true
         )
     )
 

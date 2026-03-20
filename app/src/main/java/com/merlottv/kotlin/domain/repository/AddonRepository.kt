@@ -16,4 +16,8 @@ interface AddonRepository {
     suspend fun searchCatalog(addon: Addon, type: String, query: String): List<MetaPreview>
     suspend fun addAddon(url: String): Addon?
     suspend fun removeAddon(url: String)
+
+    /** Pause/resume network requests — when paused, only cached results are returned.
+     *  Use this when Live TV is active to prevent addon traffic from competing for bandwidth. */
+    fun setNetworkPaused(paused: Boolean)
 }

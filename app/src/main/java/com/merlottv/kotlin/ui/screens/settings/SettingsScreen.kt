@@ -592,6 +592,54 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ Buffer Automatic Backup Scan ═══ [Playback]
+        if (selectedTab == "Playback") {
+            SettingsSection(
+                title = "Buffer Automatic Backup Scan",
+                icon = { Text("\uD83D\uDD04", fontSize = 18.sp) }
+            ) {
+                Text(
+                    "When enabled, the app automatically searches backup M3U sources for a better stream after repeated buffering. Keeps your channels playing without manual intervention.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                        .dpadFocusable(onClick = { viewModel.toggleBufferAutoBackupScan(!uiState.bufferAutoBackupScan) })
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            "Buffer Automatic Backup Scan",
+                            color = MerlotColors.TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (uiState.bufferAutoBackupScan) "Enabled — auto-switches to backup stream after 2 rebuffers"
+                            else "Disabled — uses original stream behavior",
+                            color = if (uiState.bufferAutoBackupScan) MerlotColors.Accent else MerlotColors.TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = uiState.bufferAutoBackupScan,
+                        onCheckedChange = null,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MerlotColors.Accent,
+                            checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.height(24.dp).focusable(false)
+                    )
+                }
+            }
+        }
+
         // ═══ Bitrate Checker ═══ [Playback]
         if (selectedTab == "Playback") {
             SettingsSection(

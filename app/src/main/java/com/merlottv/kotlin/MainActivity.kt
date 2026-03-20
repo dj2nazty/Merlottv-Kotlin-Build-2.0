@@ -58,24 +58,31 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
 
-        // Catch Compose focus-search crash on TV: "LayoutCoordinate operations are only
-        // valid when isAttached is true" — happens when D-pad navigation tries to measure
-        // an item that was scrolled out of the LazyRow viewport. This is a known Compose
-        // bug; swallowing it here prevents the app from crashing.
-        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            if (throwable is IllegalStateException &&
-                throwable.message?.contains("isAttached") == true
-            ) {
-                android.util.Log.w("MerlotTV", "Suppressed Compose focus crash", throwable)
-                // Don't kill the app — the UI recovers on its own
+    /**
+     * Intercept key dispatch to catch Compose's internal focus-search crash:
+     * "LayoutCoordinate operations are only valid when isAttached is true"
+     *
+     * This is a known Compose bug with LazyColumn/LazyRow + D-pad navigation —
+     * the focus system tries to measure an item that was scrolled off-screen and
+     * already detached. Catching it here lets the UI recover gracefully instead
+     * of killing the app.
+     */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        return try {
+            super.dispatchKeyEvent(event)
+        } catch (e: IllegalStateException) {
+            if (e.message?.contains("isAttached") == true) {
+                android.util.Log.w("MerlotTV", "Suppressed Compose focus crash", e)
+                true // Consume the event — UI recovers on next frame
             } else {
-                defaultHandler?.uncaughtException(thread, throwable)
+                throw e
             }
         }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
         setContent {
             MerlotTVTheme {

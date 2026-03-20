@@ -64,6 +64,8 @@ data class SettingsUiState(
     val availableCategories: List<String> = emptyList(),
     // Live TV buffer duration (ms) — adjustable 300–3000 in 100ms steps
     val bufferDurationMs: Int = 800,
+    // Buffer Automatic Backup Scan — auto-failover to backup M3U on rebuffer
+    val bufferAutoBackupScan: Boolean = false,
     // Weather alerts on Live TV / VOD
     val weatherAlertsEnabled: Boolean = true,
     // Auto frame rate matching
@@ -122,6 +124,7 @@ class SettingsViewModel @Inject constructor(
             val customEpg = settingsDataStore.customEpgSources.first()
             val backupSources = settingsDataStore.backupSources.first()
             val bufferMs = settingsDataStore.bufferDurationMs.first()
+            val bufferAutoBackup = settingsDataStore.bufferAutoBackupScan.first()
             val weatherAlertsOn = settingsDataStore.weatherAlertsEnabled.first()
             val frameRateMode = settingsDataStore.frameRateMatching.first()
             val nextEpAutoPlay = settingsDataStore.nextEpisodeAutoPlay.first()
@@ -140,6 +143,7 @@ class SettingsViewModel @Inject constructor(
                 defaultEpgSources = defaultEpg,
                 backupSources = backupSources,
                 bufferDurationMs = bufferMs,
+                bufferAutoBackupScan = bufferAutoBackup,
                 weatherAlertsEnabled = weatherAlertsOn,
                 frameRateMatching = frameRateMode,
                 nextEpisodeAutoPlay = nextEpAutoPlay,
@@ -562,6 +566,15 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(bufferDurationMs = clamped)
         viewModelScope.launch {
             settingsDataStore.setBufferDurationMs(clamped)
+            cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    // ─── Buffer Automatic Backup Scan ───
+    fun toggleBufferAutoBackupScan(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(bufferAutoBackupScan = enabled)
+        viewModelScope.launch {
+            settingsDataStore.setBufferAutoBackupScan(enabled)
             cloudSyncManager.notifySettingsChanged()
         }
     }

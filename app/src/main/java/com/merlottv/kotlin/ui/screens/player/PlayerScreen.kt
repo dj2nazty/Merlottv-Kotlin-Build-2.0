@@ -126,6 +126,10 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(true) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
+
+    // Intro video overlay — shown until the stream is actually ready to play
+    var playerReady by remember { mutableStateOf(false) }
+    var introVideoView by remember { mutableStateOf<android.widget.VideoView?>(null) }
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
 
@@ -228,10 +232,15 @@ fun PlayerScreen(
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
                             totalDuration = duration.coerceAtLeast(0)
+                            playerReady = true
                         }
                     }
                     override fun onIsPlayingChanged(playing: Boolean) {
                         isPlaying = playing
+                    }
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        // Stream failed — dismiss intro so user sees the error state
+                        playerReady = true
                     }
                 })
             }
@@ -380,7 +389,12 @@ fun PlayerScreen(
             val pos = player.currentPosition
             val dur = player.duration.coerceAtLeast(0)
             val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
-            // Release MediaSession + player to free memory immediately
+            // Release intro video — stopPlayback + suspend to free hardware codec
+            try {
+                introVideoView?.stopPlayback()
+                introVideoView?.suspend()  // Releases underlying MediaPlayer + codec
+                introVideoView = null
+            } catch (_: Exception) {}
             mediaSession.release()
             player.release()
             // Save progress async — survives composable disposal via GlobalScope
@@ -464,7 +478,8 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     this.player = player
                     useController = false
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+                    // Hide buffering spinner while intro plays; show it for mid-playback rebuffer
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     subtitleView?.apply {
                         setUserDefaultTextSize()
                     }
@@ -492,6 +507,65 @@ fun PlayerScreen(
             },
             modifier = Modifier.fillMaxSize()
         )
+
+        // ── Branded intro video overlay ──────────────────────────────────
+        // Plays merlot_player_intro.mp4 on loop until the stream is buffered
+        // and ready. Covers the black screen / buffering state entirely.
+        AnimatedVisibility(
+            visible = !playerReady,
+            enter = fadeIn(),
+            exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(400)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        android.widget.VideoView(ctx).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            val uri = android.net.Uri.parse(
+                                "android.resource://${ctx.packageName}/${com.merlottv.kotlin.R.raw.merlot_player_intro}"
+                            )
+                            setVideoURI(uri)
+                            setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                mp.start()
+                            }
+                            setOnErrorListener { _, _, _ -> true }
+                            introVideoView = this
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        // Release intro video once stream is ready — free hardware codec immediately
+        LaunchedEffect(playerReady) {
+            if (playerReady) {
+                delay(500) // Let fade-out animation finish
+                try {
+                    introVideoView?.stopPlayback()
+                    introVideoView?.suspend()
+                    introVideoView = null
+                } catch (_: Exception) {}
+            }
+        }
+
+        // Timeout: if stream isn't ready in 30s, dismiss intro anyway
+        LaunchedEffect(Unit) {
+            delay(30_000)
+            if (!playerReady) {
+                playerReady = true
+            }
+        }
 
         // Pause icon overlay
         AnimatedVisibility(
@@ -615,6 +689,7 @@ fun PlayerScreen(
                     val newUrl = stream.url.ifEmpty { stream.externalUrl }
                     if (newUrl.isNotEmpty() && newUrl != currentStreamUrl) {
                         currentStreamUrl = newUrl
+                        playerReady = false // Show intro video while new stream buffers
                         val savedPos = player.currentPosition
                         player.stop()
                         player.clearMediaItems()

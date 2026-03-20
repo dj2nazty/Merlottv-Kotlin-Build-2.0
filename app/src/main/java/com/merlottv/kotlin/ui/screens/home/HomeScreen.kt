@@ -96,7 +96,16 @@ fun HomeScreen(
 
     // Focus restoration: track the last focused item ID across navigation
     var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
-    val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val focusRequesters = remember { linkedMapOf<String, FocusRequester>() }
+
+    // LRU cap: keep map under 100 entries to prevent memory leaks
+    LaunchedEffect(focusRequesters.size) {
+        if (focusRequesters.size > 100) {
+            val excess = focusRequesters.size - 100
+            val keysToRemove = focusRequesters.keys.take(excess)
+            keysToRemove.forEach { focusRequesters.remove(it) }
+        }
+    }
 
     // Default focus to first streaming service tab
     LaunchedEffect(uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
@@ -118,10 +127,29 @@ fun HomeScreen(
         }
     }
 
+    // Throttle rapid D-pad DOWN/UP to prevent Compose focus search crash on detached nodes
+    var lastVerticalNavTime by remember { mutableStateOf(0L) }
+    val verticalNavThrottleMs = 80L
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MerlotColors.Background)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionDown || event.key == Key.DirectionUp)
+                ) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastVerticalNavTime < verticalNavThrottleMs) {
+                        true // Consume rapid repeat to prevent crash
+                    } else {
+                        lastVerticalNavTime = now
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
     ) {
         when {
             uiState.isLoading && uiState.catalogRows.isEmpty() -> {
@@ -406,17 +434,17 @@ private fun ContinueWatchingCard(
         onFocused()
     }
 
-    // Spring-based scale animation
+    // Lightweight tween scale
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        targetValue = if (isFocused) 1.03f else 1f,
+        animationSpec = tween(durationMillis = 150),
         label = "cwCardScale"
     )
 
-    // Width expansion on focus
+    // Fixed width — no resize on focus
     val cardWidth by animateDpAsState(
-        targetValue = if (isFocused) 172.dp else 160.dp,
-        animationSpec = tween(durationMillis = 200),
+        targetValue = 160.dp,
+        animationSpec = tween(durationMillis = 150),
         label = "cwCardWidth"
     )
 
@@ -740,10 +768,9 @@ private fun CatalogRowSection(
         }
     }
 
-    // Periodically clean focus requesters map to prevent memory leak
+    // Clean focus requesters map — keep only current items
     LaunchedEffect(items.size) {
-        if (focusRequesters.size > 150) {
-            // Keep only IDs that exist in current items
+        if (focusRequesters.size > 100) {
             val validIds = items.map { it.id }.toSet()
             focusRequesters.keys.removeAll { it !in validIds }
         }
@@ -831,32 +858,30 @@ private fun PosterCard(
         onFocused()
     }
 
-    // Spring-based scale animation
+    // Lightweight tween scale — no spring overhead, smaller scale change
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        targetValue = if (isFocused) 1.03f else 1f,
+        animationSpec = tween(durationMillis = 150),
         label = "cardScale"
     )
 
-    // Width: expands to landscape hero when trailer plays
+    // Width: expands to landscape hero when trailer plays, fixed otherwise
     val cardWidth by animateDpAsState(
         targetValue = when {
             isTrailerPlaying -> 280.dp
-            isFocused -> 140.dp
-            else -> 130.dp
+            else -> 130.dp  // Fixed — no resize on focus
         },
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = 200),
         label = "cardWidth"
     )
 
-    // Height: switches to 16:9 landscape when trailer plays
+    // Height: switches to 16:9 landscape when trailer plays, fixed otherwise
     val cardHeight by animateDpAsState(
         targetValue = when {
             isTrailerPlaying -> 158.dp
-            isFocused -> 210.dp
-            else -> 195.dp
+            else -> 195.dp  // Fixed — no resize on focus
         },
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = 200),
         label = "cardHeight"
     )
 
@@ -960,11 +985,11 @@ private fun PosterCard(
                 }
             }
 
-            // Favorite heart overlay (shows after long-press) — animated entrance/exit
+            // Favorite heart overlay (shows after long-press)
             if (showHeartOverlay) {
                 val heartScale by animateFloatAsState(
                     targetValue = 1f,
-                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
+                    animationSpec = tween(durationMillis = 200),
                     label = "heartScale"
                 )
                 Box(

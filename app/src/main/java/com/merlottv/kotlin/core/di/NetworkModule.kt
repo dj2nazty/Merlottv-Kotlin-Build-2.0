@@ -41,8 +41,8 @@ object NetworkModule {
 
         return OkHttpClient.Builder()
             .cache(cache)
-            // Keep more connections alive for faster subsequent requests to same hosts
-            .connectionPool(ConnectionPool(20, 5, TimeUnit.MINUTES))
+            // 30 idle connections (warm for failover), 2-min keep-alive (free sockets faster)
+            .connectionPool(ConnectionPool(30, 2, TimeUnit.MINUTES))
             // Tighter timeouts — fail fast on dead hosts instead of blocking UI
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)

@@ -34,6 +34,7 @@ import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.DefaultData
 import com.merlottv.kotlin.domain.model.EpgChannel
 import com.merlottv.kotlin.domain.model.EpgEntry
+import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.ChannelRepository
 import com.merlottv.kotlin.domain.repository.EpgRepository
 import com.merlottv.kotlin.domain.repository.FavoritesRepository
@@ -138,7 +139,8 @@ class LiveTvViewModel @Inject constructor(
     private val favoritesRepository: FavoritesRepository,
     private val settingsDataStore: SettingsDataStore,
     private val epgRepository: EpgRepository,
-    private val backupChannelRepository: BackupChannelRepository
+    private val backupChannelRepository: BackupChannelRepository,
+    private val addonRepository: AddonRepository
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(LiveTvUiState())
@@ -153,8 +155,10 @@ class LiveTvViewModel @Inject constructor(
     // Track playlist names for source display
     private var playlistNames: Map<String, String> = emptyMap() // url → name
 
-    // BandwidthMeter reference for real-time measured bitrate
-    private var bandwidthMeterRef: DefaultBandwidthMeter? = null
+    // Single shared BandwidthMeter — both players use this for consistent bitrate estimation
+    private val sharedBandwidthMeter: DefaultBandwidthMeter = DefaultBandwidthMeter.Builder(application)
+        .setResetOnNetworkTypeChange(true)
+        .build()
 
     // Periodic bitrate refresh job (active while Quick Menu is open)
     private var bitrateRefreshJob: Job? = null
@@ -164,6 +168,10 @@ class LiveTvViewModel @Inject constructor(
     private var sessionRebufferCount = 0
     private var sessionTotalRebufferMs = 0L
     private var wasPlayingBeforeBuffer = false
+    private var rebufferWindowStartTime = 0L // When the first rebuffer in current window started
+
+    // Buffer Automatic Backup Scan setting (read once at init, updated via Flow)
+    private var bufferAutoBackupScanEnabled = false
 
     // Stall watchdog — auto-reconnects when buffering exceeds threshold
     private var stallWatchdogJob: Job? = null
@@ -181,6 +189,8 @@ class LiveTvViewModel @Inject constructor(
         private const val PREWARM_REFRESH_MS = 30_000L // Re-warm every 30s to keep connections alive
         private const val STALL_WATCHDOG_MS = 30_000L // Auto-reconnect after 30s of buffering
         private const val VLC_STALL_WATCHDOG_MS = 20_000L // VLC stall timeout (shorter, VLC buffers less)
+        private const val REBUFFER_THRESHOLD = 2 // Trigger failover after this many rebuffers...
+        private const val REBUFFER_WINDOW_MS = 10 * 60 * 1000L // ...within this time window (10 min)
 
         // Local affiliate channels that can't handle Apollo's aggressive 10-min buffer.
         // These get a gentle TiviMate-style config instead.
@@ -224,18 +234,13 @@ class LiveTvViewModel @Inject constructor(
             .setBackBuffer(20_000, true)                // 20s back-buffer
             .build()
 
-        val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
-            .setResetOnNetworkTypeChange(true)
-            .build()
-        bandwidthMeterRef = bandwidthMeter
-
         val httpFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(5_000)
             .setReadTimeoutMs(8_000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
             .setDefaultRequestProperties(mapOf("Connection" to "keep-alive", "Accept" to "*/*"))
-            .setTransferListener(bandwidthMeter)
+            .setTransferListener(sharedBandwidthMeter)
 
         val dataSourceFactory = DefaultDataSource.Factory(application, httpFactory)
         val gentleMediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -256,13 +261,83 @@ class LiveTvViewModel @Inject constructor(
         ExoPlayer.Builder(application)
             .setLoadControl(gentleLoadControl)
             .setMediaSourceFactory(gentleMediaSourceFactory)
-            .setBandwidthMeter(bandwidthMeter)
+            .setBandwidthMeter(sharedBandwidthMeter)
             .setTrackSelector(trackSelector)
             .setRenderersFactory(renderersFactory)
             .build()
             .apply {
                 playWhenReady = true
                 Log.d("LiveTvVM", "Gentle player created for local affiliates (50s buffer, 60MB cap)")
+
+                addListener(object : Player.Listener {
+                    override fun onVideoSizeChanged(videoSize: VideoSize) {
+                        if (isPlayerReleased) return
+                        val resolution = if (videoSize.width > 0 && videoSize.height > 0) {
+                            "${videoSize.width}x${videoSize.height}"
+                        } else ""
+                        _uiState.value = _uiState.value.copy(videoResolution = resolution)
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        if (isPlayerReleased) return
+                        Log.w("LiveTvVM", "Gentle player error: ${error.errorCodeName}", error)
+                        handlePlaybackError()
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (isPlayerReleased) return
+                        when (playbackState) {
+                            Player.STATE_READY -> {
+                                stallWatchdogJob?.cancel()
+                                stallWatchdogJob = null
+                                if (wasPlayingBeforeBuffer && rebufferStartTime > 0) {
+                                    val rebufferDuration = System.currentTimeMillis() - rebufferStartTime
+                                    sessionTotalRebufferMs += rebufferDuration
+                                    rebufferStartTime = 0L
+                                    _uiState.value = _uiState.value.copy(
+                                        isBuffering = false,
+                                        lastRebufferDurationMs = rebufferDuration,
+                                        totalRebufferMs = sessionTotalRebufferMs
+                                    )
+                                }
+                                wasPlayingBeforeBuffer = false
+                            }
+                            Player.STATE_BUFFERING -> {
+                                if (_uiState.value.selectedChannel != null && !_uiState.value.isBuffering) {
+                                    val isRebuffer = _uiState.value.videoResolution.isNotEmpty()
+                                    if (isRebuffer) {
+                                        sessionRebufferCount++
+                                        val now = System.currentTimeMillis()
+                                        rebufferStartTime = now
+                                        wasPlayingBeforeBuffer = true
+
+                                        // Track rebuffer window — reset if outside 10-min window
+                                        if (rebufferWindowStartTime == 0L || now - rebufferWindowStartTime > REBUFFER_WINDOW_MS) {
+                                            rebufferWindowStartTime = now
+                                            sessionRebufferCount = 1 // Reset count for new window
+                                        }
+
+                                        _uiState.value = _uiState.value.copy(
+                                            isBuffering = true,
+                                            rebufferCount = sessionRebufferCount
+                                        )
+
+                                        // Hit rebuffer threshold — immediately try backup streams (no waiting)
+                                        if (bufferAutoBackupScanEnabled && sessionRebufferCount >= REBUFFER_THRESHOLD) {
+                                            Log.w("LiveTvVM", "Rebuffer threshold hit: $sessionRebufferCount rebuffers in ${(now - rebufferWindowStartTime) / 1000}s — switching to backup stream NOW")
+                                            handlePlaybackError()
+                                            return
+                                        }
+                                    }
+                                }
+                            }
+                            Player.STATE_ENDED -> {
+                                Log.w("LiveTvVM", "Gentle stream ended unexpectedly, forcing reconnect")
+                                handlePlaybackError()
+                            }
+                        }
+                    }
+                })
             }
     }
 
@@ -471,11 +546,7 @@ class LiveTvViewModel @Inject constructor(
             1000
         }
 
-        // BandwidthMeter tracks download speed and helps ExoPlayer pick optimal quality
-        val bandwidthMeter = DefaultBandwidthMeter.Builder(application)
-            .setResetOnNetworkTypeChange(true) // Re-estimate when WiFi ↔ cellular
-            .build()
-        bandwidthMeterRef = bandwidthMeter
+        // Use shared BandwidthMeter — consistent bitrate estimation across both players
 
         // === Apollo-grade buffer configuration ===
         //
@@ -534,7 +605,7 @@ class LiveTvViewModel @Inject constructor(
                 "Connection" to "keep-alive",
                 "Accept" to "*/*"
             ))
-            .setTransferListener(bandwidthMeter)
+            .setTransferListener(sharedBandwidthMeter)
 
         // Apply SSL bypass
         if (sslContext != null) {
@@ -579,7 +650,7 @@ class LiveTvViewModel @Inject constructor(
         ExoPlayer.Builder(application)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
-            .setBandwidthMeter(bandwidthMeter)
+            .setBandwidthMeter(sharedBandwidthMeter)
             .setTrackSelector(trackSelector)
             .setRenderersFactory(renderersFactory)
             // === Apollo: Audio focus + noisy handling ===
@@ -646,23 +717,27 @@ class LiveTvViewModel @Inject constructor(
                                     val isRebuffer = _uiState.value.videoResolution.isNotEmpty() // Was playing if we had video
                                     if (isRebuffer) {
                                         sessionRebufferCount++
-                                        rebufferStartTime = System.currentTimeMillis()
+                                        val now = System.currentTimeMillis()
+                                        rebufferStartTime = now
                                         wasPlayingBeforeBuffer = true
+
+                                        // Track rebuffer window — reset if outside 10-min window
+                                        if (rebufferWindowStartTime == 0L || now - rebufferWindowStartTime > REBUFFER_WINDOW_MS) {
+                                            rebufferWindowStartTime = now
+                                            sessionRebufferCount = 1 // Reset count for new window
+                                        }
+
                                         _uiState.value = _uiState.value.copy(
                                             isBuffering = true,
                                             rebufferCount = sessionRebufferCount
                                         )
-                                        Log.d("LiveTvVM", "Rebuffer #$sessionRebufferCount started")
+                                        Log.d("LiveTvVM", "Rebuffer #$sessionRebufferCount started (window: ${(now - rebufferWindowStartTime) / 1000}s)")
 
-                                        // Start stall watchdog — if still buffering after 30s, auto-reconnect
-                                        stallWatchdogJob?.cancel()
-                                        stallWatchdogJob = viewModelScope.launch {
-                                            delay(STALL_WATCHDOG_MS)
-                                            if (isPlayerReleased) return@launch
-                                            if (_uiState.value.isBuffering) {
-                                                Log.w("LiveTvVM", "Stall watchdog triggered — buffering for ${STALL_WATCHDOG_MS / 1000}s, forcing reconnect")
-                                                handlePlaybackError()
-                                            }
+                                        // Hit rebuffer threshold — immediately try backup streams (no waiting)
+                                        if (bufferAutoBackupScanEnabled && sessionRebufferCount >= REBUFFER_THRESHOLD) {
+                                            Log.w("LiveTvVM", "Rebuffer threshold hit: $sessionRebufferCount rebuffers in ${(now - rebufferWindowStartTime) / 1000}s — switching to backup stream NOW")
+                                            handlePlaybackError()
+                                            return
                                         }
                                     }
                                 }
@@ -670,7 +745,6 @@ class LiveTvViewModel @Inject constructor(
                             Player.STATE_ENDED -> {
                                 // Stream ended unexpectedly — force reconnect
                                 Log.w("LiveTvVM", "Stream ended unexpectedly, forcing reconnect")
-                                stallWatchdogJob?.cancel()
                                 handlePlaybackError()
                             }
                         }
@@ -704,7 +778,7 @@ class LiveTvViewModel @Inject constructor(
         try {
             val vFormat = player.videoFormat
             val aFormat = player.audioFormat
-            val measuredBps = bandwidthMeterRef?.bitrateEstimate ?: 0L
+            val measuredBps = sharedBandwidthMeter.bitrateEstimate
             _uiState.value = _uiState.value.copy(
                 videoBitrateKbps = if (vFormat != null && vFormat.bitrate > 0) vFormat.bitrate / 1000 else _uiState.value.videoBitrateKbps,
                 audioBitrateKbps = if (aFormat != null && aFormat.bitrate > 0) aFormat.bitrate / 1000 else _uiState.value.audioBitrateKbps,
@@ -751,6 +825,14 @@ class LiveTvViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.bitrateCheckerEnabled.collect { enabled ->
                 _uiState.value = _uiState.value.copy(bitrateCheckerEnabled = enabled)
+            }
+        }
+
+        // Observe Buffer Automatic Backup Scan setting
+        viewModelScope.launch {
+            settingsDataStore.bufferAutoBackupScan.collect { enabled ->
+                bufferAutoBackupScanEnabled = enabled
+                Log.d("LiveTvVM", "Buffer Auto Backup Scan: ${if (enabled) "ON" else "OFF"}")
             }
         }
 
@@ -988,6 +1070,10 @@ class LiveTvViewModel @Inject constructor(
 
     private fun safePlayChannel(channel: Channel) {
         if (isPlayerReleased) return
+
+        // Pause addon network traffic — give Live TV full bandwidth
+        addonRepository.setNetworkPaused(true)
+
         failoverAttempts = 0
         sameUrlRetryCount = 0
         triedStreamUrls.clear()
@@ -996,6 +1082,7 @@ class LiveTvViewModel @Inject constructor(
         sessionRebufferCount = 0
         sessionTotalRebufferMs = 0L
         rebufferStartTime = 0L
+        rebufferWindowStartTime = 0L
         wasPlayingBeforeBuffer = false
 
         // Cancel any active stall watchdog
@@ -1090,60 +1177,71 @@ class LiveTvViewModel @Inject constructor(
 
         failoverAttempts++
 
-        // TiviMate-style: retry same URL with linear backoff (0s, 1s, 2s) before trying backup
-        if (sameUrlRetryCount < MAX_SAME_URL_RETRIES) {
-            sameUrlRetryCount++
-            val retryDelayMs = (sameUrlRetryCount - 1) * 1000L // 0ms, 1000ms, 2000ms
-            Log.d("LiveTvVM", "Retrying same stream (attempt $sameUrlRetryCount/$MAX_SAME_URL_RETRIES, delay ${retryDelayMs}ms)")
-            _uiState.value = _uiState.value.copy(
-                isFailingOver = true,
-                failoverMessage = "Reconnecting... (retry $sameUrlRetryCount/$MAX_SAME_URL_RETRIES)"
-            )
-            viewModelScope.launch {
-                if (retryDelayMs > 0) delay(retryDelayMs)
-                if (isPlayerReleased) return@launch
-                try {
-                    val ap = getActivePlayer()
-                    ap.stop()
-                    ap.clearMediaItems()
-                    val isGentle = isLocalAffiliate(currentChannel)
-                    val mediaItem = MediaItem.Builder()
-                        .setUri(currentChannel.streamUrl)
-                        .setLiveConfiguration(
-                            MediaItem.LiveConfiguration.Builder()
-                                .setMaxPlaybackSpeed(1.04f)
-                                .setMinPlaybackSpeed(0.96f)
-                                .setTargetOffsetMs(if (isGentle) 10_000 else 8_000)
-                                .setMinOffsetMs(if (isGentle) 5_000 else 3_000)
-                                .setMaxOffsetMs(if (isGentle) 60_000 else 45_000)
-                                .build()
-                        )
-                        .build()
-                    ap.setMediaItem(mediaItem)
-                    ap.prepare()
-                    ap.play()
-                    _uiState.value = _uiState.value.copy(isFailingOver = false, failoverMessage = "")
-                } catch (e: Exception) {
-                    Log.e("LiveTvVM", "Retry $sameUrlRetryCount failed", e)
+        // ── OLD BEHAVIOR (setting OFF): same-URL retries → VLC → backup search ──
+        if (!bufferAutoBackupScanEnabled) {
+            // TiviMate-style: retry same URL with linear backoff (0s, 1s, 2s)
+            if (sameUrlRetryCount < MAX_SAME_URL_RETRIES) {
+                sameUrlRetryCount++
+                val retryDelayMs = (sameUrlRetryCount - 1) * 1000L
+                Log.d("LiveTvVM", "Retrying same stream (attempt $sameUrlRetryCount/$MAX_SAME_URL_RETRIES, delay ${retryDelayMs}ms)")
+                _uiState.value = _uiState.value.copy(
+                    isFailingOver = true,
+                    failoverMessage = "Reconnecting... (retry $sameUrlRetryCount/$MAX_SAME_URL_RETRIES)"
+                )
+                viewModelScope.launch {
+                    if (retryDelayMs > 0) delay(retryDelayMs)
+                    if (isPlayerReleased) return@launch
+                    try {
+                        val ap = getActivePlayer()
+                        ap.stop()
+                        ap.clearMediaItems()
+                        val isGentle = isLocalAffiliate(currentChannel)
+                        val mediaItem = MediaItem.Builder()
+                            .setUri(currentChannel.streamUrl)
+                            .setLiveConfiguration(
+                                MediaItem.LiveConfiguration.Builder()
+                                    .setMaxPlaybackSpeed(1.04f)
+                                    .setMinPlaybackSpeed(0.96f)
+                                    .setTargetOffsetMs(if (isGentle) 10_000 else 8_000)
+                                    .setMinOffsetMs(if (isGentle) 5_000 else 3_000)
+                                    .setMaxOffsetMs(if (isGentle) 60_000 else 45_000)
+                                    .build()
+                            )
+                            .build()
+                        ap.setMediaItem(mediaItem)
+                        ap.prepare()
+                        ap.play()
+                        _uiState.value = _uiState.value.copy(isFailingOver = false, failoverMessage = "")
+                    } catch (e: Exception) {
+                        Log.e("LiveTvVM", "Retry $sameUrlRetryCount failed", e)
+                    }
                 }
+                return
             }
-            return
-        }
 
-        // Exhausted ExoPlayer retries — try VLC before searching backups
-        if (!_uiState.value.isUsingVlc) {
-            Log.d("LiveTvVM", "ExoPlayer retries exhausted — switching to VLC fallback")
-            _uiState.value = _uiState.value.copy(
-                isFailingOver = true,
-                failoverMessage = "Switching to VLC player..."
-            )
-            playWithVlc(currentChannel.streamUrl)
-            return
-        }
+            // Exhausted ExoPlayer retries — try VLC before searching backups
+            if (!_uiState.value.isUsingVlc) {
+                Log.d("LiveTvVM", "ExoPlayer retries exhausted — switching to VLC fallback")
+                _uiState.value = _uiState.value.copy(
+                    isFailingOver = true,
+                    failoverMessage = "Switching to VLC player..."
+                )
+                playWithVlc(currentChannel.streamUrl)
+                return
+            }
 
-        // Both ExoPlayer AND VLC failed — now search backups
-        switchToExoPlayer() // Reset to ExoPlayer for backup attempt
-        triedStreamUrls.add(currentChannel.streamUrl)
+            // Both ExoPlayer AND VLC failed — now search backups
+            switchToExoPlayer()
+            triedStreamUrls.add(currentChannel.streamUrl)
+            // Fall through to backup search below...
+        } else {
+            // ── NEW BEHAVIOR (setting ON): skip retries + VLC, go straight to backup ──
+            if (_uiState.value.isUsingVlc) {
+                switchToExoPlayer()
+            }
+            triedStreamUrls.add(currentChannel.streamUrl)
+            Log.d("LiveTvVM", "Failover attempt $failoverAttempts — searching backup streams immediately")
+        }
         _uiState.value = _uiState.value.copy(
             isFailingOver = true,
             failoverMessage = "Searching backup sources... (attempt $failoverAttempts)"
@@ -1675,6 +1773,8 @@ class LiveTvViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        // Resume addon network traffic — Live TV no longer needs bandwidth
+        addonRepository.setNetworkPaused(false)
         isPlayerReleased = true
         failoverMessageJob?.cancel()
         stallWatchdogJob?.cancel()

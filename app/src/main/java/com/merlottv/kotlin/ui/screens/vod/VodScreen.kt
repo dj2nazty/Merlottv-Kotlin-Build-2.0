@@ -66,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -106,7 +105,14 @@ fun VodScreen(
 
     // Focus restoration: track the last focused item ID across navigation
     var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
-    val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val focusRequesters = remember { linkedMapOf<String, FocusRequester>() }
+
+    // LRU cap: trim oldest entries when map grows too large (deferred to avoid detached-node crashes)
+    LaunchedEffect(uiState.selectedTab, uiState.selectedGenre, uiState.selectedYear, uiState.selectedPlatformTab) {
+        // Delay cleanup so Compose finishes disposing old nodes first
+        kotlinx.coroutines.delay(500)
+        focusRequesters.clear()
+    }
 
     // Restore focus to the previously selected item, or default to first card
     LaunchedEffect(uiState.filteredSections.isNotEmpty()) {
@@ -123,10 +129,29 @@ fun VodScreen(
         }
     }
 
+    // Throttle rapid D-pad DOWN/UP to prevent Compose focus search crash on detached nodes
+    var lastVerticalNavTime by remember { mutableStateOf(0L) }
+    val verticalNavThrottleMs = 80L
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MerlotColors.Background)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionDown || event.key == Key.DirectionUp)
+                ) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastVerticalNavTime < verticalNavThrottleMs) {
+                        true // Consume rapid repeat to prevent crash
+                    } else {
+                        lastVerticalNavTime = now
+                        false // Allow normal processing
+                    }
+                } else {
+                    false
+                }
+            }
     ) {
         // Tab row
         Row(
@@ -386,8 +411,8 @@ fun VodScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(allItems, key = { it.id }) { item ->
-                            val itemFocusRequester = remember {
+                        items(allItems, key = { it.id }, contentType = { "vodcard" }) { item ->
+                            val itemFocusRequester = remember(item.id) {
                                 focusRequesters.getOrPut(item.id) { FocusRequester() }
                             }
                             VodCard(
@@ -432,8 +457,8 @@ fun VodScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(allItems, key = { it.id }) { item ->
-                            val itemFocusRequester = remember {
+                        items(allItems, key = { it.id }, contentType = { "vodcard" }) { item ->
+                            val itemFocusRequester = remember(item.id) {
                                 focusRequesters.getOrPut(item.id) { FocusRequester() }
                             }
                             val isFirst = item == allItems.firstOrNull()
@@ -459,7 +484,8 @@ fun VodScreen(
                     ) {
                         items(
                             uiState.filteredSections,
-                            key = { "${it.addonName}_${it.catalogId}_${it.type}_${it.title}" }
+                            key = { "${it.addonName}_${it.catalogId}_${it.type}_${it.title}" },
+                            contentType = { "catalog_row" }
                         ) { section ->
                             val isFirst = section == uiState.filteredSections.first()
                             CatalogSectionRow(
@@ -590,7 +616,7 @@ private fun CatalogSectionRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(section.items, key = { it.id }) { item ->
+            items(section.items, key = { it.id }, contentType = { "vodcard" }) { item ->
                 val isFirst = firstCardFocusRequester != null && section.items.firstOrNull()?.id == item.id
                 val itemFocusRequester = remember(item.id) {
                     if (isFirst && firstCardFocusRequester != null) {
@@ -656,32 +682,30 @@ private fun VodCard(
         onFocused()
     }
 
-    // Scale animation with spring physics (more natural than tween)
+    // Lightweight tween scale — no spring overhead, smaller scale change
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        targetValue = if (isFocused) 1.03f else 1f,
+        animationSpec = tween(durationMillis = 150),
         label = "cardScale"
     )
 
     // Width: expands to landscape hero when trailer plays, normal poster otherwise
     val cardWidth by animateDpAsState(
         targetValue = when {
-            isTrailerPlaying -> 280.dp  // Landscape hero width for trailer
-            isFocused -> 140.dp
-            else -> 130.dp
+            isTrailerPlaying -> 280.dp
+            else -> 130.dp  // Fixed size — no resize on focus
         },
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = 200),
         label = "cardWidth"
     )
 
-    // Height: switches to 16:9 landscape when trailer plays, 3:2 poster otherwise
+    // Height: switches to 16:9 landscape when trailer plays, fixed poster otherwise
     val cardHeight by animateDpAsState(
         targetValue = when {
-            isTrailerPlaying -> 158.dp  // 280 * 9/16 = 157.5 ≈ 158dp (16:9)
-            isFocused -> 210.dp         // 140 * 1.5
-            else -> 195.dp              // 130 * 1.5
+            isTrailerPlaying -> 158.dp
+            else -> 195.dp  // Fixed size — no resize on focus
         },
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = 200),
         label = "cardHeight"
     )
 
@@ -787,11 +811,11 @@ private fun VodCard(
                 }
             }
 
-            // Favorite heart overlay (shows after long-press) — animated entrance/exit
+            // Favorite heart overlay (shows after long-press)
             if (showHeartOverlay) {
                 val heartScale by animateFloatAsState(
                     targetValue = 1f,
-                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
+                    animationSpec = tween(durationMillis = 200),
                     label = "heartScale"
                 )
                 Box(

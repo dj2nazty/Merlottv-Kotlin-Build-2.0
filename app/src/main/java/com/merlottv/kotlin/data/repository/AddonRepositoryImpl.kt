@@ -44,6 +44,16 @@ class AddonRepositoryImpl @Inject constructor(
     @Volatile
     private var disabledUrls: Set<String> = emptySet()
 
+    // Network pause — when true, only cached results are returned (no HTTP requests)
+    // Used when Live TV is active to prevent addon traffic from stealing bandwidth
+    @Volatile
+    private var networkPaused = false
+
+    override fun setNetworkPaused(paused: Boolean) {
+        networkPaused = paused
+        Log.d("AddonRepo", "Network ${if (paused) "PAUSED (Live TV active)" else "RESUMED"}")
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
@@ -102,6 +112,11 @@ class AddonRepositoryImpl @Inject constructor(
             }
         }
 
+        // Network paused (Live TV active) — return stale cache or null, don't hit network
+        if (networkPaused) {
+            return manifestCache[url]?.first
+        }
+
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder().url(url).build()
@@ -147,6 +162,11 @@ class AddonRepositoryImpl @Inject constructor(
                     }
                 }
 
+                // Network paused (Live TV active) — return stale cache or empty
+                if (networkPaused) {
+                    return@withContext catalogCache[url]?.first ?: emptyList()
+                }
+
                 Log.d("AddonRepo", "getCatalog URL: $url")
                 val request = Request.Builder().url(url).build()
                 val response = fastClient.newCall(request).execute()
@@ -173,6 +193,11 @@ class AddonRepositoryImpl @Inject constructor(
                 Log.d("AddonRepo", "getMeta CACHE HIT: $cacheKey")
                 return meta
             }
+        }
+
+        // Network paused (Live TV active) — return stale cache or null
+        if (networkPaused) {
+            return metaCache[cacheKey]?.first
         }
 
         return withContext(Dispatchers.IO) {
@@ -270,6 +295,9 @@ class AddonRepositoryImpl @Inject constructor(
     }
 
     override suspend fun searchCatalog(addon: Addon, type: String, query: String): List<MetaPreview> {
+        // Network paused (Live TV active) — skip search, no cached results for searches
+        if (networkPaused) return emptyList()
+
         return withContext(Dispatchers.IO) {
             try {
                 val base = addon.url.removeSuffix("/manifest.json")

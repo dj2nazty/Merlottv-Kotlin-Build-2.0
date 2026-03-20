@@ -62,6 +62,9 @@ class SettingsDataStore(private val context: Context) {
         val BUFFER_DURATION_MS = intPreferencesKey("live_tv_buffer_duration_ms")
         const val DEFAULT_BUFFER_MS = 1000 // 1.0 second default (matches TiviMate)
 
+        // Buffer Automatic Backup Scan — auto-failover to backup M3U on rebuffer
+        val BUFFER_AUTO_BACKUP_SCAN = booleanPreferencesKey("buffer_auto_backup_scan")
+
         // Weather
         val WEATHER_ZIP = stringPreferencesKey("weather_zip_code")
         const val DEFAULT_WEATHER_ZIP = "43616"
@@ -350,6 +353,15 @@ class SettingsDataStore(private val context: Context) {
         // Clamp to valid range: 300ms – 3000ms
         val clamped = ms.coerceIn(300, 3000)
         context.settingsDataStore.edit { it[BUFFER_DURATION_MS] = clamped }
+    }
+
+    // ─── Buffer Automatic Backup Scan ───
+    val bufferAutoBackupScan: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[BUFFER_AUTO_BACKUP_SCAN] ?: false // Off by default (old behavior)
+    }
+
+    suspend fun setBufferAutoBackupScan(enabled: Boolean) {
+        context.settingsDataStore.edit { it[BUFFER_AUTO_BACKUP_SCAN] = enabled }
     }
 
     // ─── Weather ZIP Code ───
