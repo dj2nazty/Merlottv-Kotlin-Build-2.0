@@ -150,11 +150,24 @@ class HomeViewModel @Inject constructor(
                 }
                 // Hide Torbox "Your Media" catalogs from display
                 jobs.removeAll { it.addonName.contains("torbox", true) && it.catalogName.contains("your media", true) }
-                Log.d("HomeViewModel", "Total catalog jobs: ${jobs.size}")
 
-                // Load saved order/hidden upfront so we can sort progressively
+                // Load saved order/hidden upfront so we can skip hidden catalogs entirely
                 val savedOrder = settingsDataStore.homeCategoryOrder.first()
                 val hiddenKeys = settingsDataStore.homeHiddenCategories.first()
+
+                // Remove hidden catalogs BEFORE fetching — saves network requests
+                val beforeCount = jobs.size
+                val useDefaultHide = settingsDataStore.HOME_DEFAULT_HIDE_MARKER in hiddenKeys
+                jobs.removeAll { job ->
+                    val key = "${job.addonId}:${job.catalogId}:${job.type}"
+                    if (useDefaultHide) {
+                        // Default: only show MerlotTV+ catalogs (excluding network catalogs)
+                        job.addonId != "com.merlottv.tmdb" || key.contains(":net.")
+                    } else {
+                        key in hiddenKeys
+                    }
+                }
+                Log.d("HomeViewModel", "Total catalog jobs: ${jobs.size} (${beforeCount - jobs.size} hidden, skipped)")
                 val orderMap = if (savedOrder.isNotEmpty()) {
                     savedOrder.withIndex().associate { (i, key) -> key to i }
                 } else emptyMap()
@@ -178,10 +191,21 @@ class HomeViewModel @Inject constructor(
                                             "series" -> "Series"
                                             else -> job.type
                                         }
+                                        // Skip type label if catalog name already contains it
+                                        val nameLower = job.catalogName.lowercase()
+                                        val alreadyHasType = "movies" in nameLower || "series" in nameLower ||
+                                            "shows" in nameLower
+                                        val displayTitle = if (alreadyHasType) {
+                                            "${job.catalogName} — ${job.addonName}"
+                                        } else {
+                                            "${job.catalogName} $typeLabel — ${job.addonName}"
+                                        }
+                                        // Deduplicate within this row (same ID from addon)
+                                        val dedupedItems = items.distinctBy { it.id }
                                         val row = CatalogRow(
                                             key = "${job.addonId}:${job.catalogId}:${job.type}",
-                                            title = "${job.catalogName} $typeLabel — ${job.addonName}",
-                                            items = items
+                                            title = displayTitle,
+                                            items = dedupedItems
                                         )
                                         rowChannel.send(row)
                                     }
@@ -194,7 +218,6 @@ class HomeViewModel @Inject constructor(
 
                 // Consume rows as they arrive and update UI progressively
                 for (row in rowChannel) {
-                    if (row.key in hiddenKeys) continue
                     accumulatedRows.add(row)
 
                     // Sort with each emission
@@ -278,31 +301,38 @@ class HomeViewModel @Inject constructor(
     private fun defaultSortOrder(title: String): Int {
         val t = title.lowercase()
         return when {
-            "airing today" in t -> 0
-            "popular new tv" in t -> 1
-            "trending" in t -> 2
-            "popular" in t -> 3
-            "upcoming" in t -> 3
-            "in theaters" in t || "now_playing" in t -> 4
-            "on the air" in t -> 5
-            "top rated" in t -> 6
-            "latest" in t || "new" in t -> 7
-            "featured" in t -> 8
-            "netflix" in t -> 9
-            "disney" in t -> 10
-            "prime" in t || "amazon" in t -> 11
-            "hbo" in t || "max" in t -> 12
-            "apple" in t -> 13
-            "paramount" in t -> 14
-            "peacock" in t -> 15
-            "discovery" in t -> 16
-            "nbc" in t -> 17
-            "abc" in t -> 18
-            "cbs" in t -> 19
-            "fox" in t -> 20
-            "cw" in t -> 21
-            "showtime" in t -> 22
-            "imdb" in t -> 23
+            // MerlotTV+ catalogs first — user's preferred order
+            "popular new tv" in t -> 0
+            "popular" in t && "movie" in t -> 1
+            "popular" in t && "series" in t -> 2
+            "new" in t && "movie" in t -> 3
+            "new" in t && "series" in t -> 4
+            "featured" in t && "movie" in t -> 5
+            "featured" in t && "series" in t -> 6
+            "airing today" in t -> 7
+            "on the air" in t -> 8
+            "upcoming" in t -> 9
+            "in theaters" in t || "now_playing" in t -> 10
+            "top rated" in t -> 11
+            // Streaming service catalogs
+            "trending" in t -> 12
+            "netflix" in t -> 13
+            "disney" in t -> 14
+            "prime" in t || "amazon" in t -> 15
+            "hbo" in t || "max" in t -> 16
+            "apple" in t -> 17
+            "paramount" in t -> 18
+            "peacock" in t -> 19
+            "discovery" in t -> 20
+            // Network catalogs
+            "nbc" in t -> 21
+            "abc" in t -> 22
+            "cbs" in t -> 23
+            "fox" in t -> 24
+            "cw" in t -> 25
+            "showtime" in t -> 26
+            "imdb" in t -> 27
+            "latest" in t -> 28
             else -> 30
         }
     }

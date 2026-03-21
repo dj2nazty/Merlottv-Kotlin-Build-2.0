@@ -421,8 +421,18 @@ class AddonRepositoryImpl @Inject constructor(
             val map = adapter.fromJson(json) as? Map<String, Any?> ?: return emptyList()
             val metas = map["metas"] as? List<Map<String, Any?>> ?: return emptyList()
             return metas.map { m ->
+                // Prefer imdb_id over id — normalizes across addons so the same
+                // show always has the same ID regardless of which addon returned it.
+                // This fixes: duplicates across rows, favorites not syncing across addons.
+                val rawId = m["id"] as? String ?: ""
+                val imdbId = m["imdb_id"] as? String
+                val normalizedId = if (!imdbId.isNullOrBlank() && imdbId.startsWith("tt")) {
+                    imdbId
+                } else {
+                    rawId
+                }
                 MetaPreview(
-                    id = m["id"] as? String ?: "",
+                    id = normalizedId,
                     type = m["type"] as? String ?: "",
                     name = m["name"] as? String ?: "",
                     poster = m["poster"] as? String ?: "",

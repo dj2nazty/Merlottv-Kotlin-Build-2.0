@@ -14,6 +14,17 @@ object DefaultData {
     const val OPENSUBTITLES_ADDON_URL = "https://opensubtitles-v3.strem.io"
 
     val DEFAULT_ADDONS = listOf(
+        // Cinemeta — meta-only provider (no catalogs).
+        // Provides /meta/movie/ and /meta/series/ with full episode data.
+        // Essential for TV show detail screens (episode lists, descriptions, etc.)
+        Addon(
+            id = "cinemeta",
+            name = "Cinemeta",
+            url = "https://v3-cinemeta.strem.io/manifest.json",
+            isDefault = true,
+            resources = listOf("meta"),
+            types = listOf("movie", "series")
+        ),
         Addon(
             id = "opensubtitles-v3",
             name = "OpenSubtitles v3",
@@ -48,36 +59,18 @@ object DefaultData {
             isDefault = true
         ),
         Addon(
-            id = "cinemeta",
-            name = "Cinemeta",
-            url = "https://v3-cinemeta.strem.io/manifest.json",
-            catalogs = listOf(
-                AddonCatalog(
-                    id = "top",
-                    name = "Popular Movies",
-                    type = "movie",
-                    extra = listOf(CatalogExtra("search", false))
-                ),
-                AddonCatalog(
-                    id = "top",
-                    name = "Popular Series",
-                    type = "series",
-                    extra = listOf(CatalogExtra("search", false))
-                )
-            ),
-            isDefault = true
-        ),
-        Addon(
-            id = "tmdb-addon",
-            name = "TMDB",
-            url = "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json",
-            isDefault = true
-        ),
-        Addon(
             id = "com.merlottv.tmdb",
             name = "MerlotTV+",
             url = "https://merlottv-addon.onrender.com/manifest.json",
             catalogs = listOf(
+                // Combined catalogs (TMDB + Cinemeta merged, deduped)
+                AddonCatalog(id = "merlot.popular_movies", name = "Popular Movies", type = "movie"),
+                AddonCatalog(id = "merlot.popular_series", name = "Popular Series", type = "series"),
+                AddonCatalog(id = "merlot.new_movies", name = "New Movies", type = "movie"),
+                AddonCatalog(id = "merlot.new_series", name = "New Series", type = "series"),
+                AddonCatalog(id = "merlot.featured_movies", name = "Featured Movies", type = "movie"),
+                AddonCatalog(id = "merlot.featured_series", name = "Featured Series", type = "series"),
+                // Original MerlotTV+ catalogs
                 AddonCatalog(id = "merlot.upcoming", name = "Upcoming Movies", type = "movie"),
                 AddonCatalog(id = "merlot.now_playing", name = "In Theaters Now", type = "movie"),
                 AddonCatalog(id = "merlot.top_rated_movies", name = "Top Rated Movies", type = "movie"),
@@ -85,6 +78,7 @@ object DefaultData {
                 AddonCatalog(id = "merlot.airing_today", name = "Airing Today", type = "series"),
                 AddonCatalog(id = "merlot.on_the_air", name = "On The Air", type = "series"),
                 AddonCatalog(id = "merlot.top_rated_series", name = "Top Rated Series", type = "series"),
+                // Network catalogs
                 AddonCatalog(id = "net.nbc", name = "NBC", type = "series"),
                 AddonCatalog(id = "net.abc", name = "ABC", type = "series"),
                 AddonCatalog(id = "net.cbs", name = "CBS", type = "series"),

@@ -406,7 +406,38 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val homeCategoryOrder: Flow<List<String>> = context.settingsDataStore.data.map { readJsonStringList(it, HOME_CATEGORY_ORDER) }
-    val homeHiddenCategories: Flow<Set<String>> = context.settingsDataStore.data.map { readJsonStringList(it, HOME_HIDDEN_CATEGORIES).toSet() }
+    /**
+     * Default: only MerlotTV+ catalogs are visible on the Home screen.
+     * All other addon catalogs (Netflix, IMDB, Fusion, Torbox, network catalogs)
+     * are hidden until the user explicitly enables them in Settings.
+     *
+     * We use a special marker "@@DEFAULT_HIDE_NON_MERLOT@@" so HomeViewModel
+     * knows to apply the default filter instead of a static key list.
+     */
+    val HOME_DEFAULT_HIDE_MARKER = "@@DEFAULT_HIDE_NON_MERLOT@@"
+
+    /** MerlotTV+ network catalogs always hidden by default even after user saves */
+    private val ALWAYS_DEFAULT_HIDDEN = setOf(
+        "com.merlottv.tmdb:net.nbc:series",
+        "com.merlottv.tmdb:net.abc:series",
+        "com.merlottv.tmdb:net.cbs:series",
+        "com.merlottv.tmdb:net.fox:series",
+        "com.merlottv.tmdb:net.cw:series",
+        "com.merlottv.tmdb:net.hbo:series",
+        "com.merlottv.tmdb:net.showtime:series",
+        "com.merlottv.tmdb:net.fx:series",
+        "com.merlottv.tmdb:net.amc:series",
+        "com.merlottv.tmdb:net.usa:series",
+        "com.merlottv.tmdb:net.bravo:series",
+        "com.merlottv.tmdb:net.hgtv:series",
+        "com.merlottv.tmdb:net.history:series",
+        "com.merlottv.tmdb:net.pbs:series"
+    )
+
+    val homeHiddenCategories: Flow<Set<String>> = context.settingsDataStore.data.map { prefs ->
+        val saved = readJsonStringList(prefs, HOME_HIDDEN_CATEGORIES)
+        if (saved.isEmpty()) setOf(HOME_DEFAULT_HIDE_MARKER) else saved.toSet()
+    }
     val vodCategoryOrder: Flow<List<String>> = context.settingsDataStore.data.map { readJsonStringList(it, VOD_CATEGORY_ORDER) }
     val vodHiddenCategories: Flow<Set<String>> = context.settingsDataStore.data.map { readJsonStringList(it, VOD_HIDDEN_CATEGORIES).toSet() }
 

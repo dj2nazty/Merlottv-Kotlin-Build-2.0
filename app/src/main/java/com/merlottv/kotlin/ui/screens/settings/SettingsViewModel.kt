@@ -762,20 +762,32 @@ class SettingsViewModel @Inject constructor(
         savedOrder: List<String>,
         hiddenKeys: Set<String>
     ): List<CategoryItem> {
+        // Check if we're using the default hide marker (hide all non-MerlotTV+ catalogs)
+        val useDefaultHide = settingsDataStore.HOME_DEFAULT_HIDE_MARKER in hiddenKeys
+
+        fun isEnabled(key: String): Boolean {
+            return if (useDefaultHide) {
+                // Default: only MerlotTV+ catalogs enabled, excluding network catalogs
+                key.startsWith("com.merlottv.tmdb:") && !key.contains(":net.")
+            } else {
+                key !in hiddenKeys
+            }
+        }
+
         if (savedOrder.isEmpty()) {
-            return allItems.map { it.copy(enabled = it.key !in hiddenKeys) }
+            return allItems.map { it.copy(enabled = isEnabled(it.key)) }
         }
         val itemMap = allItems.associateBy { it.key }
         // Saved items first (in order), then new items appended
         val ordered = mutableListOf<CategoryItem>()
         for (key in savedOrder) {
             val item = itemMap[key] ?: continue
-            ordered.add(item.copy(enabled = key !in hiddenKeys))
+            ordered.add(item.copy(enabled = isEnabled(key)))
         }
         // Append any new items not in saved order
         for (item in allItems) {
             if (ordered.none { it.key == item.key }) {
-                ordered.add(item.copy(enabled = item.key !in hiddenKeys))
+                ordered.add(item.copy(enabled = isEnabled(item.key)))
             }
         }
         return ordered
@@ -854,34 +866,42 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** Must match HomeViewModel.defaultSortOrder exactly so Settings and Home agree */
+    /** Must match HomeViewModel.defaultSortOrder exactly so Settings and Home agree */
     private fun defaultSortOrder(title: String): Int {
         val t = title.lowercase()
         return when {
-            "airing today" in t -> 0
-            "popular new tv" in t -> 1
-            "trending" in t -> 2
-            "popular" in t -> 3
-            "upcoming" in t -> 3
-            "in theaters" in t || "now_playing" in t -> 4
-            "on the air" in t -> 5
-            "top rated" in t -> 6
-            "latest" in t || "new" in t -> 7
-            "featured" in t -> 8
-            "netflix" in t -> 9
-            "disney" in t -> 10
-            "prime" in t || "amazon" in t -> 11
-            "hbo" in t || "max" in t -> 12
-            "apple" in t -> 13
-            "paramount" in t -> 14
-            "peacock" in t -> 15
-            "discovery" in t -> 16
-            "nbc" in t -> 17
-            "abc" in t -> 18
-            "cbs" in t -> 19
-            "fox" in t -> 20
-            "cw" in t -> 21
-            "showtime" in t -> 22
-            "imdb" in t -> 23
+            // MerlotTV+ catalogs first — user's preferred order
+            "popular new tv" in t -> 0
+            "popular" in t && "movie" in t -> 1
+            "popular" in t && "series" in t -> 2
+            "new" in t && "movie" in t -> 3
+            "new" in t && "series" in t -> 4
+            "featured" in t && "movie" in t -> 5
+            "featured" in t && "series" in t -> 6
+            "airing today" in t -> 7
+            "on the air" in t -> 8
+            "upcoming" in t -> 9
+            "in theaters" in t || "now_playing" in t -> 10
+            "top rated" in t -> 11
+            // Streaming service catalogs
+            "trending" in t -> 12
+            "netflix" in t -> 13
+            "disney" in t -> 14
+            "prime" in t || "amazon" in t -> 15
+            "hbo" in t || "max" in t -> 16
+            "apple" in t -> 17
+            "paramount" in t -> 18
+            "peacock" in t -> 19
+            "discovery" in t -> 20
+            // Network catalogs
+            "nbc" in t -> 21
+            "abc" in t -> 22
+            "cbs" in t -> 23
+            "fox" in t -> 24
+            "cw" in t -> 25
+            "showtime" in t -> 26
+            "imdb" in t -> 27
+            "latest" in t -> 28
             else -> 30
         }
     }

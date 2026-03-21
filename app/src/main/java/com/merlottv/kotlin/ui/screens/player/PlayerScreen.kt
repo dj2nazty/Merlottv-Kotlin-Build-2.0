@@ -383,16 +383,20 @@ fun PlayerScreen(
         }
     }
 
-    // Pause player when app goes to background (onStop) — prevents audio leak
+    // Stop player when app goes to background (onStop) — prevents audio leak.
+    // Using player.stop() instead of player.pause() ensures ExoPlayer releases its
+    // audio output and buffers immediately, so no sound can leak even if the
+    // composable disposal is delayed or the process is killed.
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    player.pause()
+                    player.stop()
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {
-                    // Resume playback when returning to app
+                    // Re-prepare and resume playback when returning to app
+                    player.prepare()
                     player.play()
                 }
                 else -> {}
