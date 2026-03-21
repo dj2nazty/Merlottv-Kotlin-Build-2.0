@@ -14,8 +14,8 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 109
-        versionName = "2.77"
+        versionCode = 110
+        versionName = "2.78"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")
@@ -27,10 +27,6 @@ android {
             useSupportLibrary = true
         }
 
-        // Only include ARM ABIs — drops x86/x86_64 (emulator-only) to cut APK size in half
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
     }
 
     signingConfigs {

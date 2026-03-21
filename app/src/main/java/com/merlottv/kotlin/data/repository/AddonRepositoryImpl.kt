@@ -199,6 +199,7 @@ class AddonRepositoryImpl @Inject constructor(
 
         // Network paused (Live TV active) — return stale cache or null
         if (networkPaused) {
+            Log.w("AddonRepo", "getMeta BLOCKED by networkPaused for $cacheKey")
             return metaCache[cacheKey]?.first
         }
 

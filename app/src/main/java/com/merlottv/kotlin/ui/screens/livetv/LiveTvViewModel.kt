@@ -1602,6 +1602,8 @@ class LiveTvViewModel @Inject constructor(
         if (isPlayerReleased) return
         try { player.stop() } catch (_: Exception) {}
         try { gentlePlayer.stop() } catch (_: Exception) {}
+        // Resume addon network traffic so VOD detail screens can load
+        addonRepository.setNetworkPaused(false)
     }
 
     fun resumePlayback() {
