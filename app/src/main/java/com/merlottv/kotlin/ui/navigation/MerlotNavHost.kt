@@ -21,12 +21,10 @@ import com.merlottv.kotlin.ui.screens.player.PlayerScreen
 import com.merlottv.kotlin.ui.screens.profiles.ProfilePickerScreen
 import com.merlottv.kotlin.ui.screens.search.SearchScreen
 import com.merlottv.kotlin.ui.screens.settings.SettingsScreen
-import com.merlottv.kotlin.ui.screens.sports.GameDetailScreen
+import com.merlottv.kotlin.ui.screens.channelbackup.ChannelBackupScreen
 import com.merlottv.kotlin.ui.screens.spacex.SpaceXScreen
 import com.merlottv.kotlin.ui.screens.account.AccountScreen
 import com.merlottv.kotlin.ui.screens.weather.WeatherScreen
-import com.merlottv.kotlin.ui.screens.sports.SportsScreen
-import com.merlottv.kotlin.ui.screens.sports.TeamDetailScreen
 import com.merlottv.kotlin.ui.screens.tvguide.TvGuideScreen
 import com.merlottv.kotlin.ui.screens.vod.VodScreen
 import com.merlottv.kotlin.ui.screens.vod.VodDetailScreen
@@ -139,49 +137,20 @@ fun MerlotNavHost(
             )
         }
 
-        composable(Screen.Sports.route) {
+        composable(Screen.ChannelBackup.route) {
             onLiveTvFullscreenChanged(false)
-            SportsScreen(
-                onNavigateToGame = { league, eventId ->
-                    navController.navigate(Screen.GameDetail.createRoute(league, eventId))
-                },
-                onNavigateToTeam = { league, teamId ->
-                    navController.navigate(Screen.TeamDetail.createRoute(league, teamId))
+            ChannelBackupScreen(
+                onStreamSelected = { streamUrl, channelName ->
+                    val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
+                    val encodedTitle = URLEncoder.encode(channelName, "UTF-8")
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            url = encodedUrl,
+                            title = encodedTitle,
+                            contentType = "tv"
+                        )
+                    )
                 }
-            )
-        }
-
-        composable(
-            route = Screen.GameDetail.route,
-            arguments = listOf(
-                navArgument("league") { type = NavType.StringType },
-                navArgument("eventId") { type = NavType.StringType }
-            )
-        ) { backStackEntry ->
-            onLiveTvFullscreenChanged(false)
-            val league = backStackEntry.arguments?.getString("league") ?: "nfl"
-            val eventId = backStackEntry.arguments?.getString("eventId") ?: ""
-            GameDetailScreen(
-                league = league,
-                eventId = eventId,
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        composable(
-            route = Screen.TeamDetail.route,
-            arguments = listOf(
-                navArgument("league") { type = NavType.StringType },
-                navArgument("teamId") { type = NavType.StringType }
-            )
-        ) { backStackEntry ->
-            onLiveTvFullscreenChanged(false)
-            val league = backStackEntry.arguments?.getString("league") ?: "nfl"
-            val teamId = backStackEntry.arguments?.getString("teamId") ?: ""
-            TeamDetailScreen(
-                league = league,
-                teamId = teamId,
-                onBack = { navController.popBackStack() }
             )
         }
 

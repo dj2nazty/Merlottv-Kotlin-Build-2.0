@@ -223,7 +223,26 @@ fun PlayerScreen(
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
             .apply {
-                val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
+                // Build MediaItem with MIME type hint for streams without file extensions.
+                // URLs like "https://a1xs.vip/300003" have no extension, so ExoPlayer
+                // defaults to progressive extraction which fails for HLS/DASH streams.
+                // For live TV streams (contentType="tv") or .m3u8 URLs, hint HLS.
+                val uri = Uri.parse(streamUrl)
+                val mediaItem = if (
+                    contentType == "tv" ||
+                    streamUrl.contains(".m3u8", ignoreCase = true) ||
+                    (!streamUrl.contains(".mp4", ignoreCase = true) &&
+                     !streamUrl.contains(".mkv", ignoreCase = true) &&
+                     !streamUrl.contains(".avi", ignoreCase = true) &&
+                     !streamUrl.substringAfterLast("/").contains("."))
+                ) {
+                    MediaItem.Builder()
+                        .setUri(uri)
+                        .setMimeType(MimeTypes.APPLICATION_M3U8)
+                        .build()
+                } else {
+                    MediaItem.fromUri(uri)
+                }
                 setMediaItem(mediaItem)
                 playWhenReady = true
                 prepare()

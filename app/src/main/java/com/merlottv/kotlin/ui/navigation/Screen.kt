@@ -9,7 +9,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Rocket
-import androidx.compose.material.icons.filled.SportsFootball
+import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Tv
@@ -26,7 +26,7 @@ sealed class Screen(
     data object TvGuide : Screen("tv_guide", "TV Guide", Icons.Default.Tv)
     data object Vod : Screen("vod", "VOD", Icons.Default.Movie)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
-    data object Sports : Screen("sports", "Sports", Icons.Default.SportsFootball)
+    data object ChannelBackup : Screen("channel_backup", "Channel Backup", Icons.Default.SettingsInputAntenna)
     data object SpaceX : Screen("spacex", "SpaceX", Icons.Default.Rocket)
     data object Weather : Screen("weather", "Weather", Icons.Default.Cloud)
     data object Account : Screen("account", "Account", Icons.Default.AccountCircle)
@@ -34,14 +34,6 @@ sealed class Screen(
 
     // Profile picker
     data object ProfilePicker : Screen("profile_picker", "Profiles", Icons.Default.Person)
-
-    // Sports detail routes
-    data object GameDetail : Screen("sports/game/{league}/{eventId}", "Game", Icons.Default.SportsFootball) {
-        fun createRoute(league: String, eventId: String) = "sports/game/$league/$eventId"
-    }
-    data object TeamDetail : Screen("sports/team/{league}/{teamId}", "Team", Icons.Default.SportsFootball) {
-        fun createRoute(league: String, teamId: String) = "sports/team/$league/$teamId"
-    }
 
     // Detail routes
     data object VodDetail : Screen("vod_detail/{type}/{id}", "Detail", Icons.Default.Movie) {
@@ -65,6 +57,6 @@ sealed class Screen(
     }
 
     companion object {
-        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, Vod, Favorites, Sports, SpaceX, Weather, Account, Settings)
+        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, ChannelBackup, Vod, Favorites, SpaceX, Weather, Account, Settings)
     }
 }
