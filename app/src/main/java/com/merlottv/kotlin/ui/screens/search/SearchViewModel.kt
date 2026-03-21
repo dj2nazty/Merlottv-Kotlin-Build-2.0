@@ -114,22 +114,33 @@ class SearchViewModel @Inject constructor(
                                     val results = addonRepository.searchCatalog(addon, type, query)
                                     if (results.isNotEmpty()) {
                                         accumulatedResults.addAll(results)
-                                        // Deduplicate by type:id (NuvioTV-style)
+                                        // Deduplicate and sort by relevance
+                                        val qLower = query.trim().lowercase()
+                                        val qWords = qLower.split("\\s+".toRegex())
                                         val unique = synchronized(accumulatedResults) {
                                             accumulatedResults.distinctBy { "${it.type}:${it.id}" }
+                                                .sortedByDescending { meta ->
+                                                    val n = meta.name.lowercase()
+                                                    when {
+                                                        n == qLower -> 100
+                                                        n.startsWith(qLower) -> 90
+                                                        qWords.all { it in n } -> 80
+                                                        qLower in n -> 70
+                                                        qWords.any { it in n } -> 50
+                                                        else -> 0
+                                                    }
+                                                }
                                         }
 
                                         // Progressive rendering — update UI as results arrive
                                         if (!hasRenderedFirst) {
                                             hasRenderedFirst = true
-                                            // First result renders instantly
                                             _uiState.value = _uiState.value.copy(
                                                 results = unique,
-                                                isLoading = true, // Still loading more
+                                                isLoading = true,
                                                 resultCount = unique.size
                                             )
                                         } else {
-                                            // Subsequent results — adaptive debounce
                                             _uiState.value = _uiState.value.copy(
                                                 results = unique,
                                                 resultCount = unique.size
@@ -147,8 +158,25 @@ class SearchViewModel @Inject constructor(
                 }
 
                 val elapsed = System.currentTimeMillis() - startTime
-                // Final deduplicated results
+                // Final deduplicated results, sorted by relevance
+                val queryLower = query.trim().lowercase()
+                val queryWords = queryLower.split("\\s+".toRegex())
                 val finalResults = accumulatedResults.distinctBy { "${it.type}:${it.id}" }
+                    .sortedWith(compareByDescending<MetaPreview> { meta ->
+                        // Relevance score: exact match > contains all words > contains query > partial
+                        val nameLower = meta.name.lowercase()
+                        when {
+                            nameLower == queryLower -> 100           // Exact match
+                            nameLower.startsWith(queryLower) -> 90  // Starts with query
+                            queryWords.all { it in nameLower } -> 80 // Contains all query words
+                            queryLower in nameLower -> 70           // Contains full query string
+                            queryWords.any { it in nameLower } -> 50 // Contains some words
+                            else -> 0
+                        }
+                    }.thenByDescending {
+                        // Secondary: prefer items with posters (better quality results)
+                        if (it.poster.isNotEmpty()) 1 else 0
+                    })
 
                 Log.d("SearchVM", "Search '$query': ${finalResults.size} results in ${elapsed}ms")
 

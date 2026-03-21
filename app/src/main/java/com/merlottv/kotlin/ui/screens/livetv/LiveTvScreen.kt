@@ -115,6 +115,26 @@ fun LiveTvScreen(
         }
     }
 
+    // Pause Live TV when app goes to background — prevents audio leak
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    try { viewModel.stopPlayback() } catch (_: Exception) {}
+                    try { viewModel.stopVlc() } catch (_: Exception) {}
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    // Resume channel when coming back
+                    try { viewModel.resumePlayback() } catch (_: Exception) {}
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val uiState by viewModel.uiState.collectAsState()
 
     if (uiState.isFullscreen && uiState.selectedChannel != null) {

@@ -146,6 +146,10 @@ class VodDetailViewModel @Inject constructor(
         playBestStream()
     }
 
+    fun retry() {
+        loadMeta()
+    }
+
     private fun loadMeta() {
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()

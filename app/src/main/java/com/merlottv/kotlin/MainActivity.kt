@@ -1,6 +1,7 @@
 package com.merlottv.kotlin
 
 import android.app.Activity
+import android.media.AudioManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -89,6 +90,41 @@ class MainActivity : ComponentActivity() {
                 MerlotApp()
             }
         }
+    }
+
+    /**
+     * Stop all audio when the app goes to the background (Home button, task switcher,
+     * or screen off). This prevents audio from continuing to play after leaving the app.
+     */
+    override fun onStop() {
+        super.onStop()
+        // Abandon audio focus — tells the system we're done producing audio
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        audioManager.abandonAudioFocus(null)
+        // Mute the stream temporarily so any lingering player buffer is silent
+        // (ExoPlayer may still have a few frames queued)
+        try {
+            audioManager.adjustStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                AudioManager.ADJUST_MUTE,
+                0
+            )
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Restore audio when the app comes back to the foreground.
+     */
+    override fun onRestart() {
+        super.onRestart()
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        try {
+            audioManager.adjustStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                AudioManager.ADJUST_UNMUTE,
+                0
+            )
+        } catch (_: Exception) {}
     }
 }
 

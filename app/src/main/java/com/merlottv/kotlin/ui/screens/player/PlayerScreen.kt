@@ -383,6 +383,25 @@ fun PlayerScreen(
         }
     }
 
+    // Pause player when app goes to background (onStop) — prevents audio leak
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    player.pause()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    // Resume playback when returning to app
+                    player.play()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Save progress on dispose — release player immediately, save async via GlobalScope
     DisposableEffect(Unit) {
         onDispose {

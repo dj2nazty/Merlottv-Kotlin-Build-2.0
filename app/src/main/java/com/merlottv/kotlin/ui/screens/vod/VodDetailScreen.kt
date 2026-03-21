@@ -744,6 +744,44 @@ fun VodDetailScreen(
                     }
                 }
             }
+            else -> {
+                // Meta failed to load — show error with retry
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    androidx.compose.material3.Text(
+                        text = "Failed to load details",
+                        color = Color.White,
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.material3.Text(
+                        text = "Check your connection and try again",
+                        color = Color.Gray,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MerlotColors.Accent)
+                            .padding(horizontal = 24.dp, vertical = 10.dp)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown &&
+                                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                ) {
+                                    viewModel.retry()
+                                    true
+                                } else false
+                            }
+                            .focusable(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.material3.Text("Retry", color = Color.Black)
+                    }
+                }
+            }
         }
 
         // ─── In-App Trailer Player Overlay (Native ExoPlayer) ───

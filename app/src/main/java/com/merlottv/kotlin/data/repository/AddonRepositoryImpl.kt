@@ -315,9 +315,19 @@ class AddonRepositoryImpl @Inject constructor(
                     .map { it.id }
                     .distinct()
                     .ifEmpty {
-                        // Fallback: if no catalogs are defined (manifest not fetched),
-                        // try "top" which is the Cinemeta default
-                        if (addon.catalogs.isEmpty()) listOf("top") else return@withContext emptyList()
+                        // Fallback: if no catalogs explicitly declare search support,
+                        // try "top" (Cinemeta default) or the first catalog for this type
+                        // Most Stremio addons support /search= on any catalog
+                        if (addon.catalogs.isEmpty()) {
+                            listOf("top")
+                        } else {
+                            addon.catalogs
+                                .filter { it.type == type }
+                                .map { it.id }
+                                .distinct()
+                                .take(1) // Try the first catalog for this type
+                                .ifEmpty { return@withContext emptyList() }
+                        }
                     }
 
                 // Parallelize multi-catalog search within each addon
