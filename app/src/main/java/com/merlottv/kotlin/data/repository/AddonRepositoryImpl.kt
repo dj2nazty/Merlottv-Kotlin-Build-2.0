@@ -169,7 +169,9 @@ class AddonRepositoryImpl @Inject constructor(
 
                 Log.d("AddonRepo", "getCatalog URL: $url")
                 val request = Request.Builder().url(url).build()
-                val response = fastClient.newCall(request).execute()
+                // Use longer timeouts for self-hosted addon (Render free tier is slower)
+                val client = if ("merlottv-addon" in url) okHttpClient else fastClient
+                val response = client.newCall(request).execute()
                 val body = response.body?.string() ?: return@withContext emptyList()
                 val items = parseCatalogResponse(body)
 

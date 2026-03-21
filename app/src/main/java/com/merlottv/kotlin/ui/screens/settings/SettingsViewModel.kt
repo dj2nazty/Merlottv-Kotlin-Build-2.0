@@ -1,6 +1,7 @@
 package com.merlottv.kotlin.ui.screens.settings
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.BuildConfig
@@ -733,6 +734,7 @@ class SettingsViewModel @Inject constructor(
                     val title = "${job.catalogName} $typeLabel — ${job.addonName}"
                     CategoryItem(key = key, title = title, enabled = true)
                 }.distinctBy { it.key }
+                 .sortedBy { defaultSortOrder(it.title) } // Match Home screen default order
 
                 // Load saved order and hidden for Home
                 val homeOrder = settingsDataStore.homeCategoryOrder.first()
@@ -783,6 +785,8 @@ class SettingsViewModel @Inject constructor(
         val items = _uiState.value.homeCategoryItems.map {
             if (it.key == key) it.copy(enabled = !it.enabled) else it
         }
+        val toggled = items.find { it.key == key }
+        Log.d("SettingsVM", "toggleHome: $key -> enabled=${toggled?.enabled}")
         _uiState.value = _uiState.value.copy(homeCategoryItems = items)
     }
 
@@ -835,12 +839,50 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val homeItems = _uiState.value.homeCategoryItems
             val vodItems = _uiState.value.vodCategoryItems
+            val homeHidden = homeItems.filter { !it.enabled }.map { it.key }.toSet()
+            val vodHidden = vodItems.filter { !it.enabled }.map { it.key }.toSet()
+            Log.d("SettingsVM", "SAVE: ${homeItems.size} home items, ${homeHidden.size} hidden home, ${vodItems.size} vod items, ${vodHidden.size} hidden vod")
+            Log.d("SettingsVM", "SAVE hidden home keys: $homeHidden")
             settingsDataStore.setHomeCategoryOrder(homeItems.map { it.key })
-            settingsDataStore.setHomeHiddenCategories(homeItems.filter { !it.enabled }.map { it.key }.toSet())
+            settingsDataStore.setHomeHiddenCategories(homeHidden)
             settingsDataStore.setVodCategoryOrder(vodItems.map { it.key })
-            settingsDataStore.setVodHiddenCategories(vodItems.filter { !it.enabled }.map { it.key }.toSet())
+            settingsDataStore.setVodHiddenCategories(vodHidden)
+            Log.d("SettingsVM", "SAVE complete — closing overlay")
             _uiState.value = _uiState.value.copy(showVodCategorySystem = false, reorderMode = false)
             cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    /** Must match HomeViewModel.defaultSortOrder exactly so Settings and Home agree */
+    private fun defaultSortOrder(title: String): Int {
+        val t = title.lowercase()
+        return when {
+            "airing today" in t -> 0
+            "popular new tv" in t -> 1
+            "trending" in t -> 2
+            "popular" in t -> 3
+            "upcoming" in t -> 3
+            "in theaters" in t || "now_playing" in t -> 4
+            "on the air" in t -> 5
+            "top rated" in t -> 6
+            "latest" in t || "new" in t -> 7
+            "featured" in t -> 8
+            "netflix" in t -> 9
+            "disney" in t -> 10
+            "prime" in t || "amazon" in t -> 11
+            "hbo" in t || "max" in t -> 12
+            "apple" in t -> 13
+            "paramount" in t -> 14
+            "peacock" in t -> 15
+            "discovery" in t -> 16
+            "nbc" in t -> 17
+            "abc" in t -> 18
+            "cbs" in t -> 19
+            "fox" in t -> 20
+            "cw" in t -> 21
+            "showtime" in t -> 22
+            "imdb" in t -> 23
+            else -> 30
         }
     }
 

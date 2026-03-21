@@ -74,9 +74,32 @@ object DefaultData {
             isDefault = true
         ),
         Addon(
-            id = "merlottv-plus",
+            id = "com.merlottv.tmdb",
             name = "MerlotTV+",
-            url = "http://10.0.2.2:7000/manifest.json",
+            url = "https://merlottv-addon.onrender.com/manifest.json",
+            catalogs = listOf(
+                AddonCatalog(id = "merlot.upcoming", name = "Upcoming Movies", type = "movie"),
+                AddonCatalog(id = "merlot.now_playing", name = "In Theaters Now", type = "movie"),
+                AddonCatalog(id = "merlot.top_rated_movies", name = "Top Rated Movies", type = "movie"),
+                AddonCatalog(id = "merlot.popular_new_tvshows", name = "Popular New TV Shows", type = "series"),
+                AddonCatalog(id = "merlot.airing_today", name = "Airing Today", type = "series"),
+                AddonCatalog(id = "merlot.on_the_air", name = "On The Air", type = "series"),
+                AddonCatalog(id = "merlot.top_rated_series", name = "Top Rated Series", type = "series"),
+                AddonCatalog(id = "net.nbc", name = "NBC", type = "series"),
+                AddonCatalog(id = "net.abc", name = "ABC", type = "series"),
+                AddonCatalog(id = "net.cbs", name = "CBS", type = "series"),
+                AddonCatalog(id = "net.fox", name = "FOX", type = "series"),
+                AddonCatalog(id = "net.cw", name = "The CW", type = "series"),
+                AddonCatalog(id = "net.hbo", name = "HBO", type = "series"),
+                AddonCatalog(id = "net.showtime", name = "Showtime", type = "series"),
+                AddonCatalog(id = "net.fx", name = "FX", type = "series"),
+                AddonCatalog(id = "net.amc", name = "AMC", type = "series"),
+                AddonCatalog(id = "net.usa", name = "USA Network", type = "series"),
+                AddonCatalog(id = "net.bravo", name = "Bravo", type = "series"),
+                AddonCatalog(id = "net.hgtv", name = "HGTV", type = "series"),
+                AddonCatalog(id = "net.history", name = "History", type = "series"),
+                AddonCatalog(id = "net.pbs", name = "PBS", type = "series")
+            ),
             isDefault = true
         ),
         Addon(

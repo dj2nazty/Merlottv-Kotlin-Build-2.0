@@ -59,9 +59,43 @@ class HomeViewModel @Inject constructor(
     // Limit concurrent catalog HTTP requests — max 12 for faster startup
     private val catalogDispatcher = Dispatchers.IO.limitedParallelism(4)
 
+    private var catalogLoadJob: kotlinx.coroutines.Job? = null
+    private var reloadDebounceJob: kotlinx.coroutines.Job? = null
+    private val initTime = System.currentTimeMillis()
+
     init {
         loadCatalogs()
         loadContinueWatching()
+        // Watch for category order/hidden changes and reload (skip first 3s after init)
+        viewModelScope.launch {
+            settingsDataStore.homeCategoryOrder.collect {
+                if (System.currentTimeMillis() - initTime < 3000) return@collect
+                scheduleReload("order changed")
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.homeHiddenCategories.collect {
+                if (System.currentTimeMillis() - initTime < 3000) return@collect
+                scheduleReload("hidden changed")
+            }
+        }
+    }
+
+    /** Debounce reload — both order and hidden may change at the same time */
+    private fun scheduleReload(reason: String) {
+        reloadDebounceJob?.cancel()
+        reloadDebounceJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(500) // Wait 500ms for both saves to settle
+            Log.d("HomeViewModel", "Reloading catalogs: $reason")
+            catalogLoadJob?.cancel()
+            loadCatalogs()
+        }
+    }
+
+    /** Public: force a full catalog reload */
+    fun reloadCatalogs() {
+        catalogLoadJob?.cancel()
+        loadCatalogs()
     }
 
     private fun loadContinueWatching() {
@@ -73,7 +107,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadCatalogs() {
-        viewModelScope.launch {
+        catalogLoadJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             Log.d("HomeViewModel", "Starting loadCatalogs")
             try {
@@ -205,7 +239,11 @@ class HomeViewModel @Inject constructor(
         return rows
             .filter { row ->
                 val t = row.title.lowercase()
-                ("movie" in t) && ("popular" in t || "new" in t || "featured" in t || "trending" in t || "top" in t)
+                // Movies: popular, new, featured, trending, top
+                // Series: airing today, popular new tv shows (MerlotTV+)
+                ("movie" in t && ("popular" in t || "new" in t || "featured" in t || "trending" in t || "top" in t)) ||
+                ("airing today" in t) ||
+                ("popular new tv" in t)
             }
             .flatMap { it.items }
             .distinctBy { it.id }
@@ -240,11 +278,12 @@ class HomeViewModel @Inject constructor(
     private fun defaultSortOrder(title: String): Int {
         val t = title.lowercase()
         return when {
-            "trending" in t -> 0
-            "popular" in t -> 1
-            "upcoming" in t -> 2
-            "in theaters" in t || "now_playing" in t -> 3
-            "airing today" in t -> 4
+            "airing today" in t -> 0
+            "popular new tv" in t -> 1
+            "trending" in t -> 2
+            "popular" in t -> 3
+            "upcoming" in t -> 3
+            "in theaters" in t || "now_playing" in t -> 4
             "on the air" in t -> 5
             "top rated" in t -> 6
             "latest" in t || "new" in t -> 7

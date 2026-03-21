@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -640,6 +641,21 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ Home & VOD Categories ═══ [Playback]
+        if (selectedTab == "Playback") {
+            SettingsSection(title = "Home & VOD Categories", icon = { Icon(Icons.Default.Tune, null, tint = MerlotColors.Accent) }) {
+                Text(
+                    "Customize which catalog rows appear on the Home and VOD screens, reorder them, or hide ones you don't want.",
+                    color = MerlotColors.TextMuted, fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                DpadButton(onClick = { viewModel.openVodCategorySystem() }) {
+                    Text("Manage Home & VOD Categories", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         // ═══ Bitrate Checker ═══ [Playback]
         if (selectedTab == "Playback") {
             SettingsSection(
@@ -1210,20 +1226,7 @@ fun SettingsScreen(
             }
         }
 
-        // ═══ VOD Category System ═══ [Advanced]
-        if (selectedTab == "Advanced") {
-            SettingsSection(title = "VOD Category System", icon = { Icon(Icons.Default.Tune, null, tint = MerlotColors.Accent) }) {
-                Text(
-                    "Customize which catalog rows appear on the Home and VOD screens, and their display order.",
-                    color = MerlotColors.TextMuted, fontSize = 11.sp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                DpadButton(onClick = { viewModel.openVodCategorySystem() }) {
-                    Text("Open VOD Category System", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
+        // ═══ VOD Category System ═══ [moved to Playback tab below]
 
         // ═══ Live TV Category Order ═══ [Advanced]
         if (selectedTab == "Advanced" && uiState.categoryOrder.isNotEmpty()) {
@@ -1435,6 +1438,10 @@ private fun VodCategorySystemOverlay(
             }
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            // Hoisted focus requesters so tabs and header can reference them
+            val saveFocus = remember { FocusRequester() }
+            val closeFocus = remember { FocusRequester() }
+
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1443,44 +1450,86 @@ private fun VodCategorySystemOverlay(
                 Icon(Icons.Default.Tune, null, tint = MerlotColors.Accent, modifier = Modifier.size(24.dp))
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    "VOD Category System",
+                    "Home & VOD Categories",
                     color = MerlotColors.TextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
-                val saveFocus = remember { FocusRequester() }
-                val closeFocus = remember { FocusRequester() }
-                DpadButton(
-                    onClick = { movingIndex = -1; onSave() },
+                var saveBtnFocused by remember { mutableStateOf(false) }
+                var closeBtnFocused by remember { mutableStateOf(false) }
+                Box(
                     modifier = Modifier
                         .focusRequester(saveFocus)
+                        .onFocusChanged { saveBtnFocused = it.isFocused }
+                        .border(
+                            2.dp,
+                            if (saveBtnFocused) MerlotColors.Accent else Color.Transparent,
+                            RoundedCornerShape(8.dp)
+                        )
                         .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
-                                try { closeFocus.requestFocus() } catch (_: Exception) {}
-                                true
+                            if (event.type == KeyEventType.KeyDown) {
+                                when (event.key) {
+                                    Key.DirectionCenter, Key.Enter -> {
+                                        movingIndex = -1; onSave()
+                                        true
+                                    }
+                                    Key.DirectionRight -> {
+                                        try { closeFocus.requestFocus() } catch (_: Exception) {}
+                                        true
+                                    }
+                                    Key.DirectionDown -> false
+                                    Key.DirectionLeft -> true
+                                    else -> false
+                                }
                             } else false
                         }
+                        .focusable()
+                        .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Icon(Icons.Default.Save, null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Save", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Save, null, modifier = Modifier.size(14.dp), tint = if (saveBtnFocused) MerlotColors.White else MerlotColors.TextPrimary)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Save", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = if (saveBtnFocused) MerlotColors.White else MerlotColors.TextPrimary)
+                    }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                DpadButton(
-                    onClick = { onClose() },
+                Box(
                     modifier = Modifier
                         .focusRequester(closeFocus)
+                        .onFocusChanged { closeBtnFocused = it.isFocused }
+                        .border(
+                            2.dp,
+                            if (closeBtnFocused) MerlotColors.Accent else Color.Transparent,
+                            RoundedCornerShape(8.dp)
+                        )
                         .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                                try { saveFocus.requestFocus() } catch (_: Exception) {}
-                                true
+                            if (event.type == KeyEventType.KeyDown) {
+                                when (event.key) {
+                                    Key.DirectionCenter, Key.Enter -> {
+                                        onClose()
+                                        true
+                                    }
+                                    Key.DirectionLeft -> {
+                                        try { saveFocus.requestFocus() } catch (_: Exception) {}
+                                        true
+                                    }
+                                    Key.DirectionDown -> false
+                                    Key.DirectionRight -> true
+                                    else -> false
+                                }
                             } else false
                         }
+                        .focusable()
+                        .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Close", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp), tint = if (closeBtnFocused) MerlotColors.White else MerlotColors.TextPrimary)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Close", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = if (closeBtnFocused) MerlotColors.White else MerlotColors.TextPrimary)
+                    }
                 }
             }
 
@@ -1521,6 +1570,10 @@ private fun VodCategorySystemOverlay(
                                         Key.DirectionCenter, Key.Enter -> {
                                             movingIndex = -1
                                             onTabChange(tab)
+                                            true
+                                        }
+                                        Key.DirectionUp -> {
+                                            try { saveFocus.requestFocus() } catch (_: Exception) {}
                                             true
                                         }
                                         Key.DirectionLeft -> {
@@ -1606,11 +1659,60 @@ private fun VodCategorySystemOverlay(
                     CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
                 }
             } else {
-                // Use LazyColumn with stable keys to prevent crash on reorder
+                // Track which row index has focus for reorder moves
+                var focusedIndex by remember { mutableStateOf(-1) }
+                // FocusRequesters for each row so we can restore focus after reorder
+                val focusRequesters = remember(items.size) {
+                    List(items.size) { FocusRequester() }
+                }
+
                 val lazyState = rememberLazyListState()
+
+                // After a reorder move, re-focus the moved item AND scroll to keep it visible
+                LaunchedEffect(movingIndex) {
+                    if (movingIndex >= 0 && movingIndex < focusRequesters.size) {
+                        kotlinx.coroutines.delay(50)
+                        try {
+                            lazyState.animateScrollToItem(movingIndex)
+                            focusRequesters[movingIndex].requestFocus()
+                        } catch (_: Exception) {}
+                    }
+                }
+
                 LazyColumn(
                     state = lazyState,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .onPreviewKeyEvent { event ->
+                            // Handle reorder moves at the LazyColumn level
+                            if (event.type == KeyEventType.KeyDown && movingIndex >= 0) {
+                                when (event.key) {
+                                    Key.DirectionUp -> {
+                                        if (movingIndex > 0) {
+                                            if (isHome) onMoveHomeUp(movingIndex) else onMoveVodUp(movingIndex)
+                                            movingIndex -= 1
+                                        }
+                                        true
+                                    }
+                                    Key.DirectionDown -> {
+                                        if (movingIndex < items.size - 1) {
+                                            if (isHome) onMoveHomeDown(movingIndex) else onMoveVodDown(movingIndex)
+                                            movingIndex += 1
+                                        }
+                                        true
+                                    }
+                                    Key.DirectionCenter, Key.Enter -> {
+                                        movingIndex = -1 // Drop / confirm position
+                                        true
+                                    }
+                                    Key.Back -> {
+                                        movingIndex = -1
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        }
                 ) {
                     itemsIndexed(items, key = { _, item -> item.key }) { index, item ->
                         val isMoving = movingIndex == index
@@ -1635,46 +1737,24 @@ private fun VodCategorySystemOverlay(
                                         else -> Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
                                     }
                                 )
-                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusRequester(focusRequesters[index])
+                                .onFocusChanged {
+                                    isFocused = it.isFocused
+                                    if (it.isFocused) focusedIndex = index
+                                }
                                 .onPreviewKeyEvent { event ->
-                                    if (event.type == KeyEventType.KeyDown) {
+                                    if (event.type == KeyEventType.KeyDown && movingIndex < 0) {
                                         when (event.key) {
                                             Key.DirectionCenter, Key.Enter -> {
                                                 if (reorderMode) {
-                                                    // Reorder mode: pick up / put down
-                                                    if (isMoving) {
-                                                        movingIndex = -1 // Confirm position
-                                                    } else if (movingIndex >= 0) {
-                                                        movingIndex = -1 // Cancel current, don't pick up new
-                                                    } else {
-                                                        movingIndex = index // Pick up this item
-                                                    }
+                                                    movingIndex = index // Pick up this item
                                                 } else {
-                                                    // Toggle mode: toggle visibility
+                                                    // Toggle visibility
                                                     if (isHome) onToggleHome(item.key) else onToggleVod(item.key)
                                                 }
                                                 true
                                             }
-                                            Key.DirectionUp -> {
-                                                if (isMoving && index > 0) {
-                                                    if (isHome) onMoveHomeUp(index) else onMoveVodUp(index)
-                                                    movingIndex = index - 1
-                                                    true
-                                                } else false
-                                            }
-                                            Key.DirectionDown -> {
-                                                if (isMoving && index < items.size - 1) {
-                                                    if (isHome) onMoveHomeDown(index) else onMoveVodDown(index)
-                                                    movingIndex = index + 1
-                                                    true
-                                                } else false
-                                            }
-                                            Key.Back -> {
-                                                if (isMoving) {
-                                                    movingIndex = -1
-                                                    true
-                                                } else false
-                                            }
+                                            Key.DirectionLeft -> true // Block left to prevent sidebar
                                             else -> false
                                         }
                                     } else false
@@ -1715,18 +1795,26 @@ private fun VodCategorySystemOverlay(
                                 maxLines = 1
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            // Toggle switch (visible in both modes for state awareness)
-                            Switch(
-                                checked = item.enabled,
-                                onCheckedChange = null,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MerlotColors.Accent,
-                                    checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f),
-                                    uncheckedThumbColor = MerlotColors.TextMuted,
-                                    uncheckedTrackColor = MerlotColors.Surface2
-                                ),
-                                modifier = Modifier.height(24.dp).focusable(false)
-                            )
+                            // Visual indicator — not focusable, not interactive
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 36.dp, height = 20.dp)
+                                    .background(
+                                        if (item.enabled) MerlotColors.Accent.copy(alpha = 0.3f) else MerlotColors.Surface2,
+                                        RoundedCornerShape(10.dp)
+                                    ),
+                                contentAlignment = if (item.enabled) Alignment.CenterEnd else Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(2.dp)
+                                        .size(16.dp)
+                                        .background(
+                                            if (item.enabled) MerlotColors.Accent else MerlotColors.TextMuted,
+                                            CircleShape
+                                        )
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(3.dp))
                     }
@@ -1734,9 +1822,53 @@ private fun VodCategorySystemOverlay(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Bottom buttons: Reset
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DpadButton(onClick = { movingIndex = -1; reorderMode = false; if (isHome) onResetHome() else onResetVod() }) {
+                // Bottom buttons: Save, Close, Reset — all reachable by scrolling down past the list
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    var saveBtnFocused2 by remember { mutableStateOf(false) }
+                    var closeBtnFocused2 by remember { mutableStateOf(false) }
+                    var resetBtnFocused by remember { mutableStateOf(false) }
+
+                    DpadButton(
+                        onClick = { movingIndex = -1; onSave() },
+                        modifier = Modifier
+                            .onFocusChanged { saveBtnFocused2 = it.isFocused }
+                            .border(
+                                2.dp,
+                                if (saveBtnFocused2) MerlotColors.Accent else Color.Transparent,
+                                RoundedCornerShape(8.dp)
+                            )
+                    ) {
+                        Icon(Icons.Default.Save, null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Save", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                    DpadButton(
+                        onClick = { onClose() },
+                        modifier = Modifier
+                            .onFocusChanged { closeBtnFocused2 = it.isFocused }
+                            .border(
+                                2.dp,
+                                if (closeBtnFocused2) MerlotColors.Accent else Color.Transparent,
+                                RoundedCornerShape(8.dp)
+                            )
+                    ) {
+                        Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Close", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                    DpadButton(
+                        onClick = { movingIndex = -1; reorderMode = false; if (isHome) onResetHome() else onResetVod() },
+                        modifier = Modifier
+                            .onFocusChanged { resetBtnFocused = it.isFocused }
+                            .border(
+                                2.dp,
+                                if (resetBtnFocused) Color(0xFFFF9800) else Color.Transparent,
+                                RoundedCornerShape(8.dp)
+                            )
+                    ) {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Reset to Default", fontWeight = FontWeight.Bold, fontSize = 11.sp)
