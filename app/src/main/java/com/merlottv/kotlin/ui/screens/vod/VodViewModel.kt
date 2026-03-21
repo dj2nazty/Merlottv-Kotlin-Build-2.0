@@ -171,6 +171,8 @@ data class VodUiState(
     val selectedTab: String = "All",
     val selectedPlatformTab: PlatformTab? = null,
     val platformSections: List<CatalogSection> = emptyList(),
+    val filteredPlatformItems: List<com.merlottv.kotlin.domain.model.MetaPreview> = emptyList(),
+    val platformSearchQuery: String = "",
     val isPlatformLoading: Boolean = false,
     val sections: List<CatalogSection> = emptyList(),
     val filteredSections: List<CatalogSection> = emptyList(),
@@ -238,6 +240,8 @@ class VodViewModel @Inject constructor(
                 selectedTab = "All",
                 selectedPlatformTab = null,
                 platformSections = emptyList(),
+                filteredPlatformItems = emptyList(),
+                platformSearchQuery = "",
                 availableGenres = emptyList(),
                 availableYears = emptyList()
             )
@@ -249,12 +253,28 @@ class VodViewModel @Inject constructor(
             selectedPlatformTab = tab,
             isPlatformLoading = true,
             platformSections = emptyList(),
+            filteredPlatformItems = emptyList(),
+            platformSearchQuery = "",
             selectedGenre = null,
             selectedYear = null,
             availableGenres = emptyList(),
             availableYears = emptyList()
         )
         loadMdbListContent(tab)
+    }
+
+    fun onPlatformSearchQueryChanged(query: String) {
+        val current = _uiState.value
+        val allItems = current.platformSections.flatMap { it.items }
+        val filtered = if (query.isBlank()) {
+            allItems
+        } else {
+            allItems.filter { it.name.contains(query, ignoreCase = true) }
+        }
+        _uiState.value = current.copy(
+            platformSearchQuery = query,
+            filteredPlatformItems = filtered
+        )
     }
 
     private val mdbListCache = mutableMapOf<String, List<MetaPreview>>()
@@ -295,7 +315,8 @@ class VodViewModel @Inject constructor(
                     )
                     _uiState.value = _uiState.value.copy(
                         isPlatformLoading = false,
-                        platformSections = listOf(section)
+                        platformSections = listOf(section),
+                        filteredPlatformItems = cached
                     )
                     return@launch
                 }
@@ -383,35 +404,46 @@ class VodViewModel @Inject constructor(
                         catalogId = tab.id,
                         items = allResolved.toList()
                     )
+                    val currentItems = allResolved.toList()
+                    val query = _uiState.value.platformSearchQuery
+                    val filtered = if (query.isBlank()) currentItems
+                        else currentItems.filter { it.name.contains(query, ignoreCase = true) }
                     _uiState.value = _uiState.value.copy(
                         isPlatformLoading = chunkIdx == 0 && allResolved.isEmpty(),
-                        platformSections = listOf(section)
+                        platformSections = listOf(section),
+                        filteredPlatformItems = filtered
                     )
                 }
 
                 // Final update with clean title
+                val finalItems = allResolved.toList()
                 val finalSection = CatalogSection(
                     key = "mdblist:${tab.id}",
-                    title = "${tab.name} — ${allResolved.size} titles",
+                    title = "${tab.name} — ${finalItems.size} titles",
                     addonName = "MDBList",
                     brandLogo = "",
                     type = "movie",
                     catalogId = tab.id,
-                    items = allResolved.toList()
+                    items = finalItems
                 )
 
                 // Cache results
-                mdbListCache[cacheKey] = allResolved.toList()
+                mdbListCache[cacheKey] = finalItems
 
+                val query = _uiState.value.platformSearchQuery
+                val filtered = if (query.isBlank()) finalItems
+                    else finalItems.filter { it.name.contains(query, ignoreCase = true) }
                 _uiState.value = _uiState.value.copy(
                     isPlatformLoading = false,
-                    platformSections = if (allResolved.isNotEmpty()) listOf(finalSection) else emptyList()
+                    platformSections = if (finalItems.isNotEmpty()) listOf(finalSection) else emptyList(),
+                    filteredPlatformItems = filtered
                 )
             } catch (e: Exception) {
                 android.util.Log.w("VodViewModel", "MDBList load failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(
                     isPlatformLoading = false,
-                    platformSections = emptyList()
+                    platformSections = emptyList(),
+                    filteredPlatformItems = emptyList()
                 )
             }
         }

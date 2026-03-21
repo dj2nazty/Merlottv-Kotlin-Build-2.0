@@ -78,8 +78,14 @@ import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.components.CardTrailerPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 
 @Composable
 fun VodScreen(
@@ -153,78 +159,80 @@ fun VodScreen(
                 }
             }
     ) {
-        // Tab row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "VOD",
-                color = MerlotColors.TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Spacer(modifier = Modifier.width(16.dp))
+        // Tab row — hidden when a platform/streaming service tab is selected
+        if (uiState.selectedPlatformTab == null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "VOD",
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.width(16.dp))
 
-            // Main tabs: All, Movies, Series
-            val tabs = listOf("All", "Movies", "Series")
-            val mainTabFocusRequesters = remember { List(tabs.size) { FocusRequester() } }
-            tabs.forEachIndexed { index, tab ->
-                val isSelected = uiState.selectedTab == tab && uiState.selectedPlatformTab == null
+                // Main tabs: All, Movies, Series
+                val tabs = listOf("All", "Movies", "Series")
+                val mainTabFocusRequesters = remember { List(tabs.size) { FocusRequester() } }
+                tabs.forEachIndexed { index, tab ->
+                    val isSelected = uiState.selectedTab == tab
 
-                Box(
-                    modifier = Modifier
-                        .focusRequester(mainTabFocusRequesters[index])
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown) {
-                                when (event.key) {
-                                    Key.DirectionLeft -> {
-                                        if (index > 0) {
-                                            try { mainTabFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
-                                            true
-                                        } else false // let sidebar open
+                    Box(
+                        modifier = Modifier
+                            .focusRequester(mainTabFocusRequesters[index])
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown) {
+                                    when (event.key) {
+                                        Key.DirectionLeft -> {
+                                            if (index > 0) {
+                                                try { mainTabFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                                true
+                                            } else false // let sidebar open
+                                        }
+                                        Key.DirectionRight -> {
+                                            if (index < tabs.size - 1) {
+                                                try { mainTabFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                                true
+                                            } else true
+                                        }
+                                        else -> false
                                     }
-                                    Key.DirectionRight -> {
-                                        if (index < tabs.size - 1) {
-                                            try { mainTabFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
-                                            true
-                                        } else true
-                                    }
-                                    else -> false
-                                }
-                            } else false
-                        }
-                ) {
-                    MerlotChip(
-                        selected = isSelected,
-                        onClick = { viewModel.onTabSelected(tab) },
-                        label = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
-                                when (tab) {
-                                    "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
-                                    "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
-                                    else -> {}
-                                }
-                                if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
-                                Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                                } else false
                             }
-                        }
+                    ) {
+                        MerlotChip(
+                            selected = isSelected,
+                            onClick = { viewModel.onTabSelected(tab) },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val tint = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
+                                    when (tab) {
+                                        "Movies" -> Icon(Icons.Default.Movie, null, modifier = Modifier.size(14.dp), tint = tint)
+                                        "Series" -> Icon(Icons.Default.Tv, null, modifier = Modifier.size(14.dp), tint = tint)
+                                        else -> {}
+                                    }
+                                    if (tab != "All") Spacer(modifier = Modifier.width(4.dp))
+                                    Text(tab, fontSize = 12.sp, color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary)
+                                }
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                if (!uiState.isLoading && uiState.filteredSections.isNotEmpty()) {
+                    Text(
+                        text = "${uiState.filteredSections.size} categories",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 11.sp
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            if (!uiState.isLoading && uiState.filteredSections.isNotEmpty() && uiState.selectedPlatformTab == null) {
-                Text(
-                    text = "${uiState.filteredSections.size} categories",
-                    color = MerlotColors.TextMuted,
-                    fontSize = 11.sp
-                )
             }
         }
 
@@ -373,15 +381,24 @@ fun VodScreen(
                     Text(uiState.error ?: "Failed to load", color = MerlotColors.Danger, fontSize = 13.sp)
                 }
             }
-            // Platform tab selected with content — show as grid
+            // Platform tab selected with content — show header + search + grid
             uiState.selectedPlatformTab != null && uiState.platformSections.isNotEmpty() -> {
+                val displayItems = uiState.filteredPlatformItems
                 val allItems = uiState.platformSections.flatMap { it.items }
                 Column {
-                    // Header with logo + count
+                    // Header with back arrow, logo, name, count
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        IconButton(onClick = { viewModel.onPlatformTabSelected(null) }) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MerlotColors.TextPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .size(28.dp)
@@ -398,34 +415,102 @@ fun VodScreen(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "${uiState.selectedPlatformTab!!.name} — ${allItems.size} titles",
+                            uiState.selectedPlatformTab!!.name,
                             color = MerlotColors.TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "${displayItems.size} of ${allItems.size}",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 11.sp
                         )
                     }
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 130.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(allItems, key = { it.id }, contentType = { "vodcard" }) { item ->
-                            val itemFocusRequester = remember(item.id) {
-                                focusRequesters.getOrPut(item.id) { FocusRequester() }
-                            }
-                            VodCard(
-                                item = item,
-                                onClick = {
-                                    lastFocusedItemId = item.id
-                                    onNavigateToDetail(item.type, item.id)
-                                },
-                                onLongClick = { viewModel.toggleFavorite(item) },
-                                isFavorite = item.id in favoriteIds,
-                                focusRequester = itemFocusRequester,
-                                onFocused = { lastFocusedItemId = item.id }
+
+                    // Search bar for this streaming service catalog
+                    OutlinedTextField(
+                        value = uiState.platformSearchQuery,
+                        onValueChange = { viewModel.onPlatformSearchQueryChanged(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .height(48.dp),
+                        placeholder = {
+                            Text(
+                                "Search ${uiState.selectedPlatformTab!!.name}...",
+                                color = MerlotColors.TextMuted,
+                                fontSize = 13.sp
                             )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MerlotColors.TextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (uiState.platformSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.onPlatformSearchQueryChanged("") }) {
+                                    Icon(
+                                        Icons.Default.Clear,
+                                        contentDescription = "Clear",
+                                        tint = MerlotColors.TextMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MerlotColors.TextPrimary,
+                            unfocusedTextColor = MerlotColors.TextPrimary,
+                            cursorColor = MerlotColors.Accent,
+                            focusedBorderColor = MerlotColors.Accent,
+                            unfocusedBorderColor = MerlotColors.Surface2,
+                            focusedContainerColor = MerlotColors.Surface,
+                            unfocusedContainerColor = MerlotColors.Surface
+                        ),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    if (displayItems.isEmpty() && uiState.platformSearchQuery.isNotEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "No results for \"${uiState.platformSearchQuery}\"",
+                                color = MerlotColors.TextMuted,
+                                fontSize = 14.sp
+                            )
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 130.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(displayItems, key = { it.id }, contentType = { "vodcard" }) { item ->
+                                val itemFocusRequester = remember(item.id) {
+                                    focusRequesters.getOrPut(item.id) { FocusRequester() }
+                                }
+                                VodCard(
+                                    item = item,
+                                    onClick = {
+                                        lastFocusedItemId = item.id
+                                        onNavigateToDetail(item.type, item.id)
+                                    },
+                                    onLongClick = { viewModel.toggleFavorite(item) },
+                                    isFavorite = item.id in favoriteIds,
+                                    focusRequester = itemFocusRequester,
+                                    onFocused = { lastFocusedItemId = item.id }
+                                )
+                            }
                         }
                     }
                 }
