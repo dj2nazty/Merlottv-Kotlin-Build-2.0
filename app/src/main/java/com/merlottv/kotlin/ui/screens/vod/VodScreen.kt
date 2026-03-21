@@ -64,8 +64,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -354,7 +358,62 @@ fun VodScreen(
         }
 
         when {
-            uiState.isLoading -> {
+            // Platform loading MUST be checked before isLoading — user may click a
+            // streaming service while the main VOD catalogs are still loading
+            uiState.isPlatformLoading && uiState.selectedPlatformTab != null -> {
+                // Pulsing streaming service icon animation
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                    val alpha by infiniteTransition.animateFloat(
+                        initialValue = 0.3f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(800, easing = androidx.compose.animation.core.EaseInOut),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseAlpha"
+                    )
+                    val scale by infiniteTransition.animateFloat(
+                        initialValue = 0.9f,
+                        targetValue = 1.1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(800, easing = androidx.compose.animation.core.EaseInOut),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseScale"
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    this.alpha = alpha
+                                }
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(uiState.selectedPlatformTab!!.bgColor)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.foundation.Image(
+                                painter = androidx.compose.ui.res.painterResource(id = uiState.selectedPlatformTab!!.iconRes),
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "Loading ${uiState.selectedPlatformTab!!.name}...",
+                            color = MerlotColors.TextMuted.copy(alpha = alpha),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+            // Only show main catalog loading when NO platform tab is selected
+            uiState.isLoading && uiState.selectedPlatformTab == null -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = MerlotColors.Accent)
@@ -363,16 +422,12 @@ fun VodScreen(
                     }
                 }
             }
-            uiState.isFilterLoading || uiState.isPlatformLoading -> {
+            uiState.isFilterLoading -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = MerlotColors.Accent)
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            if (uiState.isPlatformLoading) "Loading ${uiState.selectedPlatformTab?.name ?: ""}..."
-                            else "Loading...",
-                            color = MerlotColors.TextMuted, fontSize = 12.sp
-                        )
+                        Text("Loading...", color = MerlotColors.TextMuted, fontSize = 12.sp)
                     }
                 }
             }

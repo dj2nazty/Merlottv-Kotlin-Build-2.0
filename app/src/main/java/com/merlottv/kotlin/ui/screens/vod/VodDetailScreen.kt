@@ -2,6 +2,7 @@
 
 package com.merlottv.kotlin.ui.screens.vod
 
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -917,8 +918,16 @@ private fun EpisodeCard(
                     model = episode.thumbnail,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.Crop,
+                    onError = {
+                        android.util.Log.e("EpisodeCard", "Thumbnail FAILED: ${episode.thumbnail} — ${it.result.throwable.message}")
+                    },
+                    onSuccess = {
+                        android.util.Log.d("EpisodeCard", "Thumbnail OK: ${episode.thumbnail}")
+                    }
                 )
+            } else {
+                android.util.Log.d("EpisodeCard", "Episode '${episode.title}' has EMPTY thumbnail")
             }
             // Play overlay icon
             Box(

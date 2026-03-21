@@ -473,14 +473,31 @@ class AddonRepositoryImpl @Inject constructor(
                 writer = (meta["writer"] as? List<String>) ?: emptyList(),
                 imdbRating = meta["imdbRating"] as? String ?: "",
                 videos = (meta["videos"] as? List<Map<String, Any?>>)?.map { v ->
+                    // Some addons return thumbnails via metahub.space which 301-redirects.
+                    // Coil may not follow cross-domain redirects on all devices.
+                    // Also try to extract IMDB ID + season/episode to build a direct TMDB URL as fallback.
+                    val rawThumb = v["thumbnail"] as? String ?: ""
+                    val videoId = v["id"] as? String ?: ""
+                    val seasonNum = (v["season"] as? Number)?.toInt() ?: 0
+                    val episodeNum = (v["episode"] as? Number)?.toInt() ?: 0
+
+                    // Build a fallback thumbnail from the show's poster if no episode thumb
+                    val thumbnail = rawThumb.ifEmpty {
+                        // If the video ID follows tt1234567:S:E pattern, construct metahub URL
+                        val imdbMatch = Regex("^(tt\\d+):\\d+:\\d+$").find(videoId)
+                        if (imdbMatch != null && seasonNum > 0 && episodeNum > 0) {
+                            "https://episodes.metahub.space/${imdbMatch.groupValues[1]}/$seasonNum/$episodeNum/w780.jpg"
+                        } else ""
+                    }
+
                     Video(
-                        id = v["id"] as? String ?: "",
+                        id = videoId,
                         title = v["title"] as? String ?: v["name"] as? String ?: "",
-                        season = (v["season"] as? Number)?.toInt() ?: 0,
-                        episode = (v["episode"] as? Number)?.toInt() ?: 0,
+                        season = seasonNum,
+                        episode = episodeNum,
                         released = v["released"] as? String ?: "",
                         overview = v["overview"] as? String ?: "",
-                        thumbnail = v["thumbnail"] as? String ?: ""
+                        thumbnail = thumbnail
                     )
                 } ?: emptyList(),
                 trailerStreams = (meta["trailerStreams"] as? List<Map<String, Any?>>)?.map { t ->

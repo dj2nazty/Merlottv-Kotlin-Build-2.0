@@ -199,8 +199,8 @@ class VodViewModel @Inject constructor(
         .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-    // Limit Cinemeta parallelism to avoid overwhelming the device
-    private val cinemetaDispatcher = Dispatchers.IO.limitedParallelism(6)
+    // Cinemeta parallelism — higher = faster poster loading for streaming service grids
+    private val cinemetaDispatcher = Dispatchers.IO.limitedParallelism(12)
 
     val favoriteVodIds: StateFlow<Set<String>> = favoritesRepository.getFavoriteVodIds()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -327,15 +327,17 @@ class VodViewModel @Inject constructor(
                 val body = response.body?.string() ?: throw Exception("Empty response")
                 val jsonArray = JSONArray(body)
 
-                // Extract ALL IMDB IDs with their MDBList mediatype
-                data class MdbItem(val imdbId: String, val mediaType: String)
+                // Extract ALL items with their MDBList data (title, imdb_id, mediatype, year)
+                data class MdbItem(val imdbId: String, val title: String, val mediaType: String, val year: String)
                 val mdbItems = mutableListOf<MdbItem>()
                 for (i in 0 until jsonArray.length()) {
                     val item = jsonArray.getJSONObject(i)
                     val imdbId = item.optString("imdb_id", "")
+                    val title = item.optString("title", "")
                     val mediaType = item.optString("mediatype", "")
-                    if (imdbId.isNotEmpty()) {
-                        mdbItems.add(MdbItem(imdbId, mediaType))
+                    val year = item.optString("release_year", "")
+                    if (imdbId.isNotEmpty() && title.isNotEmpty()) {
+                        mdbItems.add(MdbItem(imdbId, title, mediaType, year))
                     }
                 }
 
@@ -347,97 +349,99 @@ class VodViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Resolve IMDB IDs via Cinemeta PROGRESSIVELY in chunks of 20
-                // Show results as they come in so the user sees content fast
+                // Keep pulsing icon visible while first batch of posters loads.
+                // This way content appears fully loaded with artwork instead of blank cards.
                 val cinemetaBase = "https://v3-cinemeta.strem.io"
-                val allResolved = mutableListOf<MetaPreview>()
-                val chunks = mdbItems.chunked(20)
+                val resolvedMap = java.util.concurrent.ConcurrentHashMap<String, MetaPreview>()
+
+                // Pre-fill with MDBList basic data (title only, no poster)
+                mdbItems.forEach { mdbItem ->
+                    val cinemetaType = when (mdbItem.mediaType) {
+                        "show" -> "series"; "movie" -> "movie"; else -> "movie"
+                    }
+                    resolvedMap[mdbItem.imdbId] = MetaPreview(
+                        id = mdbItem.imdbId, type = cinemetaType, name = mdbItem.title,
+                        poster = "", description = "", imdbRating = "",
+                        background = "", logo = ""
+                    )
+                }
+
+                val chunks = mdbItems.chunked(25)
+                val loadStartTime = System.currentTimeMillis()
 
                 for ((chunkIdx, chunk) in chunks.withIndex()) {
-                    // Check if user switched away from this platform tab
                     if (_uiState.value.selectedPlatformTab?.id != tab.id) return@launch
 
-                    val batchResults = supervisorScope {
+                    supervisorScope {
                         chunk.map { mdbItem ->
                             async(cinemetaDispatcher) {
                                 withTimeoutOrNull(4000L) {
-                                    // Map MDBList mediatype → Cinemeta type
                                     val cinemetaType = when (mdbItem.mediaType) {
-                                        "show" -> "series"
-                                        "movie" -> "movie"
-                                        else -> "movie" // default fallback
+                                        "show" -> "series"; "movie" -> "movie"; else -> "movie"
                                     }
                                     try {
                                         val url = "$cinemetaBase/meta/$cinemetaType/${mdbItem.imdbId}.json"
                                         val req = Request.Builder().url(url).build()
                                         val resp = httpClient.newCall(req).execute()
                                         if (resp.isSuccessful) {
-                                            val metaBody = resp.body?.string() ?: return@withTimeoutOrNull null
+                                            val metaBody = resp.body?.string() ?: return@withTimeoutOrNull
                                             val metaJson = org.json.JSONObject(metaBody).optJSONObject("meta")
-                                                ?: return@withTimeoutOrNull null
-                                            MetaPreview(
-                                                id = metaJson.optString("imdb_id", mdbItem.imdbId),
-                                                type = cinemetaType,
-                                                name = metaJson.optString("name", ""),
-                                                poster = metaJson.optString("poster", ""),
-                                                description = metaJson.optString("description", ""),
-                                                imdbRating = metaJson.optString("imdbRating", ""),
-                                                background = metaJson.optString("background", ""),
-                                                logo = metaJson.optString("logo", "")
-                                            )
-                                        } else null
-                                    } catch (_: Exception) { null }
+                                                ?: return@withTimeoutOrNull
+                                            val poster = metaJson.optString("poster", "")
+                                            if (poster.isNotEmpty()) {
+                                                resolvedMap[mdbItem.imdbId] = MetaPreview(
+                                                    id = metaJson.optString("imdb_id", mdbItem.imdbId),
+                                                    type = cinemetaType,
+                                                    name = metaJson.optString("name", mdbItem.title),
+                                                    poster = poster,
+                                                    description = metaJson.optString("description", ""),
+                                                    imdbRating = metaJson.optString("imdbRating", ""),
+                                                    background = metaJson.optString("background", ""),
+                                                    logo = metaJson.optString("logo", "")
+                                                )
+                                            }
+                                        }
+                                    } catch (_: Exception) {}
                                 }
                             }
                         }.awaitAll()
-                    }.filterNotNull().filter { it.name.isNotEmpty() && it.poster.isNotEmpty() }
+                    }
 
-                    allResolved.addAll(batchResults)
+                    // After first chunk: ensure pulsing icon showed for at least 1.5s total,
+                    // then reveal content with posters already loaded
+                    if (chunkIdx == 0) {
+                        val elapsed = System.currentTimeMillis() - loadStartTime
+                        val minDisplayMs = 1500L
+                        if (elapsed < minDisplayMs) {
+                            kotlinx.coroutines.delay(minDisplayMs - elapsed)
+                        }
+                    }
 
-                    // Update UI progressively after each chunk
+                    // Update UI with enriched data
+                    val updatedItems = mdbItems.mapNotNull { resolvedMap[it.imdbId] }
                     val section = CatalogSection(
                         key = "mdblist:${tab.id}",
-                        title = "${tab.name} — ${allResolved.size} of ${mdbItems.size}",
+                        title = "${tab.name} — ${updatedItems.size} titles",
                         addonName = "MDBList",
                         brandLogo = "",
                         type = "movie",
                         catalogId = tab.id,
-                        items = allResolved.toList()
+                        items = updatedItems
                     )
-                    val currentItems = allResolved.toList()
                     val query = _uiState.value.platformSearchQuery
-                    val filtered = if (query.isBlank()) currentItems
-                        else currentItems.filter { it.name.contains(query, ignoreCase = true) }
+                    val filtered = if (query.isBlank()) updatedItems
+                        else updatedItems.filter { it.name.contains(query, ignoreCase = true) }
                     _uiState.value = _uiState.value.copy(
-                        isPlatformLoading = chunkIdx == 0 && allResolved.isEmpty(),
+                        isPlatformLoading = false,
                         platformSections = listOf(section),
                         filteredPlatformItems = filtered
                     )
                 }
 
-                // Final update with clean title
-                val finalItems = allResolved.toList()
-                val finalSection = CatalogSection(
-                    key = "mdblist:${tab.id}",
-                    title = "${tab.name} — ${finalItems.size} titles",
-                    addonName = "MDBList",
-                    brandLogo = "",
-                    type = "movie",
-                    catalogId = tab.id,
-                    items = finalItems
-                )
-
-                // Cache results
+                // Cache final enriched results
+                val finalItems = mdbItems.mapNotNull { resolvedMap[it.imdbId] }
                 mdbListCache[cacheKey] = finalItems
 
-                val query = _uiState.value.platformSearchQuery
-                val filtered = if (query.isBlank()) finalItems
-                    else finalItems.filter { it.name.contains(query, ignoreCase = true) }
-                _uiState.value = _uiState.value.copy(
-                    isPlatformLoading = false,
-                    platformSections = if (finalItems.isNotEmpty()) listOf(finalSection) else emptyList(),
-                    filteredPlatformItems = filtered
-                )
             } catch (e: Exception) {
                 android.util.Log.w("VodViewModel", "MDBList load failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(
