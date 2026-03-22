@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -79,7 +78,7 @@ import java.util.Date
 import java.util.Locale
 
 private const val PIXELS_PER_MINUTE = 3f
-private const val CHANNEL_COL_WIDTH = 160
+private const val CHANNEL_COL_WIDTH = 220
 private const val ROW_HEIGHT = 56
 private const val TIMELINE_HEIGHT = 32
 
@@ -101,9 +100,7 @@ fun TvGuideScreen(
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     val channelListState = rememberLazyListState()
-    val channelPanelListState = rememberLazyListState()
     val programListState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
 
     var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -138,17 +135,6 @@ fun TvGuideScreen(
         if (uiState.guideChannels.isNotEmpty()) {
             channelListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
             programListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
-            // Also sync channel panel if visible
-            if (uiState.showChannelPanel) {
-                channelPanelListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
-            }
-        }
-    }
-
-    // Scroll channel panel to selected channel when it opens
-    LaunchedEffect(uiState.showChannelPanel) {
-        if (uiState.showChannelPanel && uiState.guideChannels.isNotEmpty()) {
-            channelPanelListState.scrollToItem((selectedIndex - 3).coerceAtLeast(0))
         }
     }
 
@@ -171,9 +157,6 @@ fun TvGuideScreen(
         try { focusRequester.requestFocus() } catch (_: Exception) {}
     }
 
-    // Guard against rapid Left presses opening both panels at once
-    var channelPanelOpenTime by remember { mutableLongStateOf(0L) }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -183,45 +166,18 @@ fun TvGuideScreen(
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
-                // Category sidebar is open — let it handle its own keys
+                // Category sidebar is open — handle keys at parent level
                 if (uiState.showCategoryPicker) {
-                    false
-                }
-                // Channel panel is open — handle its navigation
-                else if (uiState.showChannelPanel) {
                     when (event.key) {
-                        Key.DirectionDown -> {
-                            viewModel.navigate(1)
-                            true
-                        }
-                        Key.DirectionUp -> {
-                            viewModel.navigate(-1)
-                            true
-                        }
-                        Key.DirectionLeft -> {
-                            // Step 2: open category sidebar (only if panel has been open > 300ms)
-                            if (System.currentTimeMillis() - channelPanelOpenTime > 300) {
-                                viewModel.showCategoryPicker()
-                            }
-                            true
-                        }
                         Key.DirectionRight, Key.Back -> {
-                            // Go back to EPG grid
-                            viewModel.hideChannelPanel()
+                            viewModel.hideCategoryPicker()
                             true
                         }
-                        Key.DirectionCenter, Key.Enter -> {
-                            val channel = viewModel.getSelectedChannel()
-                            if (channel != null) {
-                                viewModel.saveChannelForPlayback(channel)
-                                onChannelSelected(channel)
-                            }
-                            true
-                        }
-                        else -> false
+                        Key.DirectionLeft -> true // consume to prevent main sidebar opening
+                        else -> false // let sidebar handle up/down/enter
                     }
                 }
-                // Default EPG grid navigation
+                // Normal EPG navigation — channel list is always visible
                 else {
                     when (event.key) {
                         Key.DirectionDown -> {
@@ -238,9 +194,9 @@ fun TvGuideScreen(
                         }
                         Key.DirectionLeft -> {
                             if (uiState.timelineAtStart) {
-                                // Step 1: open channel panel
-                                channelPanelOpenTime = System.currentTimeMillis()
-                                viewModel.showChannelPanel()
+                                // Open category sidebar since channel list is always visible
+                                viewModel.showChannelPanel() // auto-detect group
+                                viewModel.showCategoryPicker()
                             } else {
                                 viewModel.scrollTimeline(-1)
                             }
@@ -277,20 +233,38 @@ fun TvGuideScreen(
                         onCategoryClick = { viewModel.toggleCategoryPicker() }
                     )
 
-                    // EPG Grid
+                    // EPG Grid — unified layout (categories + channels + timeline/programs)
                     Row(modifier = Modifier.fillMaxSize()) {
-                        // Left column — channel names with highlight
+                        // Category column — slides in from left, pushes everything right
+                        GuideCategorySidebar(
+                            visible = uiState.showCategoryPicker,
+                            groups = uiState.groups,
+                            selectedGroup = uiState.selectedGroup,
+                            onGroupSelected = { group ->
+                                viewModel.setGroup(group)
+                                viewModel.hideCategoryPicker()
+                            },
+                            onDismiss = {
+                                viewModel.hideCategoryPicker()
+                            }
+                        )
+
+                        // Channel column — always visible
                         Column(
                             modifier = Modifier
                                 .width(CHANNEL_COL_WIDTH.dp)
                                 .fillMaxHeight()
                         ) {
+                            // Timeline-height spacer to align with timeline header
                             Box(
                                 modifier = Modifier
                                     .height(TIMELINE_HEIGHT.dp)
                                     .fillMaxWidth()
-                                    .background(MerlotColors.Surface)
+                                    .background(Color.Transparent)
+                                    .border(0.5.dp, MerlotColors.Border)
                             )
+
+                            // Channel list — rows match program row heights and borders
                             LazyColumn(
                                 state = channelListState,
                                 modifier = Modifier.fillMaxHeight()
@@ -299,15 +273,49 @@ fun TvGuideScreen(
                                     uiState.guideChannels,
                                     key = { index, ch -> "${index}_${ch.id}" }
                                 ) { index, channel ->
-                                    GuideChannelCell(
-                                        channel = channel,
-                                        epgChannel = uiState.epgChannels.getOrNull(index),
-                                        isHighlighted = index == selectedIndex,
-                                        onClick = {
-                                            viewModel.saveChannelForPlayback(channel)
-                                            onChannelSelected(channel)
+                                    val logoUrl = channel.logoUrl.ifEmpty {
+                                        uiState.epgChannels.getOrNull(index)?.icon ?: ""
+                                    }
+                                    val isHighlighted = index == selectedIndex
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(ROW_HEIGHT.dp)
+                                            .border(
+                                                width = if (isHighlighted) 2.dp else 0.5.dp,
+                                                color = if (isHighlighted) MerlotColors.Accent else MerlotColors.Border
+                                            )
+                                            .background(
+                                                if (isHighlighted) MerlotColors.Accent.copy(alpha = 0.25f)
+                                                else Color.Transparent
+                                            )
+                                            .clickable {
+                                                viewModel.saveChannelForPlayback(channel)
+                                                onChannelSelected(channel)
+                                            }
+                                            .padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (logoUrl.isNotEmpty()) {
+                                            AsyncImage(
+                                                model = logoUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(30.dp)
+                                                    .clip(RoundedCornerShape(4.dp))
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
                                         }
-                                    )
+                                        Text(
+                                            text = channel.name,
+                                            color = if (isHighlighted) MerlotColors.White else MerlotColors.TextPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -342,36 +350,6 @@ fun TvGuideScreen(
                         }
                     }
                 }
-
-                // Step 1: Channel panel — slides in from left, shows channels in current category
-                GuideChannelPanel(
-                    visible = uiState.showChannelPanel,
-                    channels = uiState.guideChannels,
-                    epgChannels = uiState.epgChannels,
-                    selectedIndex = selectedIndex,
-                    categoryName = uiState.selectedGroup ?: "All Channels",
-                    onChannelClick = { channel ->
-                        viewModel.saveChannelForPlayback(channel)
-                        onChannelSelected(channel)
-                    },
-                    channelListState = channelPanelListState
-                )
-
-                // Step 2: Category sidebar — slides in over channel panel
-                GuideCategorySidebar(
-                    visible = uiState.showCategoryPicker,
-                    groups = uiState.groups,
-                    selectedGroup = uiState.selectedGroup,
-                    onGroupSelected = { group ->
-                        viewModel.setGroup(group)
-                        viewModel.hideCategoryPicker()
-                        // Keep channel panel open to show filtered channels
-                    },
-                    onDismiss = {
-                        viewModel.hideCategoryPicker()
-                        // Go back to channel panel
-                    }
-                )
 
                 // Program detail dialog
                 uiState.selectedProgram?.let { program ->
@@ -503,56 +481,6 @@ private fun GuideNowIndicator(currentTimeMs: Long, timelineStartMs: Long, scroll
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Channel Cell (left column — with D-pad highlight)
-// ═══════════════════════════════════════════════════════════════════
-
-@Composable
-private fun GuideChannelCell(
-    channel: Channel,
-    epgChannel: EpgChannel?,
-    isHighlighted: Boolean,
-    onClick: () -> Unit
-) {
-    val logoUrl = channel.logoUrl.ifEmpty { epgChannel?.icon ?: "" }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(ROW_HEIGHT.dp)
-            .border(
-                width = if (isHighlighted) 2.dp else 0.5.dp,
-                color = if (isHighlighted) MerlotColors.Accent else MerlotColors.Border
-            )
-            .background(
-                if (isHighlighted) MerlotColors.Accent.copy(alpha = 0.25f)
-                else MerlotColors.Surface
-            )
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (logoUrl.isNotEmpty()) {
-            AsyncImage(
-                model = logoUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(4.dp))
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        Text(
-            text = channel.name,
-            color = if (isHighlighted) MerlotColors.White else MerlotColors.TextPrimary,
-            fontSize = 11.sp,
-            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
 // Channel Program Row (right column — with D-pad highlight border)
 // ═══════════════════════════════════════════════════════════════════
 
@@ -633,112 +561,7 @@ private fun GuideChannelRow(
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Channel Panel — Step 1 slide-in (channels in current category)
-// ═══════════════════════════════════════════════════════════════════
-
-@Composable
-private fun GuideChannelPanel(
-    visible: Boolean,
-    channels: List<Channel>,
-    epgChannels: List<EpgChannel>,
-    selectedIndex: Int,
-    categoryName: String,
-    onChannelClick: (Channel) -> Unit,
-    channelListState: LazyListState
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
-        exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
-        modifier = Modifier
-            .zIndex(5f)
-            .fillMaxHeight()
-    ) {
-        Column(
-            modifier = Modifier
-                .width(220.dp)
-                .fillMaxHeight()
-                .background(MerlotColors.Black.copy(alpha = 0.92f))
-        ) {
-            // Header — shows current category
-            Text(
-                text = categoryName,
-                color = MerlotColors.Accent,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(16.dp)
-            )
-            Text(
-                text = "${channels.size} channels",
-                color = MerlotColors.TextPrimary.copy(alpha = 0.6f),
-                fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
-            )
-            Spacer(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-                    .height(1.dp)
-                    .background(MerlotColors.Border)
-            )
-
-            // Channel list
-            LazyColumn(
-                state = channelListState,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                itemsIndexed(
-                    channels,
-                    key = { index, ch -> "panel_${index}_${ch.id}" }
-                ) { index, channel ->
-                    val logoUrl = channel.logoUrl.ifEmpty {
-                        epgChannels.getOrNull(index)?.icon ?: ""
-                    }
-                    val isHighlighted = index == selectedIndex
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .border(
-                                width = if (isHighlighted) 2.dp else 0.dp,
-                                color = if (isHighlighted) MerlotColors.Accent else Color.Transparent
-                            )
-                            .background(
-                                if (isHighlighted) MerlotColors.Accent.copy(alpha = 0.25f)
-                                else Color.Transparent
-                            )
-                            .clickable { onChannelClick(channel) }
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (logoUrl.isNotEmpty()) {
-                            AsyncImage(
-                                model = logoUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-                        Text(
-                            text = channel.name,
-                            color = if (isHighlighted) MerlotColors.White else MerlotColors.TextPrimary,
-                            fontSize = 12.sp,
-                            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Category Sidebar — Step 2 slide-in (category list)
+// Category Sidebar — slides in from left (category list)
 // ═══════════════════════════════════════════════════════════════════
 
 @Composable
@@ -775,16 +598,12 @@ private fun GuideCategorySidebar(
     AnimatedVisibility(
         visible = visible,
         enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
-        exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
-        modifier = Modifier
-            .zIndex(10f)
-            .fillMaxHeight()
+        exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
     ) {
         Column(
             modifier = Modifier
-                .width(240.dp)
+                .width(180.dp)
                 .fillMaxHeight()
-                .background(MerlotColors.Black.copy(alpha = 0.92f))
                 .focusRequester(sidebarFocusRequester)
                 .focusable()
                 .onPreviewKeyEvent { event ->
@@ -825,22 +644,25 @@ private fun GuideCategorySidebar(
                     }
                 }
         ) {
-            // Header
-            Text(
-                "Select Category",
-                color = MerlotColors.Accent,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(16.dp)
-            )
-            Spacer(
+            // Header — matches timeline header height
+            Box(
                 modifier = Modifier
+                    .height(TIMELINE_HEIGHT.dp)
                     .fillMaxWidth()
-                    .height(1.dp)
-                    .background(MerlotColors.Border)
-            )
+                    .background(Color.Transparent)
+                    .border(0.5.dp, MerlotColors.Border)
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    "Categories",
+                    color = MerlotColors.Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-            // Category list
+            // Category list — rows styled like channel/program rows
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize()
@@ -850,22 +672,24 @@ private fun GuideCategorySidebar(
                     val isSelected = item == selectedGroup
                     val isHighlighted = index == highlightedIndex
 
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .height(ROW_HEIGHT.dp)
                             .clickable { onGroupSelected(item) }
                             .border(
-                                width = if (isHighlighted) 2.dp else 0.dp,
-                                color = if (isHighlighted) MerlotColors.Accent else Color.Transparent
+                                width = if (isHighlighted) 2.dp else 0.5.dp,
+                                color = if (isHighlighted) MerlotColors.Accent else MerlotColors.Border
                             )
                             .background(
                                 when {
                                     isHighlighted -> MerlotColors.Accent.copy(alpha = 0.25f)
-                                    isSelected -> MerlotColors.Surface2
+                                    isSelected -> MerlotColors.Surface2.copy(alpha = 0.7f)
                                     else -> Color.Transparent
                                 }
                             )
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             label,
@@ -874,8 +698,8 @@ private fun GuideCategorySidebar(
                                 isSelected -> MerlotColors.Accent
                                 else -> MerlotColors.TextPrimary
                             },
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected || isHighlighted) FontWeight.Bold else FontWeight.Normal
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected || isHighlighted) FontWeight.Bold else FontWeight.SemiBold
                         )
                     }
                 }

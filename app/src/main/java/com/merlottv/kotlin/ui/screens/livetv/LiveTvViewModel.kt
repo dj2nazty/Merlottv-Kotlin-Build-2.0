@@ -157,6 +157,9 @@ class LiveTvViewModel @Inject constructor(
     // Track playlist names for source display
     private var playlistNames: Map<String, String> = emptyMap() // url → name
 
+    // Cached EPG lookup map for search — maps channel name/id (lowercase) to EpgChannel
+    private var epgLookupMap: Map<String, EpgChannel> = emptyMap()
+
     // Single shared BandwidthMeter — both players use this for consistent bitrate estimation
     private val sharedBandwidthMeter: DefaultBandwidthMeter = DefaultBandwidthMeter.Builder(application)
         .setResetOnNetworkTypeChange(true)
@@ -1010,11 +1013,6 @@ class LiveTvViewModel @Inject constructor(
         }
     }
 
-    fun onSearchChanged(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
-        applyFilters()
-    }
-
     val isSearchActive: Boolean get() = _uiState.value.searchQuery.isNotBlank()
 
     fun onGroupSelected(group: String?) {
@@ -1446,13 +1444,24 @@ class LiveTvViewModel @Inject constructor(
     }
 
     fun exitFullscreen() {
+        // Auto-select the current channel's group so the channel list
+        // and category sidebar reflect where the user actually is
+        val currentGroup = _uiState.value.selectedChannel?.group?.takeIf { it.isNotBlank() }
+        val needsGroupChange = currentGroup != null && _uiState.value.selectedGroup != currentGroup
+
         _uiState.value = _uiState.value.copy(
             isFullscreen = false,
             showOverlay = false,
             showCategories = false,
             showChannelList = true,
-            showEpgGuide = false
+            showEpgGuide = false,
+            selectedGroup = if (needsGroupChange) currentGroup else _uiState.value.selectedGroup
         )
+
+        // Re-filter channels if group changed
+        if (needsGroupChange) {
+            applyFilters()
+        }
     }
 
     fun enterFullscreen() {
@@ -1585,6 +1594,8 @@ class LiveTvViewModel @Inject constructor(
                     epgByName[epgCh.name.lowercase()] = epgCh
                     epgByName[epgCh.id.lowercase()] = epgCh
                 }
+                // Cache for search use
+                epgLookupMap = epgByName
 
                 // Match each Live TV channel to its EPG data
                 val matchedEpgChannels = filteredChannels.map { channel ->
@@ -1644,6 +1655,33 @@ class LiveTvViewModel @Inject constructor(
         }
     }
 
+    fun onSearchChanged(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        if (query.isNotBlank()) {
+            // Search with EPG data — run in coroutine to load EPG if needed
+            viewModelScope.launch {
+                ensureEpgLookupLoaded()
+                applyFilters()
+            }
+        } else {
+            applyFilters()
+        }
+    }
+
+    /** Ensure epgLookupMap is populated — loads from Room DB if empty */
+    private suspend fun ensureEpgLookupLoaded() {
+        if (epgLookupMap.isNotEmpty()) return
+        try {
+            val epgData = epgRepository.getAllEpgChannels().first()
+            val map = mutableMapOf<String, EpgChannel>()
+            epgData.forEach { epgCh ->
+                map[epgCh.name.lowercase()] = epgCh
+                map[epgCh.id.lowercase()] = epgCh
+            }
+            epgLookupMap = map
+        } catch (_: Exception) {}
+    }
+
     private fun applyFilters() {
         val state = _uiState.value
         val hasGroup = state.selectedGroup != null
@@ -1658,9 +1696,21 @@ class LiveTvViewModel @Inject constructor(
 
         if (hasSearch) {
             val query = state.searchQuery
-            filtered = filtered.filter {
-                it.name.contains(query, ignoreCase = true) ||
-                it.group.contains(query, ignoreCase = true)
+            val now = System.currentTimeMillis()
+            filtered = filtered.filter { channel ->
+                // Match channel name or group
+                channel.name.contains(query, ignoreCase = true) ||
+                channel.group.contains(query, ignoreCase = true) ||
+                // Match currently airing or upcoming program title from EPG
+                run {
+                    val epgId = channel.epgId.ifEmpty { channel.id }
+                    val epgMatch = epgLookupMap[epgId.lowercase()]
+                        ?: epgLookupMap[channel.name.lowercase()]
+                    epgMatch?.programs?.any { program ->
+                        program.endTime > now &&
+                        program.title.contains(query, ignoreCase = true)
+                    } == true
+                }
             }
         } else if (hasGroup) {
             val group = state.selectedGroup ?: ""

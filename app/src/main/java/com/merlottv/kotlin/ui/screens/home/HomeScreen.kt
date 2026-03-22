@@ -476,20 +476,54 @@ private fun ContinueWatchingCard(
             .focusable()
     ) {
         Box {
-            AsyncImage(
-                model = item.poster,
-                contentDescription = item.title,
-                modifier = Modifier
-                    .width(cardWidth)
-                    .height(cardWidth * 0.5625f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MerlotColors.Surface2)
-                    .then(
-                        if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
-                        else Modifier
-                    ),
-                contentScale = ContentScale.Crop
-            )
+            if (item.type == "tv") {
+                // Channel backup / Live TV — show channel logo centered or initials
+                Box(
+                    modifier = Modifier
+                        .width(cardWidth)
+                        .height(cardWidth * 0.5625f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MerlotColors.Surface)
+                        .then(
+                            if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                            else Modifier
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (item.poster.isNotEmpty()) {
+                        AsyncImage(
+                            model = item.poster,
+                            contentDescription = item.title,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit
+                        )
+                    } else {
+                        Text(
+                            text = item.title.take(3).uppercase(),
+                            color = MerlotColors.Accent,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            } else {
+                AsyncImage(
+                    model = item.poster,
+                    contentDescription = item.title,
+                    modifier = Modifier
+                        .width(cardWidth)
+                        .height(cardWidth * 0.5625f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MerlotColors.Surface2)
+                        .then(
+                            if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                            else Modifier
+                        ),
+                    contentScale = ContentScale.Crop
+                )
+            }
 
             // Progress bar at bottom of thumbnail
             Box(

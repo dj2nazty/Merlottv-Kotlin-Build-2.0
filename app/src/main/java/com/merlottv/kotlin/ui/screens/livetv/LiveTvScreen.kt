@@ -1241,6 +1241,21 @@ private fun ChannelListView(
         modifier = Modifier
             .fillMaxSize()
             .background(MerlotColors.Black)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                // When categories are showing, consume Left to prevent main sidebar
+                // and handle Right/Back to dismiss categories
+                if (uiState.showCategories) {
+                    when (event.key) {
+                        Key.DirectionRight, Key.Back -> {
+                            viewModel.hideCategories()
+                            true
+                        }
+                        Key.DirectionLeft -> true // consume — don't let main sidebar open
+                        else -> false
+                    }
+                } else false
+            }
     ) {
         // Full-screen player as background
         if (uiState.selectedChannel != null) {
@@ -1338,7 +1353,19 @@ private fun ChannelListView(
 
                 // Search — readOnly until Enter/OK is pressed to prevent keyboard on D-pad hover
                 var isSearchEditing by remember { mutableStateOf(false) }
+                var focusResultsAfterKeyboard by remember { mutableStateOf(false) }
                 val searchKeyboardController = LocalSoftwareKeyboardController.current
+                val searchResultsFocusRequester = remember { FocusRequester() }
+                val searchScope = rememberCoroutineScope()
+
+                // Focus results after keyboard dismisses (with delay for keyboard animation)
+                LaunchedEffect(focusResultsAfterKeyboard) {
+                    if (focusResultsAfterKeyboard) {
+                        delay(200)
+                        try { searchResultsFocusRequester.requestFocus() } catch (_: Exception) {}
+                        focusResultsAfterKeyboard = false
+                    }
+                }
                 OutlinedTextField(
                     value = uiState.searchQuery,
                     onValueChange = { viewModel.onSearchChanged(it) },
@@ -1359,12 +1386,29 @@ private fun ChannelListView(
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown) {
                                 when {
+                                    // Not editing: Enter/OK opens keyboard
                                     !isSearchEditing && (event.key == Key.DirectionCenter || event.key == Key.Enter) -> {
                                         isSearchEditing = true; searchKeyboardController?.show(); true
                                     }
+                                    // Editing: Back closes keyboard, focus moves to results if search has text
                                     isSearchEditing && event.key == Key.Back -> {
-                                        isSearchEditing = false; searchKeyboardController?.hide(); true
+                                        isSearchEditing = false; searchKeyboardController?.hide()
+                                        if (uiState.searchQuery.isNotBlank()) {
+                                            focusResultsAfterKeyboard = true
+                                        }
+                                        true
                                     }
+                                    // Not editing: Down arrow moves focus to results/categories
+                                    !isSearchEditing && event.key == Key.DirectionDown -> {
+                                        if (uiState.searchQuery.isNotBlank()) {
+                                            try { searchResultsFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    // While editing: let ALL keys pass through to on-screen keyboard
+                                    isSearchEditing -> false
                                     else -> false
                                 }
                             } else false
@@ -1376,10 +1420,37 @@ private fun ChannelListView(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Category list (vertical)
+                // Category list OR search results (vertical)
                 if (uiState.isLoading) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
+                    }
+                } else if (uiState.searchQuery.isNotBlank()) {
+                    // Search results — show matching channels inline
+                    val searchResults = uiState.filteredChannels
+                    Text(
+                        text = "${searchResults.size} results",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 0.dp)
+                    ) {
+                        itemsIndexed(searchResults, key = { index, ch -> "search_${index}_${ch.id}" }) { index, channel ->
+                            ChannelItem(
+                                channel = channel,
+                                isSelected = channel.id == uiState.selectedChannel?.id,
+                                isFavorite = uiState.favoriteIds.contains(channel.id),
+                                onClick = {
+                                    viewModel.onSearchChanged("") // clear search
+                                    viewModel.onChannelSelected(channel)
+                                },
+                                onToggleFavorite = { viewModel.toggleFavorite(channel.id) },
+                                focusRequester = if (index == 0) searchResultsFocusRequester else null
+                            )
+                        }
                     }
                 } else {
                     val categoryListState = rememberLazyListState()

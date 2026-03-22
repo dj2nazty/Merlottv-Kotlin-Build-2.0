@@ -49,7 +49,7 @@ import com.merlottv.kotlin.ui.theme.MerlotColors
 @Composable
 fun ChannelBackupScreen(
     viewModel: ChannelBackupViewModel = hiltViewModel(),
-    onStreamSelected: (streamUrl: String, channelName: String) -> Unit = { _, _ -> }
+    onStreamSelected: (streamUrl: String, channelName: String, logoUrl: String) -> Unit = { _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -192,7 +192,7 @@ fun ChannelBackupScreen(
             channel = channel,
             onStreamSelected = { stream ->
                 selectedChannel = null
-                onStreamSelected(stream.url, channel.name)
+                onStreamSelected(stream.url, channel.name, channel.logoUrl)
             },
             onDismiss = { selectedChannel = null }
         )

@@ -148,13 +148,15 @@ fun MerlotNavHost(
         composable(Screen.ChannelBackup.route) {
             onLiveTvFullscreenChanged(false)
             ChannelBackupScreen(
-                onStreamSelected = { streamUrl, channelName ->
+                onStreamSelected = { streamUrl, channelName, logoUrl ->
                     val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
                     val encodedTitle = URLEncoder.encode(channelName, "UTF-8")
+                    val encodedPoster = URLEncoder.encode(logoUrl, "UTF-8")
                     navController.navigate(
                         Screen.Player.createRoute(
                             url = encodedUrl,
                             title = encodedTitle,
+                            poster = encodedPoster,
                             contentType = "tv"
                         )
                     )

@@ -224,7 +224,20 @@ class TvGuideViewModel @Inject constructor(
 
     /** Show channel panel (step 1 — D-pad left from grid) */
     fun showChannelPanel() {
-        _uiState.value = _uiState.value.copy(showChannelPanel = true)
+        // Auto-select the current channel's group so the channel panel
+        // and category sidebar reflect where the user actually is
+        val currentChannel = _uiState.value.guideChannels.getOrNull(_uiState.value.selectedIndex)
+        val currentGroup = currentChannel?.group?.takeIf { it.isNotBlank() }
+        val needsGroupChange = currentGroup != null && _uiState.value.selectedGroup != currentGroup
+
+        _uiState.value = _uiState.value.copy(
+            showChannelPanel = true,
+            selectedGroup = if (needsGroupChange) currentGroup else _uiState.value.selectedGroup
+        )
+
+        if (needsGroupChange) {
+            applyFilter()
+        }
     }
 
     /** Hide channel panel */
