@@ -345,17 +345,18 @@ private fun CountdownHeroCard(
                 Button(
                     onClick = { onWatchLive(watchUrl) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (launch.webcastLive) Color(0xFFE53935) else MerlotColors.Accent
+                        containerColor = when {
+                            btnFocused -> MerlotColors.Accent
+                            launch.webcastLive -> Color(0xFFE53935)
+                            else -> MerlotColors.Surface2
+                        },
+                        contentColor = if (btnFocused) MerlotColors.Black else MerlotColors.TextPrimary
                     ),
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     modifier = Modifier
                         .onFocusChanged { btnFocused = it.isFocused }
                         .focusable()
-                        .then(
-                            if (btnFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
-                            else Modifier
-                        )
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown &&
                                 (event.key == Key.DirectionCenter || event.key == Key.Enter)

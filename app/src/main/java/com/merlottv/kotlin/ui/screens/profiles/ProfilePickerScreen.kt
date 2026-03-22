@@ -395,8 +395,8 @@ private fun CreateProfileDialog(
                 onConfirm(name, selectedColor, selectedAvatarUrl)
             },
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (confirmFocused) MerlotColors.Accent else MerlotColors.Accent.copy(alpha = 0.9f),
-                contentColor = MerlotColors.Black
+                containerColor = if (confirmFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                contentColor = if (confirmFocused) MerlotColors.Black else MerlotColors.TextPrimary
             ),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier

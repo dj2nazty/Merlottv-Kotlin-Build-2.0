@@ -186,7 +186,12 @@ fun MerlotApp() {
         !isLiveTvFullscreen
 
     // Determine if we're on a "root" screen (sidebar destination, not a detail/player)
-    val isRootScreen = Screen.sidebarItems.any { it.route == currentRoute } || currentRoute == Screen.Home.route
+    // Match exact route OR route with query params (e.g. "vod?platform=...")
+    // but NOT sub-routes (e.g. "vod_detail/..." should NOT match "vod")
+    val isRootScreen = Screen.sidebarItems.any { screen ->
+        currentRoute == screen.route ||
+        currentRoute?.startsWith("${screen.route}?") == true
+    } || currentRoute == Screen.Home.route
 
     // Intercept system back button — never close app, show exit dialog on root screens
     BackHandler(enabled = isRootScreen && !showExitDialog) {
@@ -203,12 +208,12 @@ fun MerlotApp() {
                 .fillMaxSize()
                 .onKeyEvent { event ->
                     // Bubble phase: open sidebar when Left is not consumed by any child.
-                    // Home/VOD cards consume Left via onPreviewKeyEvent — this only fires
-                    // at the leftmost item. Settings buttons also handle Left/Right
-                    // between themselves explicitly to prevent sidebar hijacking.
+                    // Only allow sidebar to open on ROOT screens (Home, VOD list, Favorites, etc.)
+                    // NOT on detail screens, player, or other sub-screens — prevents
+                    // Left D-pad from hijacking navigation on those screens.
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.DirectionLeft &&
-                        showSidebar && !sidebarVisible
+                        showSidebar && !sidebarVisible && isRootScreen
                     ) {
                         sidebarVisible = true
                         true
@@ -237,7 +242,8 @@ fun MerlotApp() {
                 navController = navController,
                 modifier = Modifier.weight(1f),
                 startDestination = startDestination,
-                onLiveTvFullscreenChanged = { isLiveTvFullscreen = it }
+                onLiveTvFullscreenChanged = { isLiveTvFullscreen = it },
+                onOpenSidebar = { sidebarVisible = true }
             )
         }
 

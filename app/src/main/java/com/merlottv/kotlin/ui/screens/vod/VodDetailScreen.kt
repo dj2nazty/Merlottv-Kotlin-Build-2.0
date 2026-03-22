@@ -115,11 +115,13 @@ fun VodDetailScreen(
         }
     }
 
-    // Default focus on Play button when meta loads
-    LaunchedEffect(uiState.meta) {
+    // Always focus the Play button when entering the detail screen
+    var focusTrigger by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { focusTrigger++ }
+    LaunchedEffect(focusTrigger, uiState.meta) {
         if (uiState.meta != null) {
-            // Small delay to ensure the Play button composable is laid out
-            kotlinx.coroutines.delay(150)
+            // Delay to ensure composables are laid out
+            kotlinx.coroutines.delay(300)
             try { playButtonFocusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
@@ -129,9 +131,16 @@ fun VodDetailScreen(
             .fillMaxSize()
             .background(MerlotColors.Background)
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
-                    onBack()
-                    true
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.Back -> {
+                            onBack()
+                            true
+                        }
+                        // Consume Left at screen edges to prevent sidebar from opening
+                        // Compose will still handle Left between child focusables normally
+                        else -> false
+                    }
                 } else false
             }
     ) {
@@ -355,8 +364,8 @@ fun VodDetailScreen(
                                     onClick = { viewModel.playBestStream() },
                                     enabled = !uiState.isLoadingStreams,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (resumeFocused) FocusedButtonGrey else MerlotColors.Accent,
-                                        contentColor = if (resumeFocused) MerlotColors.White else MerlotColors.Black
+                                        containerColor = if (resumeFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                                        contentColor = if (resumeFocused) MerlotColors.Black else MerlotColors.TextPrimary
                                     ),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
@@ -389,7 +398,7 @@ fun VodDetailScreen(
                                     onClick = { viewModel.playFromStart() },
                                     enabled = !uiState.isLoadingStreams,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (restartFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                        containerColor = if (restartFocused) FocusedButtonGreyLight else MerlotColors.Surface2,
                                         contentColor = if (restartFocused) MerlotColors.White else MerlotColors.TextPrimary
                                     ),
                                     shape = RoundedCornerShape(8.dp),
@@ -416,8 +425,8 @@ fun VodDetailScreen(
                                     onClick = { viewModel.playBestStream() },
                                     enabled = !uiState.isLoadingStreams,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (playFocused) FocusedButtonGrey else MerlotColors.Accent,
-                                        contentColor = if (playFocused) MerlotColors.White else MerlotColors.Black
+                                        containerColor = if (playFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                                        contentColor = if (playFocused) MerlotColors.Black else MerlotColors.TextPrimary
                                     ),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
@@ -465,7 +474,7 @@ fun VodDetailScreen(
                             Button(
                                 onClick = { launchTrailer() },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (trailerFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                    containerColor = if (trailerFocused) FocusedButtonGreyLight else MerlotColors.Surface2,
                                     contentColor = if (trailerFocused) MerlotColors.White else MerlotColors.TextPrimary
                                 ),
                                 shape = RoundedCornerShape(8.dp),
@@ -687,8 +696,8 @@ fun VodDetailScreen(
                                     Button(
                                         onClick = { viewModel.playStream(stream) },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (streamPlayFocused) FocusedButtonGrey else MerlotColors.Accent,
-                                            contentColor = if (streamPlayFocused) MerlotColors.White else MerlotColors.Black
+                                            containerColor = if (streamPlayFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                                            contentColor = if (streamPlayFocused) MerlotColors.Black else MerlotColors.TextPrimary
                                         ),
                                         shape = RoundedCornerShape(6.dp),
                                         modifier = Modifier

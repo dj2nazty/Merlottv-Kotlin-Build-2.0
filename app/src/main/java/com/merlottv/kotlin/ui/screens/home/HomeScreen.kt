@@ -107,21 +107,16 @@ fun HomeScreen(
         }
     }
 
-    // Default focus to first streaming service tab
-    LaunchedEffect(uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
+    // Always focus the first streaming service icon when entering/returning to Home
+    var focusTrigger by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { focusTrigger++ } // Increment each time composable enters composition
+    LaunchedEffect(focusTrigger, uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
         if (uiState.catalogRows.isNotEmpty() || uiState.continueWatching.isNotEmpty() || uiState.featuredItems.isNotEmpty()) {
             delay(300)
-            val restored = lastFocusedItemId?.let { id ->
-                focusRequesters[id]?.let { requester ->
-                    try { requester.requestFocus(); true } catch (_: Exception) { false }
-                }
-            } ?: false
-            if (!restored) {
-                // Default to first streaming service tab
-                try { firstPlatformTabFocusRequester.requestFocus() } catch (_: Exception) {
-                    try { heroFocusRequester.requestFocus() } catch (_: Exception) {
-                        try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {}
-                    }
+            // Always default to first streaming service tab
+            try { firstPlatformTabFocusRequester.requestFocus() } catch (_: Exception) {
+                try { heroFocusRequester.requestFocus() } catch (_: Exception) {
+                    try { firstRowFocusRequester.requestFocus() } catch (_: Exception) {}
                 }
             }
         }
@@ -323,6 +318,7 @@ fun HomeScreen(
                             },
                             onItemLongClick = { item -> viewModel.toggleFavorite(item) },
                             favoriteIds = favoriteIds,
+                            inTheaterIds = uiState.inTheaterIds,
                             firstCardFocusRequester = rowFocusReq,
                             focusRequesters = focusRequesters,
                             onItemFocused = { itemId -> lastFocusedItemId = itemId }
@@ -740,6 +736,7 @@ private fun CatalogRowSection(
     onItemClick: (MetaPreview) -> Unit,
     onItemLongClick: (MetaPreview) -> Unit = {},
     favoriteIds: Set<String> = emptySet(),
+    inTheaterIds: Set<String> = emptySet(),
     firstCardFocusRequester: FocusRequester? = null,
     focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
     onItemFocused: (String) -> Unit = {}
@@ -811,6 +808,7 @@ private fun CatalogRowSection(
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                     isFavorite = item.id in favoriteIds,
+                    isInTheaters = item.id in inTheaterIds,
                     focusRequester = itemFocusRequester,
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
@@ -837,6 +835,7 @@ private fun PosterCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isFavorite: Boolean = false,
+    isInTheaters: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
     onLeftPress: (() -> Unit)? = null
@@ -981,6 +980,25 @@ private fun PosterCard(
                         color = MerlotColors.Warn,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // "In Theaters" badge
+            if (isInTheaters) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFFE53935).copy(alpha = 0.9f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "\uD83C\uDFAC IN THEATERS",
+                        color = MerlotColors.White,
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
             }

@@ -1,5 +1,10 @@
 package com.merlottv.kotlin.ui.screens.tvguide
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -50,6 +56,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,6 +101,7 @@ fun TvGuideScreen(
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     val channelListState = rememberLazyListState()
+    val channelPanelListState = rememberLazyListState()
     val programListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
@@ -130,6 +138,17 @@ fun TvGuideScreen(
         if (uiState.guideChannels.isNotEmpty()) {
             channelListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
             programListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
+            // Also sync channel panel if visible
+            if (uiState.showChannelPanel) {
+                channelPanelListState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
+            }
+        }
+    }
+
+    // Scroll channel panel to selected channel when it opens
+    LaunchedEffect(uiState.showChannelPanel) {
+        if (uiState.showChannelPanel && uiState.guideChannels.isNotEmpty()) {
+            channelPanelListState.scrollToItem((selectedIndex - 3).coerceAtLeast(0))
         }
     }
 
@@ -152,6 +171,9 @@ fun TvGuideScreen(
         try { focusRequester.requestFocus() } catch (_: Exception) {}
     }
 
+    // Guard against rapid Left presses opening both panels at once
+    var channelPanelOpenTime by remember { mutableLongStateOf(0L) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -161,17 +183,45 @@ fun TvGuideScreen(
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
-                // Category picker is open — handle its keys
+                // Category sidebar is open — let it handle its own keys
                 if (uiState.showCategoryPicker) {
+                    false
+                }
+                // Channel panel is open — handle its navigation
+                else if (uiState.showChannelPanel) {
                     when (event.key) {
-                        Key.Back, Key.DirectionLeft -> {
-                            viewModel.toggleCategoryPicker()
+                        Key.DirectionDown -> {
+                            viewModel.navigate(1)
                             true
                         }
-                        else -> false // Let category picker dialog handle its own keys
+                        Key.DirectionUp -> {
+                            viewModel.navigate(-1)
+                            true
+                        }
+                        Key.DirectionLeft -> {
+                            // Step 2: open category sidebar (only if panel has been open > 300ms)
+                            if (System.currentTimeMillis() - channelPanelOpenTime > 300) {
+                                viewModel.showCategoryPicker()
+                            }
+                            true
+                        }
+                        Key.DirectionRight, Key.Back -> {
+                            // Go back to EPG grid
+                            viewModel.hideChannelPanel()
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter -> {
+                            val channel = viewModel.getSelectedChannel()
+                            if (channel != null) {
+                                viewModel.saveChannelForPlayback(channel)
+                                onChannelSelected(channel)
+                            }
+                            true
+                        }
+                        else -> false
                     }
                 }
-                // Default grid navigation
+                // Default EPG grid navigation
                 else {
                     when (event.key) {
                         Key.DirectionDown -> {
@@ -188,7 +238,9 @@ fun TvGuideScreen(
                         }
                         Key.DirectionLeft -> {
                             if (uiState.timelineAtStart) {
-                                viewModel.toggleCategoryPicker()
+                                // Step 1: open channel panel
+                                channelPanelOpenTime = System.currentTimeMillis()
+                                viewModel.showChannelPanel()
                             } else {
                                 viewModel.scrollTimeline(-1)
                             }
@@ -291,18 +343,35 @@ fun TvGuideScreen(
                     }
                 }
 
-                // Category picker dialog
-                if (uiState.showCategoryPicker) {
-                    GuideCategoryPicker(
-                        groups = uiState.groups,
-                        selectedGroup = uiState.selectedGroup,
-                        onGroupSelected = { group ->
-                            viewModel.setGroup(group)
-                            viewModel.toggleCategoryPicker()
-                        },
-                        onDismiss = { viewModel.toggleCategoryPicker() }
-                    )
-                }
+                // Step 1: Channel panel — slides in from left, shows channels in current category
+                GuideChannelPanel(
+                    visible = uiState.showChannelPanel,
+                    channels = uiState.guideChannels,
+                    epgChannels = uiState.epgChannels,
+                    selectedIndex = selectedIndex,
+                    categoryName = uiState.selectedGroup ?: "All Channels",
+                    onChannelClick = { channel ->
+                        viewModel.saveChannelForPlayback(channel)
+                        onChannelSelected(channel)
+                    },
+                    channelListState = channelPanelListState
+                )
+
+                // Step 2: Category sidebar — slides in over channel panel
+                GuideCategorySidebar(
+                    visible = uiState.showCategoryPicker,
+                    groups = uiState.groups,
+                    selectedGroup = uiState.selectedGroup,
+                    onGroupSelected = { group ->
+                        viewModel.setGroup(group)
+                        viewModel.hideCategoryPicker()
+                        // Keep channel panel open to show filtered channels
+                    },
+                    onDismiss = {
+                        viewModel.hideCategoryPicker()
+                        // Go back to channel panel
+                    }
+                )
 
                 // Program detail dialog
                 uiState.selectedProgram?.let { program ->
@@ -564,11 +633,117 @@ private fun GuideChannelRow(
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Category Picker Dialog (D-pad navigable)
+// Channel Panel — Step 1 slide-in (channels in current category)
 // ═══════════════════════════════════════════════════════════════════
 
 @Composable
-private fun GuideCategoryPicker(
+private fun GuideChannelPanel(
+    visible: Boolean,
+    channels: List<Channel>,
+    epgChannels: List<EpgChannel>,
+    selectedIndex: Int,
+    categoryName: String,
+    onChannelClick: (Channel) -> Unit,
+    channelListState: LazyListState
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+        exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+        modifier = Modifier
+            .zIndex(5f)
+            .fillMaxHeight()
+    ) {
+        Column(
+            modifier = Modifier
+                .width(220.dp)
+                .fillMaxHeight()
+                .background(MerlotColors.Black.copy(alpha = 0.92f))
+        ) {
+            // Header — shows current category
+            Text(
+                text = categoryName,
+                color = MerlotColors.Accent,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(16.dp)
+            )
+            Text(
+                text = "${channels.size} channels",
+                color = MerlotColors.TextPrimary.copy(alpha = 0.6f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
+            )
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .height(1.dp)
+                    .background(MerlotColors.Border)
+            )
+
+            // Channel list
+            LazyColumn(
+                state = channelListState,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                itemsIndexed(
+                    channels,
+                    key = { index, ch -> "panel_${index}_${ch.id}" }
+                ) { index, channel ->
+                    val logoUrl = channel.logoUrl.ifEmpty {
+                        epgChannels.getOrNull(index)?.icon ?: ""
+                    }
+                    val isHighlighted = index == selectedIndex
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .border(
+                                width = if (isHighlighted) 2.dp else 0.dp,
+                                color = if (isHighlighted) MerlotColors.Accent else Color.Transparent
+                            )
+                            .background(
+                                if (isHighlighted) MerlotColors.Accent.copy(alpha = 0.25f)
+                                else Color.Transparent
+                            )
+                            .clickable { onChannelClick(channel) }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (logoUrl.isNotEmpty()) {
+                            AsyncImage(
+                                model = logoUrl,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(
+                            text = channel.name,
+                            color = if (isHighlighted) MerlotColors.White else MerlotColors.TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Category Sidebar — Step 2 slide-in (category list)
+// ═══════════════════════════════════════════════════════════════════
+
+@Composable
+private fun GuideCategorySidebar(
+    visible: Boolean,
     groups: List<String>,
     selectedGroup: String?,
     onGroupSelected: (String?) -> Unit,
@@ -577,117 +752,131 @@ private fun GuideCategoryPicker(
     val allItems = remember(groups) {
         listOf<String?>(null, "\u2605 Favorites") + groups.map { it }
     }
-    var highlightedIndex by remember { mutableIntStateOf(0) }
+    // Default to the currently selected category
+    val defaultIndex = remember(selectedGroup, allItems) {
+        val idx = allItems.indexOf(selectedGroup)
+        if (idx >= 0) idx else 0
+    }
+    var highlightedIndex by remember(visible) { mutableIntStateOf(defaultIndex) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val pickerFocusRequester = remember { FocusRequester() }
+    val sidebarFocusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) {
-        delay(100)
-        try { pickerFocusRequester.requestFocus() } catch (_: Exception) {}
+    // Auto-focus and scroll to current category when sidebar slides in
+    LaunchedEffect(visible) {
+        if (visible) {
+            delay(150)
+            try { sidebarFocusRequester.requestFocus() } catch (_: Exception) {}
+            // Scroll to show the highlighted category
+            listState.animateScrollToItem((defaultIndex - 3).coerceAtLeast(0))
+        }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Box(
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+        exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+        modifier = Modifier
+            .zIndex(10f)
+            .fillMaxHeight()
+    ) {
+        Column(
             modifier = Modifier
-                .width(300.dp)
-                .fillMaxHeight(0.7f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MerlotColors.Surface)
-                .border(1.dp, MerlotColors.Border, RoundedCornerShape(12.dp))
-                .focusRequester(pickerFocusRequester)
+                .width(240.dp)
+                .fillMaxHeight()
+                .background(MerlotColors.Black.copy(alpha = 0.92f))
+                .focusRequester(sidebarFocusRequester)
                 .focusable()
-                .onKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown) {
-                        when (event.key) {
-                            Key.DirectionDown -> {
-                                if (highlightedIndex < allItems.size - 1) {
-                                    highlightedIndex++
-                                    scope.launch {
-                                        listState.animateScrollToItem(
-                                            (highlightedIndex - 3).coerceAtLeast(0)
-                                        )
-                                    }
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.DirectionDown -> {
+                            if (highlightedIndex < allItems.size - 1) {
+                                highlightedIndex++
+                                scope.launch {
+                                    listState.animateScrollToItem(
+                                        (highlightedIndex - 3).coerceAtLeast(0)
+                                    )
                                 }
-                                true
                             }
-                            Key.DirectionUp -> {
-                                if (highlightedIndex > 0) {
-                                    highlightedIndex--
-                                    scope.launch {
-                                        listState.animateScrollToItem(
-                                            (highlightedIndex - 3).coerceAtLeast(0)
-                                        )
-                                    }
-                                }
-                                true
-                            }
-                            Key.DirectionCenter, Key.Enter -> {
-                                val item = allItems.getOrNull(highlightedIndex)
-                                onGroupSelected(item)
-                                true
-                            }
-                            Key.Back, Key.DirectionLeft -> {
-                                onDismiss()
-                                true
-                            }
-                            else -> false
+                            true
                         }
-                    } else false
+                        Key.DirectionUp -> {
+                            if (highlightedIndex > 0) {
+                                highlightedIndex--
+                                scope.launch {
+                                    listState.animateScrollToItem(
+                                        (highlightedIndex - 3).coerceAtLeast(0)
+                                    )
+                                }
+                            }
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter -> {
+                            val item = allItems.getOrNull(highlightedIndex)
+                            onGroupSelected(item)
+                            true
+                        }
+                        Key.Back, Key.DirectionRight, Key.DirectionLeft -> {
+                            onDismiss()
+                            true
+                        }
+                        else -> false
+                    }
                 }
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Text(
-                    "Select Category",
-                    color = MerlotColors.Accent,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(16.dp)
-                )
-                Spacer(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(MerlotColors.Border)
-                )
+            // Header
+            Text(
+                "Select Category",
+                color = MerlotColors.Accent,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(16.dp)
+            )
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MerlotColors.Border)
+            )
 
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    itemsIndexed(allItems) { index, item ->
-                        val label = item ?: "All Channels"
-                        val isSelected = item == selectedGroup
-                        val isHighlighted = index == highlightedIndex
+            // Category list
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                itemsIndexed(allItems) { index, item ->
+                    val label = item ?: "All Channels"
+                    val isSelected = item == selectedGroup
+                    val isHighlighted = index == highlightedIndex
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onGroupSelected(item) }
-                                .border(
-                                    width = if (isHighlighted) 2.dp else 0.dp,
-                                    color = if (isHighlighted) MerlotColors.Accent else Color.Transparent
-                                )
-                                .background(
-                                    when {
-                                        isHighlighted -> MerlotColors.Accent.copy(alpha = 0.25f)
-                                        isSelected -> MerlotColors.Surface2
-                                        else -> Color.Transparent
-                                    }
-                                )
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            Text(
-                                label,
-                                color = when {
-                                    isHighlighted -> MerlotColors.White
-                                    isSelected -> MerlotColors.Accent
-                                    else -> MerlotColors.TextPrimary
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = if (isSelected || isHighlighted) FontWeight.Bold else FontWeight.Normal
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onGroupSelected(item) }
+                            .border(
+                                width = if (isHighlighted) 2.dp else 0.dp,
+                                color = if (isHighlighted) MerlotColors.Accent else Color.Transparent
                             )
-                        }
+                            .background(
+                                when {
+                                    isHighlighted -> MerlotColors.Accent.copy(alpha = 0.25f)
+                                    isSelected -> MerlotColors.Surface2
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = when {
+                                isHighlighted -> MerlotColors.White
+                                isSelected -> MerlotColors.Accent
+                                else -> MerlotColors.TextPrimary
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected || isHighlighted) FontWeight.Bold else FontWeight.Normal
+                        )
                     }
                 }
             }
@@ -743,14 +932,15 @@ private fun GuideProgramDetailDialog(program: EpgEntry, onDismiss: () -> Unit) {
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                var closeFocused by remember { mutableStateOf(false) }
                 Button(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MerlotColors.Accent,
-                        contentColor = MerlotColors.Black
+                        containerColor = if (closeFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                        contentColor = if (closeFocused) MerlotColors.Black else MerlotColors.TextPrimary
                     ),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.align(Alignment.End).focusable()
+                    modifier = Modifier.align(Alignment.End).onFocusChanged { closeFocused = it.isFocused }.focusable()
                 ) {
                     Text("Close", fontWeight = FontWeight.Bold)
                 }
@@ -783,11 +973,15 @@ private fun GuideErrorState(error: String?, viewModel: TvGuideViewModel, modifie
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(error ?: "Unknown error", color = MerlotColors.Danger, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(12.dp))
+        var retryFocused by remember { mutableStateOf(false) }
         Button(
             onClick = { viewModel.retry() },
-            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (retryFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                contentColor = if (retryFocused) MerlotColors.Black else MerlotColors.TextPrimary
+            ),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.focusable()
+            modifier = Modifier.onFocusChanged { retryFocused = it.isFocused }.focusable()
         ) { Text("Retry", fontWeight = FontWeight.Bold) }
     }
 }
@@ -803,11 +997,15 @@ private fun GuideEmptyState(viewModel: TvGuideViewModel, modifier: Modifier) {
             modifier = Modifier.padding(top = 4.dp)
         )
         Spacer(modifier = Modifier.height(12.dp))
+        var retryFocused by remember { mutableStateOf(false) }
         Button(
             onClick = { viewModel.retry() },
-            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent, contentColor = MerlotColors.Black),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (retryFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                contentColor = if (retryFocused) MerlotColors.Black else MerlotColors.TextPrimary
+            ),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.focusable()
+            modifier = Modifier.onFocusChanged { retryFocused = it.isFocused }.focusable()
         ) { Text("Retry", fontWeight = FontWeight.Bold) }
     }
 }

@@ -156,16 +156,15 @@ fun ChannelBackupScreen(
                         var retryFocused by remember { mutableStateOf(false) }
                         Button(
                             onClick = { viewModel.refresh() },
-                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Accent),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (retryFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                                contentColor = if (retryFocused) MerlotColors.Black else MerlotColors.TextPrimary
+                            ),
                             modifier = Modifier
                                 .onFocusChanged { retryFocused = it.isFocused }
                                 .focusable()
-                                .then(
-                                    if (retryFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
-                                    else Modifier
-                                )
                         ) {
-                            Text("Retry", color = MerlotColors.Black, fontWeight = FontWeight.Bold)
+                            Text("Retry", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

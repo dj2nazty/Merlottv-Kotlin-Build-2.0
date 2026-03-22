@@ -180,7 +180,8 @@ data class VodUiState(
     val selectedGenre: String? = null,
     val selectedYear: String? = null,
     val availableGenres: List<String> = emptyList(),
-    val availableYears: List<String> = emptyList()
+    val availableYears: List<String> = emptyList(),
+    val inTheaterIds: Set<String> = emptySet()
 )
 
 @HiltViewModel
@@ -661,12 +662,19 @@ class VodViewModel @Inject constructor(
                     ))
                 }
 
+                // Collect IDs of movies from "In Theaters Now" catalog
+                val theaterIds = sorted
+                    .filter { "now_playing" in it.catalogId || "in theaters" in it.title.lowercase() }
+                    .flatMap { it.items.map { item -> item.id } }
+                    .toSet()
+
                 val current = _uiState.value
                 _uiState.value = current.copy(
                     isLoading = false,
                     selectedTab = if (current.selectedPlatformTab != null) current.selectedTab else "All",
                     sections = sorted,
-                    filteredSections = sorted
+                    filteredSections = sorted,
+                    inTheaterIds = theaterIds
                 )
             } catch (e: Exception) {
                 val current = _uiState.value

@@ -90,14 +90,24 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.activity.compose.BackHandler
 
 @Composable
 fun VodScreen(
     onNavigateToDetail: (String, String) -> Unit,
+    onNavigateToHome: () -> Unit = {},
     initialPlatformId: String = "",
     viewModel: VodViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // Back button: if viewing a platform, go back to Home + open sidebar
+    BackHandler(enabled = uiState.selectedPlatformTab != null) {
+        onNavigateToHome()
+    }
     val favoriteIds by viewModel.favoriteVodIds.collectAsState()
 
     // Auto-select platform tab if navigated from Home with a platform ID
@@ -112,6 +122,7 @@ fun VodScreen(
         }
     }
     val firstCardFocusRequester = remember { FocusRequester() }
+    val firstPlatformItemFocusRequester = remember { FocusRequester() }
 
     // Focus restoration: track the last focused item ID across navigation
     var lastFocusedItemId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -124,18 +135,21 @@ fun VodScreen(
         focusRequesters.clear()
     }
 
-    // Restore focus to the previously selected item, or default to first card
-    LaunchedEffect(uiState.filteredSections.isNotEmpty()) {
-        if (uiState.filteredSections.isNotEmpty()) {
+    // Always focus the first content card when entering/returning to VOD
+    var focusTrigger by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { focusTrigger++ }
+    LaunchedEffect(focusTrigger, uiState.filteredSections.isNotEmpty()) {
+        if (uiState.filteredSections.isNotEmpty() && uiState.selectedPlatformTab == null) {
             delay(300)
-            val restored = lastFocusedItemId?.let { id ->
-                focusRequesters[id]?.let { requester ->
-                    try { requester.requestFocus(); true } catch (_: Exception) { false }
-                }
-            } ?: false
-            if (!restored) {
-                try { firstCardFocusRequester.requestFocus() } catch (_: Exception) {}
-            }
+            try { firstCardFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
+    // Focus first item when platform/streaming service content loads
+    LaunchedEffect(uiState.platformSections.isNotEmpty(), uiState.selectedPlatformTab) {
+        if (uiState.selectedPlatformTab != null && uiState.platformSections.isNotEmpty()) {
+            delay(400)
+            try { firstPlatformItemFocusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
 
@@ -483,54 +497,139 @@ fun VodScreen(
                         )
                     }
 
-                    // Search bar for this streaming service catalog
-                    OutlinedTextField(
-                        value = uiState.platformSearchQuery,
-                        onValueChange = { viewModel.onPlatformSearchQueryChanged(it) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .height(48.dp),
-                        placeholder = {
-                            Text(
-                                "Search ${uiState.selectedPlatformTab!!.name}...",
-                                color = MerlotColors.TextMuted,
-                                fontSize = 13.sp
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = null,
-                                tint = MerlotColors.TextMuted,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            if (uiState.platformSearchQuery.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.onPlatformSearchQueryChanged("") }) {
-                                    Icon(
-                                        Icons.Default.Clear,
-                                        contentDescription = "Clear",
-                                        tint = MerlotColors.TextMuted,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                    // TV-friendly search bar: only opens keyboard on center/enter press
+                    val searchFieldFocusRequester = remember { FocusRequester() }
+                    var isSearchEditing by remember { mutableStateOf(false) }
+                    var isSearchBoxFocused by remember { mutableStateOf(false) }
+                    val keyboardController = LocalSoftwareKeyboardController.current
+                    val platformFirstItemFocusRequester = remember { FocusRequester() }
+
+                    if (isSearchEditing) {
+                        // Active editing mode — show real text field
+                        OutlinedTextField(
+                            value = uiState.platformSearchQuery,
+                            onValueChange = { viewModel.onPlatformSearchQueryChanged(it) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .height(48.dp)
+                                .focusRequester(searchFieldFocusRequester)
+                                .onFocusChanged { state ->
+                                    if (!state.isFocused) {
+                                        // Lost focus — exit editing mode, hide keyboard
+                                        isSearchEditing = false
+                                        keyboardController?.hide()
+                                    }
+                                },
+                            placeholder = {
+                                Text(
+                                    "Search ${uiState.selectedPlatformTab!!.name}...",
+                                    color = MerlotColors.TextMuted,
+                                    fontSize = 13.sp
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = MerlotColors.TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (uiState.platformSearchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.onPlatformSearchQueryChanged("") }) {
+                                        Icon(
+                                            Icons.Default.Clear,
+                                            contentDescription = "Clear",
+                                            tint = MerlotColors.TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MerlotColors.TextPrimary,
+                                unfocusedTextColor = MerlotColors.TextPrimary,
+                                cursorColor = MerlotColors.Accent,
+                                focusedBorderColor = MerlotColors.Accent,
+                                unfocusedBorderColor = MerlotColors.Surface2,
+                                focusedContainerColor = MerlotColors.Surface,
+                                unfocusedContainerColor = MerlotColors.Surface
+                            ),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+                        )
+                        // Auto-focus the text field when entering edit mode
+                        LaunchedEffect(Unit) {
+                            try { searchFieldFocusRequester.requestFocus() } catch (_: Exception) {}
+                        }
+                    } else {
+                        // D-pad friendly: looks like a search bar but is just a focusable Box
+                        // Keyboard only opens when center/enter is pressed
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MerlotColors.Surface)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSearchBoxFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .onFocusChanged { isSearchBoxFocused = it.isFocused }
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown) {
+                                        when (event.key) {
+                                            Key.DirectionCenter, Key.Enter -> {
+                                                isSearchEditing = true
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    } else false
+                                }
+                                .focusable(),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = MerlotColors.TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = uiState.platformSearchQuery.ifEmpty {
+                                        "Search ${uiState.selectedPlatformTab!!.name}..."
+                                    },
+                                    color = if (uiState.platformSearchQuery.isEmpty()) MerlotColors.TextMuted
+                                            else MerlotColors.TextPrimary,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (uiState.platformSearchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.onPlatformSearchQueryChanged("") }) {
+                                        Icon(
+                                            Icons.Default.Clear,
+                                            contentDescription = "Clear",
+                                            tint = MerlotColors.TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = MerlotColors.TextPrimary,
-                            unfocusedTextColor = MerlotColors.TextPrimary,
-                            cursorColor = MerlotColors.Accent,
-                            focusedBorderColor = MerlotColors.Accent,
-                            unfocusedBorderColor = MerlotColors.Surface2,
-                            focusedContainerColor = MerlotColors.Surface,
-                            unfocusedContainerColor = MerlotColors.Surface
-                        ),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
-                    )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -551,6 +650,7 @@ fun VodScreen(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             items(displayItems, key = { it.id }, contentType = { "vodcard" }) { item ->
+                                val isFirstItem = item == displayItems.firstOrNull()
                                 val itemFocusRequester = remember(item.id) {
                                     focusRequesters.getOrPut(item.id) { FocusRequester() }
                                 }
@@ -562,7 +662,7 @@ fun VodScreen(
                                     },
                                     onLongClick = { viewModel.toggleFavorite(item) },
                                     isFavorite = item.id in favoriteIds,
-                                    focusRequester = itemFocusRequester,
+                                    focusRequester = if (isFirstItem) firstPlatformItemFocusRequester else itemFocusRequester,
                                     onFocused = { lastFocusedItemId = item.id }
                                 )
                             }
@@ -610,6 +710,7 @@ fun VodScreen(
                                 },
                                 onLongClick = { viewModel.toggleFavorite(item) },
                                 isFavorite = item.id in favoriteIds,
+                                isInTheaters = item.id in uiState.inTheaterIds,
                                 focusRequester = if (isFirst) firstCardFocusRequester else itemFocusRequester,
                                 onFocused = { lastFocusedItemId = item.id }
                             )
@@ -638,6 +739,7 @@ fun VodScreen(
                                     viewModel.toggleFavorite(item)
                                 },
                                 favoriteIds = favoriteIds,
+                                inTheaterIds = uiState.inTheaterIds,
                                 firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null,
                                 focusRequesters = focusRequesters,
                                 onItemFocused = { itemId -> lastFocusedItemId = itemId }
@@ -661,6 +763,7 @@ private fun CatalogSectionRow(
     onItemClick: (MetaPreview) -> Unit,
     onItemLongClick: (MetaPreview) -> Unit = {},
     favoriteIds: Set<String> = emptySet(),
+    inTheaterIds: Set<String> = emptySet(),
     firstCardFocusRequester: FocusRequester? = null,
     focusRequesters: MutableMap<String, FocusRequester> = mutableMapOf(),
     onItemFocused: (String) -> Unit = {}
@@ -775,6 +878,7 @@ private fun CatalogSectionRow(
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                     isFavorite = item.id in favoriteIds,
+                    isInTheaters = item.id in inTheaterIds,
                     focusRequester = itemFocusRequester,
                     onFocused = { onItemFocused(item.id) },
                     onLeftPress = if (itemIndex > 0) {
@@ -801,6 +905,7 @@ private fun VodCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isFavorite: Boolean = false,
+    isInTheaters: Boolean = false,
     focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
     onLeftPress: (() -> Unit)? = null
@@ -951,6 +1056,25 @@ private fun VodCard(
                 }
             }
 
+            // "In Theaters" badge
+            if (isInTheaters) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFFE53935).copy(alpha = 0.9f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "\uD83C\uDFAC IN THEATERS",
+                        color = MerlotColors.White,
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+
             // Favorite heart overlay (shows after long-press)
             if (showHeartOverlay) {
                 val heartScale by animateFloatAsState(
@@ -980,11 +1104,12 @@ private fun VodCard(
             }
 
             // Small heart badge when favorited (always visible)
+            // Offset down when "In Theaters" badge is also shown
             if (isFavorite && !showHeartOverlay) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(4.dp)
+                        .padding(start = 4.dp, top = if (isInTheaters) 22.dp else 4.dp)
                         .clip(RoundedCornerShape(4.dp))
                         .background(MerlotColors.Black.copy(alpha = 0.7f))
                         .padding(horizontal = 4.dp, vertical = 2.dp)

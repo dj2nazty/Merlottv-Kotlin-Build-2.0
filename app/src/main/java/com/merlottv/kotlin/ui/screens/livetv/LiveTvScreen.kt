@@ -261,7 +261,7 @@ private fun FullscreenPlayer(
                             }
                             Key.DirectionLeft -> {
                                 viewModel.exitFullscreen()
-                                viewModel.showCategories()
+                                viewModel.showChannelList()
                                 true
                             }
                             Key.DirectionRight -> {
@@ -1224,6 +1224,19 @@ private fun ChannelListView(
         }
     }
 
+    // Request focus on channel list when it becomes visible — scroll to current channel
+    LaunchedEffect(uiState.showChannelList, uiState.filteredChannels.isNotEmpty()) {
+        if (uiState.showChannelList && !uiState.showCategories && uiState.filteredChannels.isNotEmpty()) {
+            // Scroll to the currently playing channel
+            val currentIndex = uiState.filteredChannels.indexOfFirst { it.id == uiState.selectedChannel?.id }
+            if (currentIndex >= 0) {
+                listState.scrollToItem((currentIndex - 3).coerceAtLeast(0))
+            }
+            delay(200)
+            try { channelFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1303,12 +1316,15 @@ private fun ChannelListView(
                     .background(MerlotColors.Black.copy(alpha = 0.88f))
                     .padding(vertical = 8.dp)
                     .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
-                            if (uiState.selectedGroup != null) {
-                                try { channelFocusRequester.requestFocus() } catch (_: Exception) {}
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionRight, Key.Back -> {
+                                // Go back to channel list
+                                viewModel.hideCategories()
+                                true
                             }
-                            true
-                        } else false
+                            else -> false
+                        }
                     }
             ) {
                 // Header
@@ -1366,7 +1382,21 @@ private fun ChannelListView(
                         CircularProgressIndicator(color = MerlotColors.Accent, modifier = Modifier.size(24.dp))
                     }
                 } else {
+                    val categoryListState = rememberLazyListState()
+
+                    // Scroll to current category when sidebar opens
+                    LaunchedEffect(uiState.showCategories) {
+                        if (uiState.showCategories && uiState.selectedGroup != null) {
+                            val idx = uiState.groups.indexOf(uiState.selectedGroup)
+                            if (idx >= 0) {
+                                // +1 for "All Channels" item at top
+                                categoryListState.scrollToItem((idx + 1 - 3).coerceAtLeast(0))
+                            }
+                        }
+                    }
+
                     LazyColumn(
+                        state = categoryListState,
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp)
                     ) {
@@ -1375,14 +1405,15 @@ private fun ChannelListView(
                                 label = "All Channels (${uiState.totalChannels})",
                                 isSelected = uiState.selectedGroup == null,
                                 onClick = { viewModel.onGroupSelected(null) },
-                                focusRequester = categoryFocusRequester
+                                focusRequester = if (uiState.selectedGroup == null) categoryFocusRequester else null
                             )
                         }
                         items(uiState.groups, key = { it }) { group ->
                             CategoryItem(
                                 label = group,
                                 isSelected = uiState.selectedGroup == group,
-                                onClick = { viewModel.onGroupSelected(group) }
+                                onClick = { viewModel.onGroupSelected(group) },
+                                focusRequester = if (uiState.selectedGroup == group) categoryFocusRequester else null
                             )
                         }
                     }
@@ -1390,10 +1421,9 @@ private fun ChannelListView(
             }
         }
 
-        // Channel list — semi-transparent overlay, shows when categories are hidden OR search is active
-        val showChannelList = (!uiState.showCategories || uiState.searchQuery.isNotBlank()) && !uiState.isLoading
+        // Channel list — semi-transparent overlay, shows channels in current category
         AnimatedVisibility(
-            visible = showChannelList,
+            visible = uiState.showChannelList && !uiState.isLoading,
             enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
             exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart)
@@ -1404,15 +1434,23 @@ private fun ChannelListView(
                     .fillMaxHeight()
                     .background(MerlotColors.Black.copy(alpha = 0.75f))
                     .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                            viewModel.onSearchChanged("") // Clear search when going back to categories
-                            viewModel.showCategories()
-                            true
-                        } else if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
-                            viewModel.onSearchChanged("") // Clear search when going back
-                            viewModel.showCategories()
-                            true
-                        } else false
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (event.key) {
+                            Key.DirectionLeft -> {
+                                viewModel.onSearchChanged("")
+                                viewModel.showCategories()
+                                true
+                            }
+                            Key.DirectionRight, Key.Back -> {
+                                // Go back to fullscreen (only if a channel is playing)
+                                if (uiState.selectedChannel != null) {
+                                    viewModel.hideChannelList()
+                                    viewModel.enterFullscreen()
+                                }
+                                true
+                            }
+                            else -> false
+                        }
                     }
             ) {
                 // Group name header
@@ -1443,14 +1481,18 @@ private fun ChannelListView(
                     state = listState,
                     modifier = Modifier.weight(1f)
                 ) {
-                    itemsIndexed(uiState.filteredChannels, key = { _, ch -> ch.id }) { index, channel ->
+                    val focusTargetIndex = run {
+                        val idx = uiState.filteredChannels.indexOfFirst { it.id == uiState.selectedChannel?.id }
+                        if (idx >= 0) idx else 0
+                    }
+                    itemsIndexed(uiState.filteredChannels, key = { index, ch -> "${index}_${ch.id}" }) { index, channel ->
                         ChannelItem(
                             channel = channel,
                             isSelected = channel.id == uiState.selectedChannel?.id,
                             isFavorite = uiState.favoriteIds.contains(channel.id),
                             onClick = { viewModel.onChannelSelected(channel) },
                             onToggleFavorite = { viewModel.toggleFavorite(channel.id) },
-                            focusRequester = if (index == 0) channelFocusRequester else null
+                            focusRequester = if (index == focusTargetIndex) channelFocusRequester else null
                         )
                     }
                 }
@@ -2176,14 +2218,15 @@ private fun EpgOverlayProgramDialog(program: EpgEntry, onDismiss: () -> Unit) {
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                var closeFocused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
                 androidx.compose.material3.Button(
                     onClick = onDismiss,
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = MerlotColors.Accent,
-                        contentColor = MerlotColors.Black
+                        containerColor = if (closeFocused) MerlotColors.Accent else MerlotColors.Surface2,
+                        contentColor = if (closeFocused) MerlotColors.Black else MerlotColors.TextPrimary
                     ),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.align(Alignment.End).focusable()
+                    modifier = Modifier.align(Alignment.End).onFocusChanged { closeFocused = it.isFocused }.focusable()
                 ) {
                     Text("Close", fontWeight = FontWeight.Bold)
                 }

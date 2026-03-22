@@ -39,7 +39,8 @@ data class HomeUiState(
     val featuredItems: List<MetaPreview> = emptyList(),
     val continueWatching: List<WatchProgressItem> = emptyList(),
     val catalogRows: List<CatalogRow> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val inTheaterIds: Set<String> = emptySet()
 )
 
 @HiltViewModel
@@ -171,6 +172,22 @@ class HomeViewModel @Inject constructor(
                 val orderMap = if (savedOrder.isNotEmpty()) {
                     savedOrder.withIndex().associate { (i, key) -> key to i }
                 } else emptyMap()
+
+                // Fetch "In Theaters" IDs even if the row is hidden — we tag movies app-wide
+                val theaterIdSet = mutableSetOf<String>()
+                launch(catalogDispatcher) {
+                    try {
+                        val merlotAddon = manifests.find { it.id == "com.merlottv.tmdb" }
+                        if (merlotAddon != null) {
+                            val nowPlayingItems = addonRepository.getCatalog(merlotAddon, "movie", "merlot.now_playing")
+                            theaterIdSet.addAll(nowPlayingItems.map { it.id })
+                            Log.d("HomeViewModel", "Fetched ${theaterIdSet.size} in-theater movie IDs")
+                            _uiState.value = _uiState.value.copy(inTheaterIds = theaterIdSet.toSet())
+                        }
+                    } catch (e: Exception) {
+                        Log.w("HomeViewModel", "Failed to fetch in-theater IDs: ${e.message}")
+                    }
+                }
 
                 // Progressive loading: emit each catalog row as it arrives
                 // so the UI shows content immediately instead of waiting for ALL catalogs

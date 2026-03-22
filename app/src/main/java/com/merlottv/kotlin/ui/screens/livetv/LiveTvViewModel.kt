@@ -82,7 +82,9 @@ data class LiveTvUiState(
     val isFailingOver: Boolean = false,
     val failoverMessage: String = "",
     // Category sidebar visibility
-    val showCategories: Boolean = true,
+    val showCategories: Boolean = false,
+    // Channel list visibility (shown by default in non-fullscreen mode)
+    val showChannelList: Boolean = true,
     // Quick menu (OK button popup)
     val showQuickMenu: Boolean = false,
     // Last 3 watched channels (most recent first)
@@ -1016,16 +1018,28 @@ class LiveTvViewModel @Inject constructor(
     val isSearchActive: Boolean get() = _uiState.value.searchQuery.isNotBlank()
 
     fun onGroupSelected(group: String?) {
-        _uiState.value = _uiState.value.copy(selectedGroup = group, showCategories = false)
+        _uiState.value = _uiState.value.copy(
+            selectedGroup = group,
+            showCategories = false,
+            showChannelList = true
+        )
         applyFilters()
     }
 
     fun showCategories() {
-        _uiState.value = _uiState.value.copy(showCategories = true)
+        _uiState.value = _uiState.value.copy(showCategories = true, showChannelList = false)
     }
 
     fun hideCategories() {
-        _uiState.value = _uiState.value.copy(showCategories = false)
+        _uiState.value = _uiState.value.copy(showCategories = false, showChannelList = true)
+    }
+
+    fun showChannelList() {
+        _uiState.value = _uiState.value.copy(showChannelList = true, showCategories = false)
+    }
+
+    fun hideChannelList() {
+        _uiState.value = _uiState.value.copy(showChannelList = false)
     }
 
     /**
@@ -1435,8 +1449,17 @@ class LiveTvViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             isFullscreen = false,
             showOverlay = false,
-            showCategories = true,
+            showCategories = false,
+            showChannelList = true,
             showEpgGuide = false
+        )
+    }
+
+    fun enterFullscreen() {
+        _uiState.value = _uiState.value.copy(
+            isFullscreen = true,
+            showChannelList = false,
+            showCategories = false
         )
     }
 

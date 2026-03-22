@@ -41,7 +41,9 @@ data class TvGuideUiState(
     val selectedIndex: Int = 0,
     val scrollRequest: Int = 0,
     val timelineAtStart: Boolean = true,
-    // Category picker
+    // Channel panel (step 1: slide-in channel list)
+    val showChannelPanel: Boolean = false,
+    // Category picker (step 2: slide-in category sidebar)
     val showCategoryPicker: Boolean = false,
     // Program detail
     val selectedProgram: EpgEntry? = null
@@ -218,6 +220,26 @@ class TvGuideViewModel @Inject constructor(
         if (_uiState.value.timelineAtStart != atStart) {
             _uiState.value = _uiState.value.copy(timelineAtStart = atStart)
         }
+    }
+
+    /** Show channel panel (step 1 — D-pad left from grid) */
+    fun showChannelPanel() {
+        _uiState.value = _uiState.value.copy(showChannelPanel = true)
+    }
+
+    /** Hide channel panel */
+    fun hideChannelPanel() {
+        _uiState.value = _uiState.value.copy(showChannelPanel = false)
+    }
+
+    /** Show category picker (step 2 — D-pad left from channel panel) */
+    fun showCategoryPicker() {
+        _uiState.value = _uiState.value.copy(showCategoryPicker = true)
+    }
+
+    /** Hide category picker */
+    fun hideCategoryPicker() {
+        _uiState.value = _uiState.value.copy(showCategoryPicker = false)
     }
 
     /** Toggle category picker visibility */

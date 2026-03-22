@@ -37,7 +37,8 @@ fun MerlotNavHost(
     navController: NavHostController,
     modifier: Modifier = Modifier,
     startDestination: String = Screen.Home.route,
-    onLiveTvFullscreenChanged: (Boolean) -> Unit = {}
+    onLiveTvFullscreenChanged: (Boolean) -> Unit = {},
+    onOpenSidebar: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -122,6 +123,13 @@ fun MerlotNavHost(
                 onNavigateToDetail = { type, id ->
                     val encodedId = URLEncoder.encode(id, "UTF-8")
                     navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Home.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                    onOpenSidebar()
                 },
                 initialPlatformId = platformId
             )
