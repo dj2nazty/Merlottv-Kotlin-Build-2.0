@@ -23,12 +23,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import com.merlottv.kotlin.ui.components.MerlotChip
@@ -58,6 +60,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -102,6 +105,7 @@ import androidx.activity.compose.BackHandler
 fun VodScreen(
     onNavigateToDetail: (String, String) -> Unit,
     onNavigateToHome: () -> Unit = {},
+    onPlayVideo: ((url: String, title: String) -> Unit)? = null,
     initialPlatformId: String = "",
     viewModel: VodViewModel = hiltViewModel()
 ) {
@@ -497,30 +501,39 @@ fun VodScreen(
                     }
                 }
             }
-            // Genre tab selected with content — show sections as horizontal rows
+            // Genre tab selected with content — show as poster grid
             uiState.selectedGenreTab != null && uiState.genreTabSections.isNotEmpty() -> {
-                LazyColumn(
+                val allItems = remember(uiState.genreTabSections) {
+                    uiState.genreTabSections.flatMap { it.items }.distinctBy { it.id }
+                }
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(130.dp),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 16.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(
-                        uiState.genreTabSections,
-                        key = { it.key },
-                        contentType = { "catalog_row" }
-                    ) { section ->
-                        val isFirst = section == uiState.genreTabSections.first()
-                        CatalogSectionRow(
-                            section = section,
-                            onItemClick = { item ->
+                    items(allItems, key = { it.id }, contentType = { "vodcard" }) { item ->
+                        val isFirst = allItems.firstOrNull()?.id == item.id
+                        val itemFocusRequester = remember(item.id) {
+                            if (isFirst && firstCardFocusRequester != null) {
+                                focusRequesters[item.id] = firstCardFocusRequester
+                                firstCardFocusRequester
+                            } else {
+                                focusRequesters.getOrPut(item.id) { FocusRequester() }
+                            }
+                        }
+                        VodCard(
+                            item = item,
+                            onClick = {
                                 lastFocusedItemId = item.id
                                 onNavigateToDetail(item.type, item.id)
                             },
-                            onItemLongClick = { item -> viewModel.toggleFavorite(item) },
-                            favoriteIds = favoriteIds,
-                            inTheaterIds = uiState.inTheaterIds,
-                            firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null,
-                            focusRequesters = focusRequesters,
-                            onItemFocused = { itemId -> lastFocusedItemId = itemId }
+                            onLongClick = { viewModel.toggleFavorite(item) },
+                            isFavorite = item.id in favoriteIds,
+                            isInTheaters = item.id in uiState.inTheaterIds,
+                            focusRequester = itemFocusRequester,
+                            onFocused = { lastFocusedItemId = item.id }
                         )
                     }
                 }
@@ -1260,3 +1273,5 @@ private fun VodCard(
         )
     }
 }
+
+

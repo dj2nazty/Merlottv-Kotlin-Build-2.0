@@ -131,6 +131,17 @@ fun MerlotNavHost(
                     }
                     onOpenSidebar()
                 },
+                onPlayVideo = { url, title ->
+                    val encodedUrl = URLEncoder.encode(url, "UTF-8")
+                    val encodedTitle = URLEncoder.encode(title, "UTF-8")
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            url = encodedUrl,
+                            title = encodedTitle,
+                            contentType = "youtube"
+                        )
+                    )
+                },
                 initialPlatformId = platformId
             )
         }
@@ -143,6 +154,11 @@ fun MerlotNavHost(
                     navController.navigate(Screen.VodDetail.createRoute(type, encodedId))
                 }
             )
+        }
+
+        composable(Screen.YouTube.route) {
+            onLiveTvFullscreenChanged(false)
+            com.merlottv.kotlin.ui.screens.youtube.YouTubeScreen()
         }
 
         composable(Screen.ChannelBackup.route) {

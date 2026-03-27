@@ -46,20 +46,10 @@ class YouTubeExtractor @Inject constructor(
         private const val CACHE_TTL_MS = 30 * 60 * 1000L // 30 minutes
 
         // Client configs — tried in order until one returns playable streams.
-        // TV_EMBEDDED is tried first because it returns HLS manifests that don't
-        // require PO tokens or nsig decryption (unlike adaptive/progressive URLs).
+        // IOS client is tried first because it returns high-quality adaptive streams
+        // (up to 1080p+) without requiring PO tokens or nsig decryption.
+        // TV_EMBEDDED is used as HLS fallback if adaptive fails.
         private val CLIENTS = listOf(
-            ClientConfig(
-                name = "TV_EMBEDDED",
-                clientName = "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-                clientVersion = "2.0",
-                androidSdkVersion = null,
-                userAgent = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.5 TV Safari/537.36",
-                deviceMake = null,
-                deviceModel = null,
-                osVersion = null,
-                isEmbedded = true
-            ),
             ClientConfig(
                 name = "IOS",
                 clientName = "IOS",
@@ -79,6 +69,17 @@ class YouTubeExtractor @Inject constructor(
                 deviceMake = null,
                 deviceModel = null,
                 osVersion = "14"
+            ),
+            ClientConfig(
+                name = "TV_EMBEDDED",
+                clientName = "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                clientVersion = "2.0",
+                androidSdkVersion = null,
+                userAgent = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.5 TV Safari/537.36",
+                deviceMake = null,
+                deviceModel = null,
+                osVersion = null,
+                isEmbedded = true
             )
         )
     }
@@ -197,7 +198,9 @@ class YouTubeExtractor @Inject constructor(
             return@withContext cached.result
         }
 
-        // First pass: try to get HLS (most reliable — no PO tokens needed)
+        // First pass: try to get HLS (most reliable — no signature/PO token issues)
+        // IOS client HLS supports up to 1080p, so quality is excellent.
+        var adaptiveFallback: YouTubeStreamResult? = null
         for (clientConfig in CLIENTS) {
             try {
                 val result = tryClient(videoId, clientConfig)
@@ -206,22 +209,21 @@ class YouTubeExtractor @Inject constructor(
                     Log.d(TAG, "Got HLS for $videoId via ${clientConfig.name}")
                     return@withContext result
                 }
-                // If we got adaptive/progressive but no HLS, save as fallback
-                if (result != null && (result.videoUrl != null || result.progressiveUrl != null)) {
-                    Log.d(TAG, "Got adaptive/progressive for $videoId via ${clientConfig.name} (no HLS, saving as fallback)")
-                    cache[videoId] = CacheEntry(result, System.currentTimeMillis())
-                    // Don't return yet — keep looking for HLS from other clients
+                // Save adaptive/progressive as fallback
+                if (result != null && (result.videoUrl != null || result.progressiveUrl != null) && adaptiveFallback == null) {
+                    adaptiveFallback = result
+                    Log.d(TAG, "Got adaptive/progressive fallback for $videoId via ${clientConfig.name}")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Client ${clientConfig.name} failed for $videoId: ${e.message}")
             }
         }
 
-        // Second: return cached adaptive/progressive if no HLS was found
-        val fallback = cache[videoId]
-        if (fallback != null) {
+        // Second: return adaptive/progressive fallback if no HLS was found
+        if (adaptiveFallback != null) {
+            cache[videoId] = CacheEntry(adaptiveFallback, System.currentTimeMillis())
             Log.d(TAG, "Using adaptive/progressive fallback for $videoId")
-            return@withContext fallback.result
+            return@withContext adaptiveFallback
         }
 
         Log.w(TAG, "All clients failed for $videoId")
@@ -371,13 +373,14 @@ class YouTubeExtractor @Inject constructor(
                 mimeType.contains("video/webm") -> score += 50
             }
 
-            // Resolution preference: 720p ideal, 1080p OK, avoid 4K (wastes bandwidth)
+            // Resolution preference: 1080p ideal for crisp TV viewing, 720p fallback
             when {
-                height == 720 -> score += 300   // Ideal for TV
-                height == 480 -> score += 250
-                height == 1080 -> score += 200  // OK but heavier
-                height == 360 -> score += 150
-                height >= 1440 -> score += 50   // Too heavy for most TV boxes
+                height == 1080 -> score += 300  // Best quality for TV
+                height == 720 -> score += 250   // Good fallback
+                height == 480 -> score += 150
+                height == 1440 -> score += 200  // 2K — good if supported
+                height == 360 -> score += 100
+                height >= 2160 -> score += 50   // 4K — too heavy for most TV boxes
                 else -> score += 100
             }
 

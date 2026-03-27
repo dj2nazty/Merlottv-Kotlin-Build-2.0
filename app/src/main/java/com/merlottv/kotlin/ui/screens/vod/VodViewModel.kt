@@ -189,6 +189,83 @@ val GENRE_TABS = listOf(
                 mdbListUrl = "https://mdblist.com/lists/dj2nazty/crime-documentaries/json"
             )
         )
+    ),
+    GenreTab(
+        id = "action",
+        name = "Action",
+        lists = listOf(
+            GenreList(
+                id = "action-movies",
+                name = "Action",
+                mdbListUrl = "https://mdblist.com/lists/dj2nazty/action-ylfd0p3v0i/json"
+            )
+        )
+    ),
+    GenreTab(
+        id = "comedy",
+        name = "Comedy",
+        lists = listOf(
+            GenreList(
+                id = "comedy-movies",
+                name = "Comedy",
+                mdbListUrl = "https://mdblist.com/lists/snoak/latest-comedy-movies/json"
+            )
+        )
+    ),
+    GenreTab(
+        id = "thriller",
+        name = "Thriller",
+        lists = listOf(
+            GenreList(
+                id = "thriller-movies",
+                name = "Thriller",
+                mdbListUrl = "https://mdblist.com/lists/snoak/latest-thriller-movies/json"
+            )
+        )
+    ),
+    GenreTab(
+        id = "sci-fi",
+        name = "Sci-Fi",
+        lists = listOf(
+            GenreList(
+                id = "sci-fi-movies",
+                name = "Sci-Fi",
+                mdbListUrl = "https://mdblist.com/lists/snoak/latest-sci-fi-movies/json"
+            )
+        )
+    ),
+    GenreTab(
+        id = "drama",
+        name = "Drama",
+        lists = listOf(
+            GenreList(
+                id = "drama-movies",
+                name = "Drama",
+                mdbListUrl = "https://mdblist.com/lists/snoak/latest-drama-movies/json"
+            )
+        )
+    ),
+    GenreTab(
+        id = "horror",
+        name = "Horror",
+        lists = listOf(
+            GenreList(
+                id = "horror-movies",
+                name = "Horror",
+                mdbListUrl = "https://mdblist.com/lists/snoak/latest-horror-movies/json"
+            )
+        )
+    ),
+    GenreTab(
+        id = "romance",
+        name = "Romance",
+        lists = listOf(
+            GenreList(
+                id = "romance-movies",
+                name = "Romance",
+                mdbListUrl = "https://mdblist.com/lists/snoak/latest-romance-movies/json"
+            )
+        )
     )
 )
 
@@ -211,14 +288,20 @@ data class VodUiState(
     val inTheaterIds: Set<String> = emptySet(),
     val selectedGenreTab: GenreTab? = null,
     val genreTabSections: List<CatalogSection> = emptyList(),
-    val isGenreTabLoading: Boolean = false
+    val isGenreTabLoading: Boolean = false,
+    val youtubeVideos: List<com.merlottv.kotlin.domain.model.YouTubeVideo> = emptyList(),
+    val filteredYoutubeVideos: List<com.merlottv.kotlin.domain.model.YouTubeVideo> = emptyList(),
+    val isYoutubeLoading: Boolean = false,
+    val selectedYoutubeChannel: String = "All",
+    val isExtractingStream: Boolean = false
 )
 
 @HiltViewModel
 class VodViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
     private val favoritesRepository: FavoritesRepository,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val youtubeRepository: com.merlottv.kotlin.data.repository.YouTubeRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VodUiState())
@@ -247,6 +330,21 @@ class VodViewModel @Inject constructor(
     }
 
     fun onTabSelected(tab: String) {
+        if (tab == "YouTube") {
+            _uiState.value = _uiState.value.copy(
+                selectedTab = tab,
+                selectedPlatformTab = null,
+                platformSections = emptyList(),
+                selectedGenreTab = null,
+                genreTabSections = emptyList(),
+                selectedGenre = null,
+                selectedYear = null,
+                availableGenres = emptyList(),
+                availableYears = emptyList()
+            )
+            loadYoutubeContent()
+            return
+        }
         val genres = when (tab) {
             "Movies" -> movieGenres
             "Series" -> seriesGenres
@@ -436,6 +534,48 @@ class VodViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    // ─── YouTube ───
+
+    private fun loadYoutubeContent(forceRefresh: Boolean = false) {
+        _uiState.value = _uiState.value.copy(isYoutubeLoading = true)
+        viewModelScope.launch {
+            val videos = youtubeRepository.fetchAllVideos(forceRefresh)
+            val channel = _uiState.value.selectedYoutubeChannel
+            val filtered = if (channel == "All") videos else videos.filter { it.channelName == channel }
+            _uiState.value = _uiState.value.copy(
+                youtubeVideos = videos,
+                filteredYoutubeVideos = filtered,
+                isYoutubeLoading = false
+            )
+        }
+    }
+
+    fun onYoutubeChannelSelected(channelName: String) {
+        val videos = _uiState.value.youtubeVideos
+        val filtered = if (channelName == "All") videos else videos.filter { it.channelName == channelName }
+        _uiState.value = _uiState.value.copy(
+            selectedYoutubeChannel = channelName,
+            filteredYoutubeVideos = filtered
+        )
+    }
+
+    fun refreshYoutube() {
+        loadYoutubeContent(forceRefresh = true)
+    }
+
+    fun extractYoutubeStream(videoId: String, title: String, onResult: (url: String?) -> Unit) {
+        _uiState.value = _uiState.value.copy(isExtractingStream = true)
+        viewModelScope.launch {
+            val url = youtubeRepository.extractStreamUrl(videoId)
+            _uiState.value = _uiState.value.copy(isExtractingStream = false)
+            onResult(url)
+        }
+    }
+
+    fun getYoutubeChannelNames(): List<String> {
+        return listOf("All") + youtubeRepository.channels.map { it.channelName }
     }
 
     fun onPlatformTabSelected(tab: PlatformTab?) {

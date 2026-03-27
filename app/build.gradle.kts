@@ -14,8 +14,8 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 112
-        versionName = "2.80"
+        versionCode = 113
+        versionName = "2.82"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")
@@ -54,6 +54,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -165,6 +166,12 @@ dependencies {
 
     // ZXing (QR code generation for device code login)
     implementation("com.google.zxing:core:3.5.2")
+
+    // NewPipe Extractor (YouTube stream URL extraction without API key)
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.2")
+
+    // Core library desugaring (required by NewPipe Extractor for minSdk < 33)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.0.4")
 }
 
 kapt {

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Rocket
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -26,6 +27,7 @@ sealed class Screen(
     data object TvGuide : Screen("tv_guide", "TV Guide", Icons.Default.Tv)
     data object Vod : Screen("vod", "VOD", Icons.Default.Movie)
     data object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
+    data object YouTube : Screen("youtube", "YouTube", Icons.Default.PlayArrow)
     data object ChannelBackup : Screen("channel_backup", "Channel Backup", Icons.Default.SettingsInputAntenna)
     data object SpaceX : Screen("spacex", "SpaceX", Icons.Default.Rocket)
     data object Weather : Screen("weather", "Weather", Icons.Default.Cloud)
@@ -57,6 +59,6 @@ sealed class Screen(
     }
 
     companion object {
-        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, ChannelBackup, Vod, Favorites, SpaceX, Weather, Account, Settings)
+        val sidebarItems = listOf(Home, Search, LiveTv, TvGuide, ChannelBackup, Vod, Favorites, YouTube, SpaceX, Weather, Account, Settings)
     }
 }
