@@ -2,6 +2,7 @@
 
 package com.merlottv.kotlin.ui.screens.vod
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -98,6 +100,9 @@ fun VodDetailScreen(
     var showingTrailerYtId by remember { mutableStateOf<String?>(null) }
     var showingTrailerSearchUrl by remember { mutableStateOf<String?>(null) }
 
+    // Source picker state
+    var showSourcePicker by remember { mutableStateOf(false) }
+
     // Auto-navigate to player when stream is selected
     LaunchedEffect(uiState.autoPlayTriggered, uiState.selectedStreamUrl) {
         if (uiState.autoPlayTriggered && uiState.selectedStreamUrl != null) {
@@ -134,7 +139,11 @@ fun VodDetailScreen(
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
                         Key.Back -> {
-                            onBack()
+                            if (showSourcePicker) {
+                                showSourcePicker = false
+                            } else {
+                                onBack()
+                            }
                             true
                         }
                         // Consume Left at screen edges to prevent sidebar from opening
@@ -560,6 +569,42 @@ fun VodDetailScreen(
                             Text("LIKE THIS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
+                        // Source button — manual stream picker (movies only)
+                        if (!isSeries) {
+                        var sourceFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = {
+                                if (uiState.streams.isEmpty()) {
+                                    viewModel.loadStreamsOnly()
+                                }
+                                showSourcePicker = true
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (sourceFocused) FocusedButtonGrey else MerlotColors.Surface2,
+                                contentColor = if (sourceFocused) MerlotColors.White else MerlotColors.TextPrimary
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .onFocusChanged { sourceFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                    ) {
+                                        if (uiState.streams.isEmpty()) {
+                                            viewModel.loadStreamsOnly()
+                                        }
+                                        showSourcePicker = true
+                                        true
+                                    } else false
+                                }
+                        ) {
+                            Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("SOURCE", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        } // end if (!isSeries)
+
                         // Favorite heart button — last
                         var favFocused by remember { mutableStateOf(false) }
                         IconButton(
@@ -795,6 +840,226 @@ fun VodDetailScreen(
         }
 
         // ─── In-App Trailer Player Overlay (Native ExoPlayer) ───
+        // ─── SOURCE PICKER OVERLAY ───
+        if (showSourcePicker) {
+            BackHandler { showSourcePicker = false }
+            val sourceFirstItemFocus = remember { FocusRequester() }
+            // Auto-focus first stream item when picker opens
+            LaunchedEffect(showSourcePicker, uiState.streams.isNotEmpty()) {
+                if (showSourcePicker && uiState.streams.isNotEmpty()) {
+                    kotlinx.coroutines.delay(200)
+                    try { sourceFirstItemFocus.requestFocus() } catch (_: Exception) {}
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f))
+                    .onPreviewKeyEvent { event ->
+                        when {
+                            // Let BackHandler handle the Back key — do NOT consume it here
+                            event.key == Key.Back -> false
+                            event.type == KeyEventType.KeyDown -> {
+                                when (event.key) {
+                                    // Only allow Up/Down for scrolling, Enter/Center to select
+                                    Key.DirectionUp, Key.DirectionDown,
+                                    Key.DirectionCenter, Key.Enter -> false
+                                    // Block everything else (Left, Right, etc.)
+                                    else -> true
+                                }
+                            }
+                            else -> true // Consume all KeyUp events too
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.6f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MerlotColors.Surface)
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        "Select Source",
+                        color = MerlotColors.TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "${uiState.streams.size} streams available",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (uiState.isLoadingStreams) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(200.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    color = MerlotColors.Accent,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Loading streams...", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                            }
+                        }
+                    } else if (uiState.streams.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(100.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No streams found", color = MerlotColors.TextMuted, fontSize = 13.sp)
+                        }
+                    } else {
+                        // Filter out unplayable streams
+                        val playableStreams = remember(uiState.streams) {
+                            uiState.streams.filter { s ->
+                                val u = s.url.ifEmpty { s.externalUrl }
+                                u.isNotEmpty() && !s.title.contains("\uD83D\uDEAB")
+                            }
+                        }
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.height(400.dp)
+                        ) {
+                            items(playableStreams.size) { index ->
+                                val stream = playableStreams[index]
+                                var itemFocused by remember { mutableStateOf(false) }
+                                val quality = stream.quality
+                                val language = stream.language
+                                val fileSize = stream.fileSize
+                                val isFirst = index == 0
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (itemFocused) MerlotColors.Accent.copy(alpha = 0.15f)
+                                            else Color.Transparent
+                                        )
+                                        .then(
+                                            if (itemFocused) Modifier.border(1.5.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                            else Modifier
+                                        )
+                                        .then(if (isFirst) Modifier.focusRequester(sourceFirstItemFocus) else Modifier)
+                                        .onFocusChanged { itemFocused = it.isFocused }
+                                        .focusable()
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown &&
+                                                (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                                            ) {
+                                                showSourcePicker = false
+                                                viewModel.playStream(stream)
+                                                true
+                                            } else false
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    // Stream name
+                                    Text(
+                                        text = stream.name.ifEmpty { stream.addonName },
+                                        color = if (itemFocused) MerlotColors.Accent else MerlotColors.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (itemFocused) FontWeight.Bold else FontWeight.Normal
+                                    )
+
+                                    // Quality + Language + Size badges
+                                    if (quality.isNotEmpty() || language.isNotEmpty() || fileSize.isNotEmpty()) {
+                                        Row(
+                                            modifier = Modifier.padding(top = 3.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (quality.isNotEmpty()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(
+                                                            when (quality) {
+                                                                "4K" -> Color(0xFF9B59B6).copy(alpha = 0.25f)
+                                                                "1080p", "REMUX", "BluRay" -> MerlotColors.Accent.copy(alpha = 0.2f)
+                                                                "720p" -> Color(0xFF3498DB).copy(alpha = 0.2f)
+                                                                else -> MerlotColors.TextMuted.copy(alpha = 0.15f)
+                                                            }
+                                                        )
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                ) {
+                                                    Text(
+                                                        quality,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = when (quality) {
+                                                            "4K" -> Color(0xFFBB86FC)
+                                                            "1080p", "REMUX", "BluRay" -> MerlotColors.Accent
+                                                            "720p" -> Color(0xFF64B5F6)
+                                                            else -> MerlotColors.TextMuted
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            if (language.isNotEmpty()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(
+                                                            if (language == "English") Color(0xFF27AE60).copy(alpha = 0.2f)
+                                                            else Color(0xFFE67E22).copy(alpha = 0.2f)
+                                                        )
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                ) {
+                                                    Text(
+                                                        language,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (language == "English") Color(0xFF2ECC71) else Color(0xFFF39C12)
+                                                    )
+                                                }
+                                            }
+                                            if (fileSize.isNotEmpty()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(3.dp))
+                                                        .background(MerlotColors.TextMuted.copy(alpha = 0.15f))
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                ) {
+                                                    Text(fileSize, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MerlotColors.TextMuted)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Stream title (codec/size details)
+                                    if (stream.title.isNotEmpty()) {
+                                        Text(
+                                            text = stream.title.take(120),
+                                            color = MerlotColors.TextMuted,
+                                            fontSize = 10.sp,
+                                            maxLines = 2,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+
+                                    // Addon source
+                                    if (stream.addonName.isNotEmpty()) {
+                                        Text(
+                                            text = stream.addonName,
+                                            color = MerlotColors.Accent.copy(alpha = 0.6f),
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         showingTrailerYtId?.let { ytId ->
             TrailerPlayer(
                 ytVideoId = ytId,

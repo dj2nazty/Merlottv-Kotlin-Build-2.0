@@ -78,7 +78,10 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
+import com.merlottv.kotlin.R
 import com.merlottv.kotlin.domain.model.MetaPreview
 import com.merlottv.kotlin.ui.components.CardTrailerPreview
 import com.merlottv.kotlin.ui.theme.MerlotColors
@@ -104,9 +107,13 @@ fun VodScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Back button: if viewing a platform, go back to Home + open sidebar
-    BackHandler(enabled = uiState.selectedPlatformTab != null) {
-        onNavigateToHome()
+    // Back button: if viewing a genre tab, deselect it; if viewing a platform, go back to Home
+    BackHandler(enabled = uiState.selectedGenreTab != null || uiState.selectedPlatformTab != null) {
+        if (uiState.selectedGenreTab != null) {
+            viewModel.onGenreTabSelected(null)
+        } else {
+            onNavigateToHome()
+        }
     }
     val favoriteIds by viewModel.favoriteVodIds.collectAsState()
 
@@ -254,8 +261,58 @@ fun VodScreen(
             }
         }
 
-        // Genre & Year filter chip rows (only on Movies/Series tabs)
-        if (uiState.selectedTab != "All" && (uiState.availableGenres.isNotEmpty() || uiState.availableYears.isNotEmpty())) {
+        // Genre tab row — curated genre collections (below main tabs)
+        if (uiState.selectedPlatformTab == null) {
+            val genreTabs = GENRE_TABS
+            val genreTabFocusRequesters = remember { List(genreTabs.size) { FocusRequester() } }
+            LazyRow(
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(end = 16.dp)
+            ) {
+                itemsIndexed(genreTabs) { index, tab ->
+                    val isSelected = uiState.selectedGenreTab?.id == tab.id
+                    Box(
+                        modifier = Modifier
+                            .focusRequester(genreTabFocusRequesters[index])
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown) {
+                                    when (event.key) {
+                                        Key.DirectionLeft -> {
+                                            if (index > 0) {
+                                                try { genreTabFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                                true
+                                            } else false
+                                        }
+                                        Key.DirectionRight -> {
+                                            if (index < genreTabs.size - 1) {
+                                                try { genreTabFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                                true
+                                            } else true
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
+                    ) {
+                        MerlotChip(
+                            selected = isSelected,
+                            onClick = { viewModel.onGenreTabSelected(tab) },
+                            label = {
+                                Text(
+                                    tab.name,
+                                    fontSize = 11.sp,
+                                    color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Genre & Year filter chip rows
+        if (uiState.selectedPlatformTab == null && uiState.selectedGenreTab == null && (uiState.availableGenres.isNotEmpty() || uiState.availableYears.isNotEmpty())) {
             // Genre filter row
             if (uiState.availableGenres.isNotEmpty()) {
                 Column(modifier = Modifier.padding(start = 16.dp, top = 4.dp)) {
@@ -426,6 +483,57 @@ fun VodScreen(
                     }
                 }
             }
+            // Genre tab loading
+            uiState.isGenreTabLoading && uiState.selectedGenreTab != null -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MerlotColors.Accent)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Loading ${uiState.selectedGenreTab!!.name}...",
+                            color = MerlotColors.TextMuted,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+            // Genre tab selected with content — show sections as horizontal rows
+            uiState.selectedGenreTab != null && uiState.genreTabSections.isNotEmpty() -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(
+                        uiState.genreTabSections,
+                        key = { it.key },
+                        contentType = { "catalog_row" }
+                    ) { section ->
+                        val isFirst = section == uiState.genreTabSections.first()
+                        CatalogSectionRow(
+                            section = section,
+                            onItemClick = { item ->
+                                lastFocusedItemId = item.id
+                                onNavigateToDetail(item.type, item.id)
+                            },
+                            onItemLongClick = { item -> viewModel.toggleFavorite(item) },
+                            favoriteIds = favoriteIds,
+                            inTheaterIds = uiState.inTheaterIds,
+                            firstCardFocusRequester = if (isFirst) firstCardFocusRequester else null,
+                            focusRequesters = focusRequesters,
+                            onItemFocused = { itemId -> lastFocusedItemId = itemId }
+                        )
+                    }
+                }
+            }
+            // Genre tab selected but empty
+            uiState.selectedGenreTab != null && uiState.genreTabSections.isEmpty() && !uiState.isGenreTabLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No content found for ${uiState.selectedGenreTab?.name}",
+                        color = MerlotColors.TextMuted, fontSize = 14.sp
+                    )
+                }
+            }
             // Only show main catalog loading when NO platform tab is selected
             uiState.isLoading && uiState.selectedPlatformTab == null -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -514,12 +622,14 @@ fun VodScreen(
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
                                 .height(48.dp)
                                 .focusRequester(searchFieldFocusRequester)
-                                .onFocusChanged { state ->
-                                    if (!state.isFocused) {
-                                        // Lost focus — exit editing mode, hide keyboard
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                                         isSearchEditing = false
                                         keyboardController?.hide()
-                                    }
+                                        // Return focus to first grid item
+                                        try { platformFirstItemFocusRequester.requestFocus() } catch (_: Exception) {}
+                                        true
+                                    } else false
                                 },
                             placeholder = {
                                 Text(
@@ -564,10 +674,11 @@ fun VodScreen(
                         // Auto-focus the text field when entering edit mode
                         LaunchedEffect(Unit) {
                             try { searchFieldFocusRequester.requestFocus() } catch (_: Exception) {}
+                            keyboardController?.show()
                         }
                     } else {
                         // D-pad friendly: looks like a search bar but is just a focusable Box
-                        // Keyboard only opens when center/enter is pressed
+                        // Keyboard ONLY opens when center/enter is pressed — skip on D-pad up/down nav
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -580,17 +691,15 @@ fun VodScreen(
                                     color = if (isSearchBoxFocused) MerlotColors.Accent else MerlotColors.Surface2,
                                     shape = RoundedCornerShape(12.dp)
                                 )
+                                .focusProperties {
+                                    // Skip this search box during vertical D-pad navigation
+                                    // Users can only focus it via explicit left/right navigation
+                                    canFocus = false
+                                }
                                 .onFocusChanged { isSearchBoxFocused = it.isFocused }
-                                .onPreviewKeyEvent { event ->
-                                    if (event.type == KeyEventType.KeyDown) {
-                                        when (event.key) {
-                                            Key.DirectionCenter, Key.Enter -> {
-                                                isSearchEditing = true
-                                                true
-                                            }
-                                            else -> false
-                                        }
-                                    } else false
+                                .clickable {
+                                    // Allow mouse/touch to open search
+                                    isSearchEditing = true
                                 }
                                 .focusable(),
                             contentAlignment = Alignment.CenterStart
@@ -780,18 +889,7 @@ private fun CatalogSectionRow(
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Brand logo (streaming platform logo)
-            val logoUrl = section.brandLogo.ifEmpty { section.addonLogo }
-            if (logoUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = logoUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
+            // No logo — clean text-only section headers
 
             Text(
                 text = section.title,

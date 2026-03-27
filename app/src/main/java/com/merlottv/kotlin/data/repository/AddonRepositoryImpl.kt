@@ -56,6 +56,9 @@ class AddonRepositoryImpl @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // Manifest cache: URL -> (Addon, timestamp)
+    private val manifestCache = ConcurrentHashMap<String, Pair<Addon, Long>>()
+
     init {
         scope.launch {
             settingsDataStore.disabledAddons.collect { urls ->
@@ -75,9 +78,6 @@ class AddonRepositoryImpl @Inject constructor(
     }
 
     private fun enabledAddons(): List<Addon> = _addons.value.filter { it.url !in disabledUrls }
-
-    // Manifest cache: URL -> (Addon, timestamp)
-    private val manifestCache = ConcurrentHashMap<String, Pair<Addon, Long>>()
     private val CACHE_TTL = TimeUnit.MINUTES.toMillis(30)
 
     // Catalog cache: URL -> (List<MetaPreview>, timestamp) — 10 min TTL
@@ -532,9 +532,27 @@ class AddonRepositoryImpl @Inject constructor(
             val map = adapter.fromJson(json) as? Map<String, Any?> ?: return emptyList()
             val streams = map["streams"] as? List<Map<String, Any?>> ?: return emptyList()
             return streams.map { s ->
+                val rawTitle = s["title"] as? String ?: ""
+                val rawName = s["name"] as? String ?: ""
+                val description = s["description"] as? String ?: ""
+                val hints = s["behaviorHints"] as? Map<String, Any?>
+                val filename = hints?.get("filename") as? String ?: ""
+
+                // Build enriched title: merge title + description + filename for max info
+                val enrichedTitle = buildString {
+                    append(rawTitle)
+                    if (description.isNotEmpty() && description != rawTitle) {
+                        if (isNotEmpty()) append("\n")
+                        append(description)
+                    }
+                    if (filename.isNotEmpty() && !rawTitle.contains(filename) && !description.contains(filename)) {
+                        if (isNotEmpty()) append("\n")
+                        append(filename)
+                    }
+                }
                 Stream(
-                    name = s["name"] as? String ?: "",
-                    title = s["title"] as? String ?: "",
+                    name = rawName,
+                    title = enrichedTitle,
                     url = s["url"] as? String ?: "",
                     ytId = s["ytId"] as? String ?: "",
                     infoHash = s["infoHash"] as? String ?: "",

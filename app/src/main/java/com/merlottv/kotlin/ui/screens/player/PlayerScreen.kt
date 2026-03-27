@@ -244,6 +244,12 @@ fun PlayerScreen(
                     MediaItem.fromUri(uri)
                 }
                 setMediaItem(mediaItem)
+
+                // Prefer English audio track for multi-language streams
+                trackSelectionParameters = trackSelectionParameters.buildUpon()
+                    .setPreferredAudioLanguage("en")
+                    .build()
+
                 playWhenReady = true
                 prepare()
 
@@ -266,9 +272,11 @@ fun PlayerScreen(
     }
 
     // MediaSession — exposes playback state to system media controls (remote, Google Assistant)
+    // Use unique ID with timestamp to avoid "Session ID must be unique" crash on rapid navigation
+    val sessionId = remember { "merlot_vod_${contentId.hashCode()}_${System.nanoTime()}" }
     val mediaSession = remember(player) {
         MediaSession.Builder(context, player)
-            .setId("merlot_vod_${contentId.hashCode()}")
+            .setId(sessionId)
             .build()
     }
 
@@ -1184,7 +1192,7 @@ private fun PlayerOptionsPanel(
                                 }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
-                            // Stream name (quality/source info)
+                            // Stream name + PLAYING indicator
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1207,13 +1215,81 @@ private fun PlayerOptionsPanel(
                                 }
                             }
 
-                            // Stream title (often contains quality, size, codec details)
+                            // Quality + Language + Size badges
+                            val quality = stream.quality
+                            val language = stream.language
+                            val fileSize = stream.fileSize
+                            if (quality.isNotEmpty() || language.isNotEmpty() || fileSize.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier.padding(top = 3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (quality.isNotEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(
+                                                    when (quality) {
+                                                        "4K" -> Color(0xFF9B59B6).copy(alpha = 0.25f)
+                                                        "1080p", "REMUX", "BluRay" -> MerlotColors.Accent.copy(alpha = 0.2f)
+                                                        "720p" -> Color(0xFF3498DB).copy(alpha = 0.2f)
+                                                        else -> MerlotColors.TextMuted.copy(alpha = 0.15f)
+                                                    }
+                                                )
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                quality,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = when (quality) {
+                                                    "4K" -> Color(0xFFBB86FC)
+                                                    "1080p", "REMUX", "BluRay" -> MerlotColors.Accent
+                                                    "720p" -> Color(0xFF64B5F6)
+                                                    else -> MerlotColors.TextMuted
+                                                }
+                                            )
+                                        }
+                                    }
+                                    if (language.isNotEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(
+                                                    if (language == "English") Color(0xFF27AE60).copy(alpha = 0.2f)
+                                                    else Color(0xFFE67E22).copy(alpha = 0.2f)
+                                                )
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                language,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (language == "English") Color(0xFF2ECC71) else Color(0xFFF39C12)
+                                            )
+                                        }
+                                    }
+                                    if (fileSize.isNotEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(MerlotColors.TextMuted.copy(alpha = 0.15f))
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(fileSize, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MerlotColors.TextMuted)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Stream title (codec, size details)
                             if (stream.title.isNotEmpty()) {
                                 Text(
                                     text = stream.title.take(120),
                                     color = MerlotColors.TextMuted,
                                     fontSize = 10.sp,
-                                    maxLines = 2
+                                    maxLines = 2,
+                                    modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
 

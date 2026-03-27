@@ -165,6 +165,33 @@ val PLATFORM_TABS = listOf(
     )
 )
 
+// Genre tabs — curated MDBList-powered genre collections shown below All/Movies/Series
+data class GenreTab(
+    val id: String,
+    val name: String,
+    val lists: List<GenreList>       // Each genre tab can have multiple sub-lists
+)
+
+data class GenreList(
+    val id: String,
+    val name: String,
+    val mdbListUrl: String
+)
+
+val GENRE_TABS = listOf(
+    GenreTab(
+        id = "crime-docs",
+        name = "Crime Documentaries",
+        lists = listOf(
+            GenreList(
+                id = "latest-crime-docs",
+                name = "Latest Crime Documentaries",
+                mdbListUrl = "https://mdblist.com/lists/dj2nazty/crime-documentaries/json"
+            )
+        )
+    )
+)
+
 data class VodUiState(
     val isLoading: Boolean = true,
     val isFilterLoading: Boolean = false,
@@ -181,7 +208,10 @@ data class VodUiState(
     val selectedYear: String? = null,
     val availableGenres: List<String> = emptyList(),
     val availableYears: List<String> = emptyList(),
-    val inTheaterIds: Set<String> = emptySet()
+    val inTheaterIds: Set<String> = emptySet(),
+    val selectedGenreTab: GenreTab? = null,
+    val genreTabSections: List<CatalogSection> = emptyList(),
+    val isGenreTabLoading: Boolean = false
 )
 
 @HiltViewModel
@@ -220,18 +250,192 @@ class VodViewModel @Inject constructor(
         val genres = when (tab) {
             "Movies" -> movieGenres
             "Series" -> seriesGenres
-            else -> emptyList()
+            else -> (movieGenres + seriesGenres).distinct().sorted()
         }
         _uiState.value = _uiState.value.copy(
             selectedTab = tab,
             selectedPlatformTab = null,
             platformSections = emptyList(),
+            selectedGenreTab = null,
+            genreTabSections = emptyList(),
             selectedGenre = null,
             selectedYear = null,
             availableGenres = genres,
-            availableYears = if (tab != "All") yearOptions else emptyList()
+            availableYears = yearOptions
         )
         applyFilter(tab)
+    }
+
+    fun onGenreTabSelected(tab: GenreTab?) {
+        if (tab == null || tab == _uiState.value.selectedGenreTab) {
+            // Deselect — go back to current main tab view
+            _uiState.value = _uiState.value.copy(
+                selectedGenreTab = null,
+                genreTabSections = emptyList()
+            )
+            return
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedGenreTab = tab,
+            selectedPlatformTab = null,
+            platformSections = emptyList(),
+            filteredPlatformItems = emptyList(),
+            platformSearchQuery = "",
+            isGenreTabLoading = true,
+            genreTabSections = emptyList()
+        )
+        loadGenreTabContent(tab)
+    }
+
+    private fun loadGenreTabContent(tab: GenreTab) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val allSections = mutableListOf<CatalogSection>()
+
+                for (list in tab.lists) {
+                    val cacheKey = "genre_${list.id}"
+
+                    // Check cache first
+                    mdbListCache[cacheKey]?.let { cached ->
+                        allSections.add(CatalogSection(
+                            key = "genre:${list.id}",
+                            title = list.name,
+                            addonName = "MDBList",
+                            brandLogo = "",
+                            type = "movie",
+                            catalogId = list.id,
+                            items = cached
+                        ))
+                        _uiState.value = _uiState.value.copy(
+                            isGenreTabLoading = false,
+                            genreTabSections = allSections.toList()
+                        )
+                        return@launch
+                    }
+
+                    if (list.mdbListUrl.isBlank()) continue
+
+                    // Fetch MDBList JSON
+                    val request = Request.Builder().url(list.mdbListUrl).build()
+                    val response = httpClient.newCall(request).execute()
+                    val body = response.body?.string() ?: continue
+                    val jsonArray = org.json.JSONArray(body)
+
+                    data class MdbItem(val imdbId: String, val title: String, val mediaType: String, val year: String)
+                    val mdbItems = mutableListOf<MdbItem>()
+                    for (i in 0 until jsonArray.length()) {
+                        val item = jsonArray.getJSONObject(i)
+                        val imdbId = item.optString("imdb_id", "")
+                        val title = item.optString("title", "")
+                        val mediaType = item.optString("mediatype", "")
+                        val year = item.optString("release_year", "")
+                        if (imdbId.isNotEmpty() && title.isNotEmpty()) {
+                            mdbItems.add(MdbItem(imdbId, title, mediaType, year))
+                        }
+                    }
+
+                    if (mdbItems.isEmpty()) continue
+
+                    // Resolve posters via Cinemeta
+                    val cinemetaBase = "https://v3-cinemeta.strem.io"
+                    val resolvedMap = java.util.concurrent.ConcurrentHashMap<String, MetaPreview>()
+
+                    // Pre-fill with basic data
+                    mdbItems.forEach { mdbItem ->
+                        val cinemetaType = when (mdbItem.mediaType) {
+                            "show" -> "series"; "movie" -> "movie"; else -> "movie"
+                        }
+                        resolvedMap[mdbItem.imdbId] = MetaPreview(
+                            id = mdbItem.imdbId, type = cinemetaType, name = mdbItem.title,
+                            poster = "", description = "", imdbRating = "",
+                            background = "", logo = ""
+                        )
+                    }
+
+                    val loadStartTime = System.currentTimeMillis()
+                    val chunks = mdbItems.chunked(25)
+
+                    for ((chunkIdx, chunk) in chunks.withIndex()) {
+                        if (_uiState.value.selectedGenreTab?.id != tab.id) return@launch
+
+                        supervisorScope {
+                            chunk.map { mdbItem ->
+                                async(cinemetaDispatcher) {
+                                    withTimeoutOrNull(4000L) {
+                                        val cinemetaType = when (mdbItem.mediaType) {
+                                            "show" -> "series"; "movie" -> "movie"; else -> "movie"
+                                        }
+                                        try {
+                                            val url = "$cinemetaBase/meta/$cinemetaType/${mdbItem.imdbId}.json"
+                                            val req = Request.Builder().url(url).build()
+                                            val resp = httpClient.newCall(req).execute()
+                                            if (resp.isSuccessful) {
+                                                val metaBody = resp.body?.string() ?: return@withTimeoutOrNull
+                                                val metaJson = org.json.JSONObject(metaBody).optJSONObject("meta")
+                                                    ?: return@withTimeoutOrNull
+                                                val poster = metaJson.optString("poster", "")
+                                                if (poster.isNotEmpty()) {
+                                                    resolvedMap[mdbItem.imdbId] = MetaPreview(
+                                                        id = metaJson.optString("imdb_id", mdbItem.imdbId),
+                                                        type = cinemetaType,
+                                                        name = metaJson.optString("name", mdbItem.title),
+                                                        poster = poster,
+                                                        description = metaJson.optString("description", ""),
+                                                        imdbRating = metaJson.optString("imdbRating", ""),
+                                                        background = metaJson.optString("background", ""),
+                                                        logo = metaJson.optString("logo", "")
+                                                    )
+                                                }
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            }.awaitAll()
+                        }
+
+                        // Minimum display time for first chunk
+                        if (chunkIdx == 0) {
+                            val elapsed = System.currentTimeMillis() - loadStartTime
+                            if (elapsed < 1500L) kotlinx.coroutines.delay(1500L - elapsed)
+                        }
+
+                        // Update UI progressively
+                        val updatedItems = mdbItems.mapNotNull { resolvedMap[it.imdbId] }
+                        val section = CatalogSection(
+                            key = "genre:${list.id}",
+                            title = list.name,
+                            addonName = "MDBList",
+                            brandLogo = "",
+                            type = "movie",
+                            catalogId = list.id,
+                            items = updatedItems
+                        )
+                        // Replace or add this list's section
+                        val currentSections = allSections.toMutableList()
+                        val existingIdx = currentSections.indexOfFirst { it.key == "genre:${list.id}" }
+                        if (existingIdx >= 0) currentSections[existingIdx] = section
+                        else currentSections.add(section)
+                        allSections.clear()
+                        allSections.addAll(currentSections)
+
+                        _uiState.value = _uiState.value.copy(
+                            isGenreTabLoading = false,
+                            genreTabSections = allSections.toList()
+                        )
+                    }
+
+                    // Cache final results
+                    val finalItems = mdbItems.mapNotNull { resolvedMap[it.imdbId] }
+                    mdbListCache[cacheKey] = finalItems
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("VodViewModel", "Genre tab load failed: ${e.message}")
+                _uiState.value = _uiState.value.copy(
+                    isGenreTabLoading = false,
+                    genreTabSections = emptyList()
+                )
+            }
+        }
     }
 
     fun onPlatformTabSelected(tab: PlatformTab?) {
@@ -252,6 +456,8 @@ class VodViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             selectedTab = "All",  // Clear main tab highlight
             selectedPlatformTab = tab,
+            selectedGenreTab = null,
+            genreTabSections = emptyList(),
             isPlatformLoading = true,
             platformSections = emptyList(),
             filteredPlatformItems = emptyList(),
@@ -479,65 +685,73 @@ class VodViewModel @Inject constructor(
     private fun loadFilteredCatalog(genre: String? = null, year: String? = null) {
         val addon = tmdbAddon ?: return
         val tab = _uiState.value.selectedTab
-        val type = if (tab == "Movies") "movie" else "series"
-        val typeLabel = if (type == "movie") "Movies" else "Series"
+        val types = when (tab) {
+            "Movies" -> listOf("movie")
+            "Series" -> listOf("series")
+            else -> listOf("movie", "series") // "All" — fetch both
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = _uiState.value.copy(isFilterLoading = true)
             try {
-                if (genre != null && year != null) {
-                    // Both genre + year: fetch both in parallel, intersect results
-                    val (genreItems, yearItems) = supervisorScope {
-                        val g = async {
-                            addonRepository.getCatalog(addon, type, "tmdb.top", genre = genre)
-                        }
-                        val y = async {
-                            addonRepository.getCatalog(addon, type, "tmdb.year", genre = year)
-                        }
-                        Pair(g.await(), y.await())
-                    }
-                    val yearIds = yearItems.map { it.id }.toSet()
-                    val items = genreItems.filter { it.id in yearIds }
-                    val title = "$genre $typeLabel — $year"
+                val sections = mutableListOf<CatalogSection>()
 
-                    val section = CatalogSection(
-                        title = title, addonName = "TMDB", addonLogo = addon.logo,
-                        brandLogo = "", type = type, catalogId = "tmdb.top+year",
-                        items = items
-                    )
-                    _uiState.value = _uiState.value.copy(
-                        isFilterLoading = false,
-                        filteredSections = if (items.isNotEmpty()) listOf(section) else emptyList()
-                    )
-                } else {
-                    // Single filter: genre OR year
-                    val catalogId: String
-                    val genreParam: String
-                    val title: String
+                for (type in types) {
+                    val typeLabel = if (type == "movie") "Movies" else "Series"
 
-                    if (year != null) {
-                        catalogId = "tmdb.year"
-                        genreParam = year
-                        title = "$year $typeLabel"
+                    if (genre != null && year != null) {
+                        // Both genre + year: fetch both in parallel, intersect results
+                        val (genreItems, yearItems) = supervisorScope {
+                            val g = async {
+                                addonRepository.getCatalog(addon, type, "tmdb.top", genre = genre)
+                            }
+                            val y = async {
+                                addonRepository.getCatalog(addon, type, "tmdb.year", genre = year)
+                            }
+                            Pair(g.await(), y.await())
+                        }
+                        val yearIds = yearItems.map { it.id }.toSet()
+                        val items = genreItems.filter { it.id in yearIds }
+                        if (items.isNotEmpty()) {
+                            sections.add(CatalogSection(
+                                title = "$genre $typeLabel — $year", addonName = "TMDB", addonLogo = addon.logo,
+                                brandLogo = "", type = type, catalogId = "tmdb.top+year",
+                                items = items
+                            ))
+                        }
                     } else {
-                        catalogId = "tmdb.top"
-                        genreParam = genre!!
-                        title = "$genre $typeLabel"
-                    }
+                        // Single filter: genre OR year
+                        val catalogId: String
+                        val genreParam: String
+                        val title: String
 
-                    val items = addonRepository.getCatalog(
-                        addon = addon, type = type, catalogId = catalogId, genre = genreParam
-                    )
-                    val section = CatalogSection(
-                        title = title, addonName = "TMDB", addonLogo = addon.logo,
-                        brandLogo = "", type = type, catalogId = catalogId,
-                        items = items
-                    )
-                    _uiState.value = _uiState.value.copy(
-                        isFilterLoading = false,
-                        filteredSections = if (items.isNotEmpty()) listOf(section) else emptyList()
-                    )
+                        if (year != null) {
+                            catalogId = "tmdb.year"
+                            genreParam = year
+                            title = "$year $typeLabel"
+                        } else {
+                            catalogId = "tmdb.top"
+                            genreParam = genre!!
+                            title = "$genre $typeLabel"
+                        }
+
+                        val items = addonRepository.getCatalog(
+                            addon = addon, type = type, catalogId = catalogId, genre = genreParam
+                        )
+                        if (items.isNotEmpty()) {
+                            sections.add(CatalogSection(
+                                title = title, addonName = "TMDB", addonLogo = addon.logo,
+                                brandLogo = "", type = type, catalogId = catalogId,
+                                items = items
+                            ))
+                        }
+                    }
                 }
+
+                _uiState.value = _uiState.value.copy(
+                    isFilterLoading = false,
+                    filteredSections = sections
+                )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isFilterLoading = false,
@@ -577,11 +791,16 @@ class VodViewModel @Inject constructor(
                 }
 
                 // Extract TMDB filter options from manifest
-                val tmdbManifest = manifests.find { it.id == "tmdb-addon" || it.name.contains("TMDB", true) }
+                android.util.Log.d("VOD_DEBUG", "Manifests count: ${manifests.size}")
+                manifests.forEach { m -> android.util.Log.d("VOD_DEBUG", "Manifest: id='${m.id}' name='${m.name}' catalogs=${m.catalogs.size}") }
+                val tmdbManifest = manifests.find { it.id == "tmdb-addon" || it.id == "com.merlottv.tmdb" || it.name.contains("TMDB", true) || it.name.contains("MerlotTV+", true) }
+                android.util.Log.d("VOD_DEBUG", "TMDB manifest found: ${tmdbManifest != null}")
                 if (tmdbManifest != null) {
                     tmdbAddon = tmdbManifest
-                    movieGenres = tmdbManifest.catalogs
-                        .find { it.id == "tmdb.top" && it.type == "movie" }
+                    android.util.Log.d("VOD_DEBUG", "TMDB catalogs: ${tmdbManifest.catalogs.map { "${it.id}/${it.type}" }}")
+                    val movieTopCatalog = tmdbManifest.catalogs.find { it.id == "tmdb.top" && it.type == "movie" }
+                    android.util.Log.d("VOD_DEBUG", "Movie top catalog: ${movieTopCatalog != null}, extras: ${movieTopCatalog?.extra?.map { "${it.name}=${it.options?.size ?: 0}" }}")
+                    movieGenres = movieTopCatalog
                         ?.extra?.find { it.name == "genre" }?.options ?: emptyList()
                     seriesGenres = tmdbManifest.catalogs
                         .find { it.id == "tmdb.top" && it.type == "series" }
@@ -589,6 +808,7 @@ class VodViewModel @Inject constructor(
                     yearOptions = tmdbManifest.catalogs
                         .find { it.id == "tmdb.year" && it.type == "movie" }
                         ?.extra?.find { it.name == "genre" }?.options ?: emptyList()
+                    android.util.Log.d("VOD_DEBUG", "movieGenres=${movieGenres.size}, seriesGenres=${seriesGenres.size}, yearOptions=${yearOptions.size}")
                 }
 
                 // Step 2: Build catalog jobs
@@ -669,12 +889,15 @@ class VodViewModel @Inject constructor(
                     .toSet()
 
                 val current = _uiState.value
+                val allGenres = (movieGenres + seriesGenres).distinct().sorted()
                 _uiState.value = current.copy(
                     isLoading = false,
                     selectedTab = if (current.selectedPlatformTab != null) current.selectedTab else "All",
                     sections = sorted,
                     filteredSections = sorted,
-                    inTheaterIds = theaterIds
+                    inTheaterIds = theaterIds,
+                    availableGenres = if (current.selectedPlatformTab == null) allGenres else emptyList(),
+                    availableYears = if (current.selectedPlatformTab == null) yearOptions else emptyList()
                 )
             } catch (e: Exception) {
                 val current = _uiState.value

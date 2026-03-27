@@ -337,6 +337,24 @@ class VodDetailViewModel @Inject constructor(
         }
     }
 
+    /** Fetch streams without auto-playing — for the Source picker */
+    fun loadStreamsOnly() {
+        val episode = _uiState.value.selectedEpisode
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingStreams = true)
+            try {
+                val streamId = if (episode != null) {
+                    "${id}:${episode.season}:${episode.episode}"
+                } else id
+                val streamType = if (episode != null) "series" else type
+                val streams = addonRepository.getStreams(streamType, streamId)
+                _uiState.value = _uiState.value.copy(streams = streams, isLoadingStreams = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingStreams = false)
+            }
+        }
+    }
+
     fun playStream(stream: Stream) {
         val url = stream.url.ifEmpty { stream.externalUrl }
         if (url.isNotEmpty()) {
@@ -392,30 +410,55 @@ class VodDetailViewModel @Inject constructor(
             (url.startsWith("http://") || url.startsWith("https://")) &&
             !url.contains("magnet:") &&
             !url.endsWith(".torrent")
+        }.filter { stream ->
+            // Filter out addon "error" placeholder streams (e.g. MediaFusion filtered results)
+            val text = "${stream.name} ${stream.title}"
+            !text.contains("\uD83D\uDEAB") && // 🚫
+            !text.contains("Filtered by your configuration") &&
+            !text.contains("Resolution Not Selected") &&
+            !text.contains("Language Not Selected") &&
+            !text.contains("Quality Not Selected")
         }
 
         if (directStreams.isEmpty()) {
-            return streams.firstOrNull { it.url.isNotEmpty() || it.externalUrl.isNotEmpty() }
+            return streams.firstOrNull {
+                val url = it.url.ifEmpty { it.externalUrl }
+                url.isNotEmpty() && !it.title.contains("\uD83D\uDEAB")
+            }
         }
 
-        val hd1080 = directStreams.firstOrNull { stream ->
+        // Prefer English streams — filter to likely-English first, fall back to all if none
+        val englishStreams = directStreams.filter { it.isLikelyEnglish }
+        val candidates = englishStreams.ifEmpty { directStreams }
+
+        // 4K
+        val hd4k = candidates.firstOrNull { stream ->
+            val text = "${stream.name} ${stream.title}".lowercase()
+            text.contains("2160") || text.contains("4k") || text.contains("uhd")
+        }
+        if (hd4k != null) return hd4k
+
+        // 1080p / BluRay / REMUX
+        val hd1080 = candidates.firstOrNull { stream ->
             val text = "${stream.name} ${stream.title}".lowercase()
             text.contains("1080") || text.contains("bluray") || text.contains("remux")
         }
         if (hd1080 != null) return hd1080
 
-        val hd720 = directStreams.firstOrNull { stream ->
+        // 720p / HD
+        val hd720 = candidates.firstOrNull { stream ->
             val text = "${stream.name} ${stream.title}".lowercase()
             text.contains("720") || text.contains("hd")
         }
         if (hd720 != null) return hd720
 
-        val torbox = directStreams.firstOrNull { stream ->
+        // TorBox addon preference
+        val torbox = candidates.firstOrNull { stream ->
             stream.addonName.contains("torbox", ignoreCase = true) ||
             stream.url.contains("torbox", ignoreCase = true)
         }
         if (torbox != null) return torbox
 
-        return directStreams.first()
+        return candidates.first()
     }
 }
