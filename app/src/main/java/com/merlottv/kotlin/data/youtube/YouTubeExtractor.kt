@@ -373,15 +373,16 @@ class YouTubeExtractor @Inject constructor(
                 mimeType.contains("video/webm") -> score += 50
             }
 
-            // Resolution preference: 1080p ideal for crisp TV viewing, 720p fallback
+            // Resolution preference: 1080p minimum, higher is better
+            // Strongly penalize anything below 1080p
             when {
-                height == 1080 -> score += 300  // Best quality for TV
-                height == 720 -> score += 250   // Good fallback
-                height == 480 -> score += 150
-                height == 1440 -> score += 200  // 2K — good if supported
-                height == 360 -> score += 100
-                height >= 2160 -> score += 50   // 4K — too heavy for most TV boxes
-                else -> score += 100
+                height >= 2160 -> score += 400  // 4K — great if device handles it
+                height == 1440 -> score += 450  // 2K — sweet spot
+                height == 1080 -> score += 500  // 1080p — minimum acceptable
+                height == 720 -> score += 100   // 720p — only if nothing better
+                height == 480 -> score -= 200   // 480p — avoid
+                height == 360 -> score -= 500   // 360p — never pick this
+                else -> if (height >= 1080) score += 500 else score -= 300
             }
 
             // Tiebreaker: higher bitrate
@@ -451,12 +452,13 @@ class YouTubeExtractor @Inject constructor(
             // Prefer MP4
             if (mimeType.contains("video/mp4")) score += 200
 
-            // Prefer 720p
+            // Prefer highest resolution (1080p minimum)
             when {
-                height == 720 -> score += 300
-                height == 360 -> score += 200
-                height == 480 -> score += 250
-                else -> score += 100
+                height >= 1080 -> score += 500
+                height == 720 -> score += 200
+                height == 480 -> score += 100
+                height == 360 -> score -= 100
+                else -> score += 50
             }
 
             Pair(url, score)

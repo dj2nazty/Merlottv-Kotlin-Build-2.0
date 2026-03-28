@@ -46,6 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -199,13 +201,14 @@ fun TrailerPlayer(
     var countdownSeconds by remember { mutableIntStateOf(10) }
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val playerFocusRequester = remember { FocusRequester() }
 
     // Create ExoPlayer and prepare media source
     DisposableEffect(result) {
         val loadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
-            .setBufferDurationsMs(5_000, 60_000, 2_000, 3_000)
-            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBufferDurationsMs(15_000, 120_000, 5_000, 8_000)
+            .setPrioritizeTimeOverSizeThresholds(false)
             .setTargetBufferBytes(C.LENGTH_UNSET)
             .build()
 
@@ -264,9 +267,11 @@ fun TrailerPlayer(
             return@DisposableEffect onDispose {}
         }
 
-        // Allow up to 1080p but let ExoPlayer adapt to bandwidth (no forced minimum)
+        // Force minimum 1080p — prefer highest quality available
         exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
-            .setMaxVideoSize(1920, 1080)
+            .setMinVideoSize(1920, 1080)
+            .setMaxVideoSize(3840, 2160)
+            .setForceHighestSupportedBitrate(true)
             .build()
 
         exoPlayer.playWhenReady = true
@@ -337,11 +342,20 @@ fun TrailerPlayer(
         }
     }
 
+    // Request focus for D-pad input
+    LaunchedEffect(player) {
+        if (player != null) {
+            kotlinx.coroutines.delay(200)
+            try { playerFocusRequester.requestFocus() } catch (_: Exception) {}
+        }
+    }
+
     // UI
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(playerFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     // Any key press shows controls
@@ -384,6 +398,7 @@ fun TrailerPlayer(
                             }
                             true
                         }
+                        Key.DirectionUp, Key.DirectionDown -> true // consume to prevent focus escape
                         else -> false
                     }
                 } else false
@@ -403,6 +418,8 @@ fun TrailerPlayer(
                         useController = false
                         setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                         setBackgroundColor(android.graphics.Color.BLACK)
+                        isFocusable = false
+                        isFocusableInTouchMode = false
                     }
                 },
                 modifier = Modifier.fillMaxSize()
