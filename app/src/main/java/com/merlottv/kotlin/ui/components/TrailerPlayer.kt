@@ -113,6 +113,15 @@ fun TrailerPlayer(
     onPlayNext: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+
+    // Keep screen awake during YouTube playback — prevents screensaver
+    val activity = context as? android.app.Activity
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
     val extractor = remember {
         EntryPointAccessors.fromApplication(
             context.applicationContext,

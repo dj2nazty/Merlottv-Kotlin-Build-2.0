@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -57,6 +58,11 @@ import coil.compose.AsyncImage
 import com.merlottv.kotlin.domain.model.YouTubeVideo
 import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -98,18 +104,35 @@ fun YouTubeScreen(
                 }
             }
 
-            // Channel filter chips
+            // Channel avatars — circular icons with name underneath
             val channelNames = viewModel.getChannelNames()
+            val avatarMap = remember(uiState.channelsWithAvatars) {
+                uiState.channelsWithAvatars.associate { it.channelName to it.avatarUrl }
+            }
             val channelChipFocusRequesters = remember { List(channelNames.size) { FocusRequester() } }
+            val channelListState = rememberLazyListState()
+            val channelScope = rememberCoroutineScope()
             LazyRow(
-                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                state = channelListState,
+                modifier = Modifier.padding(start = 16.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(end = 16.dp)
             ) {
                 itemsIndexed(channelNames) { index, name ->
                     val isSelected = uiState.selectedChannel == name
-                    Box(
+                    var isFocused by remember { mutableStateOf(false) }
+                    val avatarUrl = avatarMap[name]
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
+                            .width(72.dp)
                             .focusRequester(channelChipFocusRequesters[index])
+                            .onFocusChanged { state ->
+                                isFocused = state.isFocused
+                                if (state.isFocused) {
+                                    channelScope.launch { channelListState.animateScrollToItem(index) }
+                                }
+                            }
                             .onPreviewKeyEvent { event ->
                                 if (event.type == KeyEventType.KeyDown) {
                                     when (event.key) {
@@ -117,7 +140,7 @@ fun YouTubeScreen(
                                             if (index > 0) {
                                                 try { channelChipFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
                                             }
-                                            true // Always consume Left
+                                            true // Always consume Left — prevent sidebar from opening
                                         }
                                         Key.DirectionRight -> {
                                             if (index < channelNames.size - 1) {
@@ -125,21 +148,79 @@ fun YouTubeScreen(
                                             }
                                             true // Always consume Right
                                         }
+                                        Key.DirectionCenter, Key.Enter -> {
+                                            viewModel.onChannelSelected(name)
+                                            true
+                                        }
                                         else -> false
                                     }
                                 } else false
                             }
+                            .focusable()
                     ) {
-                        MerlotChip(
-                            selected = isSelected,
-                            onClick = { viewModel.onChannelSelected(name) },
-                            label = {
+                        // Circle avatar
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isSelected) MerlotColors.Accent.copy(alpha = 0.15f)
+                                    else Color(0xFF1E1E1E)
+                                )
+                                .border(
+                                    width = when {
+                                        isSelected -> 2.5.dp
+                                        isFocused -> 2.5.dp
+                                        else -> 0.dp
+                                    },
+                                    color = when {
+                                        isSelected -> MerlotColors.Accent
+                                        isFocused -> Color(0xFF00BFA5)
+                                        else -> Color.Transparent
+                                    },
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (name == "All") {
+                                // "All" icon — YouTube play button style
                                 Text(
-                                    name,
-                                    fontSize = 11.sp,
-                                    color = if (isSelected) MerlotColors.Black else MerlotColors.TextPrimary
+                                    "▶",
+                                    color = if (isSelected) MerlotColors.Accent else MerlotColors.TextPrimary,
+                                    fontSize = 20.sp
+                                )
+                            } else if (!avatarUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = avatarUrl,
+                                    contentDescription = name,
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                // Fallback: first letter of channel name
+                                Text(
+                                    name.first().uppercase(),
+                                    color = MerlotColors.TextPrimary,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        // Channel name under the circle
+                        Text(
+                            text = name,
+                            color = when {
+                                isSelected -> MerlotColors.Accent
+                                isFocused -> Color(0xFF00BFA5)
+                                else -> MerlotColors.TextMuted
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -156,15 +237,17 @@ fun YouTubeScreen(
                     }
                 }
                 else -> {
-                    val firstCardFocus = remember { FocusRequester() }
-                    LaunchedEffect(uiState.filteredVideos.isNotEmpty()) {
-                        if (uiState.filteredVideos.isNotEmpty()) {
-                            delay(300)
-                            try { firstCardFocus.requestFocus() } catch (_: Exception) {}
-                        }
-                    }
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val gridColumns = ((maxWidth - 32.dp) / (180.dp + 10.dp)).toInt().coerceAtLeast(1)
+                        val cardFocusRequesters = remember(uiState.filteredVideos.size) {
+                            List(uiState.filteredVideos.size) { FocusRequester() }
+                        }
+                        LaunchedEffect(uiState.filteredVideos.isNotEmpty()) {
+                            if (uiState.filteredVideos.isNotEmpty()) {
+                                delay(300)
+                                try { cardFocusRequesters.firstOrNull()?.requestFocus() } catch (_: Exception) {}
+                            }
+                        }
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(180.dp),
                             modifier = Modifier.fillMaxSize(),
@@ -177,11 +260,23 @@ fun YouTubeScreen(
                                 key = { _, video -> video.videoId },
                                 contentType = { _, _ -> "ytcard" }
                             ) { index, video ->
+                                val isLeftEdge = index % gridColumns == 0
+                                val isRightEdge = index % gridColumns == gridColumns - 1 || index == uiState.filteredVideos.size - 1
                                 YouTubeVideoCard(
                                     video = video,
-                                    focusRequester = if (index == 0) firstCardFocus else null,
-                                    isLeftEdge = index % gridColumns == 0,
-                                    onClick = { playingYtVideoId = video.videoId }
+                                    focusRequester = cardFocusRequesters.getOrNull(index) ?: remember { FocusRequester() },
+                                    isFirstCard = index == 0,
+                                    onClick = { playingYtVideoId = video.videoId },
+                                    onLeft = {
+                                        if (!isLeftEdge && index > 0) {
+                                            try { cardFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                        }
+                                    },
+                                    onRight = {
+                                        if (!isRightEdge && index < uiState.filteredVideos.size - 1) {
+                                            try { cardFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -220,8 +315,10 @@ fun YouTubeScreen(
 private fun YouTubeVideoCard(
     video: YouTubeVideo,
     focusRequester: FocusRequester? = null,
-    isLeftEdge: Boolean = false,
-    onClick: () -> Unit
+    isFirstCard: Boolean = false,
+    onClick: () -> Unit,
+    onLeft: () -> Unit = {},
+    onRight: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -239,8 +336,22 @@ private fun YouTubeVideoCard(
             }
             .let { mod -> if (focusRequester != null) mod.focusRequester(focusRequester) else mod }
             .onPreviewKeyEvent { event ->
-                if (isLeftEdge && event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
-                    true // Consume Left on left-edge cards
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionLeft -> {
+                            onLeft()
+                            true // Always consume Left — prevent sidebar from opening
+                        }
+                        Key.DirectionRight -> {
+                            onRight()
+                            true // Always consume Right
+                        }
+                        Key.DirectionCenter, Key.Enter -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
                 } else false
             }
             .onFocusChanged { isFocused = it.isFocused }
@@ -276,6 +387,7 @@ private fun YouTubeVideoCard(
             modifier = Modifier.padding(top = 4.dp)
         )
 
+        // Channel name + view count + time ago
         Text(
             text = video.channelName,
             color = MerlotColors.TextMuted,
@@ -284,6 +396,23 @@ private fun YouTubeVideoCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 2.dp)
         )
+
+        // "38K views • 3 days ago"
+        val metaText = buildString {
+            if (video.viewCount.isNotBlank()) append(video.viewCount)
+            if (video.viewCount.isNotBlank() && video.publishedTimeText.isNotBlank()) append(" • ")
+            if (video.publishedTimeText.isNotBlank()) append(video.publishedTimeText)
+        }
+        if (metaText.isNotBlank()) {
+            Text(
+                text = metaText,
+                color = MerlotColors.TextMuted.copy(alpha = 0.7f),
+                fontSize = 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 1.dp)
+            )
+        }
     }
 }
 

@@ -3,6 +3,7 @@ package com.merlottv.kotlin.ui.screens.youtube
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.data.repository.YouTubeRepository
+import com.merlottv.kotlin.domain.model.YouTubeChannel
 import com.merlottv.kotlin.domain.model.YouTubeVideo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ data class YouTubeUiState(
     val videos: List<YouTubeVideo> = emptyList(),
     val filteredVideos: List<YouTubeVideo> = emptyList(),
     val selectedChannel: String = "All",
+    val channelsWithAvatars: List<YouTubeChannel> = emptyList(),
     val error: String? = null
 )
 
@@ -32,6 +34,7 @@ class YouTubeViewModel @Inject constructor(
     fun loadIfNeeded() {
         if (hasLoaded) return
         hasLoaded = true
+        _uiState.value = _uiState.value.copy(channelsWithAvatars = youtubeRepository.getChannelsWithAvatars())
         loadVideos()
     }
 
