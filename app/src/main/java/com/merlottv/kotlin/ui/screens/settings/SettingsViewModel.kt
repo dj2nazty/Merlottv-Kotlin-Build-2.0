@@ -8,6 +8,7 @@ import com.merlottv.kotlin.BuildConfig
 import com.merlottv.kotlin.data.local.BackupSourceEntry
 import com.merlottv.kotlin.data.local.EpgSourceEntry
 import com.merlottv.kotlin.data.local.PlaylistEntry
+import com.merlottv.kotlin.data.local.XtremeServerEntry
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.UserProfile
@@ -57,6 +58,8 @@ data class SettingsUiState(
     val isCheckingUpdate: Boolean = false,
     // Backup stream sources
     val backupSources: List<BackupSourceEntry> = emptyList(),
+    // Xtreme Backup servers
+    val xtremeServers: List<XtremeServerEntry> = emptyList(),
     // Profiles
     val profiles: List<UserProfile> = emptyList(),
     val activeProfileId: String = "default",
@@ -124,6 +127,7 @@ class SettingsViewModel @Inject constructor(
             val playlists = settingsDataStore.playlists.first()
             val customEpg = settingsDataStore.customEpgSources.first()
             val backupSources = settingsDataStore.backupSources.first()
+            val xtremeServers = settingsDataStore.xtremeServers.first()
             val bufferMs = settingsDataStore.bufferDurationMs.first()
             val bufferAutoBackup = settingsDataStore.bufferAutoBackupScan.first()
             val weatherAlertsOn = settingsDataStore.weatherAlertsEnabled.first()
@@ -143,6 +147,7 @@ class SettingsViewModel @Inject constructor(
                 customEpgSources = customEpg,
                 defaultEpgSources = defaultEpg,
                 backupSources = backupSources,
+                xtremeServers = xtremeServers,
                 bufferDurationMs = bufferMs,
                 bufferAutoBackupScan = bufferAutoBackup,
                 weatherAlertsEnabled = weatherAlertsOn,
@@ -452,6 +457,42 @@ class SettingsViewModel @Inject constructor(
                 current[index] = current[index].copy(enabled = !current[index].enabled)
                 settingsDataStore.setBackupSources(current)
                 _uiState.value = _uiState.value.copy(backupSources = current)
+                cloudSyncManager.notifySettingsChanged()
+            }
+        }
+    }
+
+    // ─── Xtreme Backup Servers ───
+    fun addXtremeServer(name: String, serverUrl: String, username: String, password: String) {
+        if (serverUrl.isBlank() || username.isBlank() || password.isBlank()) return
+        viewModelScope.launch {
+            val current = _uiState.value.xtremeServers.toMutableList()
+            current.add(XtremeServerEntry(name.ifBlank { "Server ${current.size + 1}" }, serverUrl, username, password))
+            settingsDataStore.setXtremeServers(current)
+            _uiState.value = _uiState.value.copy(xtremeServers = current)
+            cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    fun removeXtremeServer(index: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value.xtremeServers.toMutableList()
+            if (index in current.indices) {
+                current.removeAt(index)
+                settingsDataStore.setXtremeServers(current)
+                _uiState.value = _uiState.value.copy(xtremeServers = current)
+                cloudSyncManager.notifySettingsChanged()
+            }
+        }
+    }
+
+    fun toggleXtremeServer(index: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value.xtremeServers.toMutableList()
+            if (index in current.indices) {
+                current[index] = current[index].copy(enabled = !current[index].enabled)
+                settingsDataStore.setXtremeServers(current)
+                _uiState.value = _uiState.value.copy(xtremeServers = current)
                 cloudSyncManager.notifySettingsChanged()
             }
         }

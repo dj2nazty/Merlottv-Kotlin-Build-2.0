@@ -101,7 +101,8 @@ import java.util.Locale
 
 @Composable
 fun LiveTvScreen(
-    viewModel: LiveTvViewModel = hiltViewModel()
+    viewModel: LiveTvViewModel = hiltViewModel(),
+    onNavigateToHome: () -> Unit = {}
 ) {
     // Keep screen awake while Live TV is active; stop playback on navigation away
     val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
@@ -136,16 +137,23 @@ fun LiveTvScreen(
     }
 
     val uiState by viewModel.uiState.collectAsState()
+    var lastBackPressTime by remember { mutableStateOf(0L) }
 
     if (uiState.isFullscreen && uiState.selectedChannel != null) {
         FullscreenPlayer(
             viewModel = viewModel,
-            uiState = uiState
+            uiState = uiState,
+            onNavigateToHome = onNavigateToHome,
+            lastBackPressTime = lastBackPressTime,
+            onBackPressed = { lastBackPressTime = it }
         )
     } else {
         ChannelListView(
             viewModel = viewModel,
-            uiState = uiState
+            uiState = uiState,
+            onNavigateToHome = onNavigateToHome,
+            lastBackPressTime = lastBackPressTime,
+            onBackPressed = { lastBackPressTime = it }
         )
     }
 }
@@ -153,7 +161,10 @@ fun LiveTvScreen(
 @Composable
 private fun FullscreenPlayer(
     viewModel: LiveTvViewModel,
-    uiState: LiveTvUiState
+    uiState: LiveTvUiState,
+    onNavigateToHome: () -> Unit = {},
+    lastBackPressTime: Long = 0L,
+    onBackPressed: (Long) -> Unit = {}
 ) {
     val focusRequester = remember { FocusRequester() }
 
@@ -274,10 +285,16 @@ private fun FullscreenPlayer(
                                 true
                             }
                             Key.Back -> {
-                                if (uiState.showOverlay) {
-                                    viewModel.hideOverlay()
+                                val now = System.currentTimeMillis()
+                                if (now - lastBackPressTime < 1500L) {
+                                    onNavigateToHome()
                                 } else {
-                                    viewModel.exitFullscreen()
+                                    onBackPressed(now)
+                                    if (uiState.showOverlay) {
+                                        viewModel.hideOverlay()
+                                    } else {
+                                        viewModel.exitFullscreen()
+                                    }
                                 }
                                 true
                             }
@@ -1210,7 +1227,10 @@ private fun getQualityLabel(resolution: String): String {
 @Composable
 private fun ChannelListView(
     viewModel: LiveTvViewModel,
-    uiState: LiveTvUiState
+    uiState: LiveTvUiState,
+    onNavigateToHome: () -> Unit = {},
+    lastBackPressTime: Long = 0L,
+    onBackPressed: (Long) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val categoryFocusRequester = remember { FocusRequester() }
@@ -1513,6 +1533,14 @@ private fun ChannelListView(
                                 true
                             }
                             Key.DirectionRight, Key.Back -> {
+                                if (event.key == Key.Back) {
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastBackPressTime < 1500L) {
+                                        onNavigateToHome()
+                                        return@onPreviewKeyEvent true
+                                    }
+                                    onBackPressed(now)
+                                }
                                 // Go back to fullscreen (only if a channel is playing)
                                 if (uiState.selectedChannel != null) {
                                     viewModel.hideChannelList()

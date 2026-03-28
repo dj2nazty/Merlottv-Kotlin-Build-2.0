@@ -36,6 +36,20 @@ data class BackupSourceEntry(
     val enabled: Boolean = true
 )
 
+data class XtremeServerEntry(
+    val name: String,
+    val serverUrl: String,
+    val username: String,
+    val password: String,
+    val enabled: Boolean = true
+) {
+    /** Build full Xtream Codes M3U playlist URL */
+    fun buildM3uUrl(): String {
+        val base = serverUrl.trimEnd('/')
+        return "$base/get.php?username=$username&password=$password&type=m3u_plus"
+    }
+}
+
 class SettingsDataStore(private val context: Context) {
 
     companion object {
@@ -44,6 +58,7 @@ class SettingsDataStore(private val context: Context) {
         val EPG_URLS = stringPreferencesKey("epg_urls")
         val CUSTOM_EPG_SOURCES = stringPreferencesKey("custom_epg_sources")
         val BACKUP_SOURCES = stringPreferencesKey("backup_sources_json")
+        val XTREME_SERVERS = stringPreferencesKey("xtreme_servers_json")
         val LAST_WATCHED_CHANNEL_ID = stringPreferencesKey("last_watched_channel_id")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
@@ -89,6 +104,8 @@ class SettingsDataStore(private val context: Context) {
         val NEXT_EPISODE_THRESHOLD_PERCENT = intPreferencesKey("next_episode_threshold_percent") // 90-99
 
         const val DEFAULT_PLAYLIST = "https://x-api.uk/get.php?username=MetrlotBackup&password=2813308004&type=m3u_plus"
+        const val XTREME_BACKUP_PLAYLIST = "xtream://pianopride.com:8080/h7z2NejYf7/0859309752"
+        val XTREME_MIGRATION_DONE = booleanPreferencesKey("xtreme_backup_migration_done")
         const val DEFAULT_TORBOX_KEY = "50c74a49-a6bc-40e9-931e-1cee1943e87b"
     }
 
@@ -103,9 +120,38 @@ class SettingsDataStore(private val context: Context) {
         if (json != null) {
             parsePlaylistsJson(json)
         } else {
-            // Migrate from single URL
+            // First launch / migration — include Xtreme Backup by default
             val singleUrl = prefs[PLAYLIST_URL] ?: DEFAULT_PLAYLIST
-            listOf(PlaylistEntry("Merlot TV", singleUrl, true))
+            listOf(
+                PlaylistEntry("Merlot TV", singleUrl, true),
+                PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, true)
+            )
+        }
+    }
+
+    /** One-time migration: inject Xtreme Backup into existing saved playlists */
+    suspend fun migrateXtremeBackup() {
+        context.settingsDataStore.edit { prefs ->
+            if (prefs[XTREME_MIGRATION_DONE] == true) return@edit
+            val json = prefs[PLAYLISTS]
+            if (json != null) {
+                val list = parsePlaylistsJson(json)
+                if (list.none { it.url == XTREME_BACKUP_PLAYLIST }) {
+                    val merlot = list.firstOrNull()
+                    val rest = list.drop(1)
+                    val updated = listOfNotNull(merlot) + PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, true) + rest
+                    val jsonArray = JSONArray()
+                    updated.forEach { entry ->
+                        val obj = JSONObject()
+                        obj.put("name", entry.name)
+                        obj.put("url", entry.url)
+                        obj.put("enabled", entry.enabled)
+                        jsonArray.put(obj)
+                    }
+                    prefs[PLAYLISTS] = jsonArray.toString()
+                }
+            }
+            prefs[XTREME_MIGRATION_DONE] = true
         }
     }
 
@@ -205,6 +251,58 @@ class SettingsDataStore(private val context: Context) {
                 BackupSourceEntry(
                     name = obj.optString("name", "Backup ${i + 1}"),
                     url = obj.optString("url", ""),
+                    enabled = obj.optBoolean("enabled", true)
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // ─── Xtreme Backup Servers ───
+    val xtremeServers: Flow<List<XtremeServerEntry>> = context.settingsDataStore.data.map { prefs ->
+        val json = prefs[XTREME_SERVERS]
+        if (json != null) {
+            parseXtremeServersJson(json)
+        } else {
+            DEFAULT_XTREME_SERVERS
+        }
+    }
+
+    private val DEFAULT_XTREME_SERVERS = listOf(
+        XtremeServerEntry(
+            name = "PianoPride",
+            serverUrl = "http://pianopride.com:8080",
+            username = "h7z2NejYf7",
+            password = "0859309752",
+            enabled = true
+        )
+    )
+
+    suspend fun setXtremeServers(entries: List<XtremeServerEntry>) {
+        val jsonArray = JSONArray()
+        entries.forEach { entry ->
+            val obj = JSONObject()
+            obj.put("name", entry.name)
+            obj.put("serverUrl", entry.serverUrl)
+            obj.put("username", entry.username)
+            obj.put("password", entry.password)
+            obj.put("enabled", entry.enabled)
+            jsonArray.put(obj)
+        }
+        context.settingsDataStore.edit { it[XTREME_SERVERS] = jsonArray.toString() }
+    }
+
+    private fun parseXtremeServersJson(json: String): List<XtremeServerEntry> {
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                XtremeServerEntry(
+                    name = obj.optString("name", "Server ${i + 1}"),
+                    serverUrl = obj.optString("serverUrl", ""),
+                    username = obj.optString("username", ""),
+                    password = obj.optString("password", ""),
                     enabled = obj.optBoolean("enabled", true)
                 )
             }

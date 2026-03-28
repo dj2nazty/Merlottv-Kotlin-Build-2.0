@@ -97,7 +97,15 @@ fun MerlotNavHost(
                 }
             }
 
-            LiveTvScreen(viewModel = viewModel)
+            LiveTvScreen(
+                viewModel = viewModel,
+                onNavigateToHome = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Home.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            )
         }
 
         composable(Screen.TvGuide.route) {

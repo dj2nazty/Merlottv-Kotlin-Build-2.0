@@ -1,5 +1,6 @@
 package com.merlottv.kotlin.data.repository
 
+import android.util.Log
 import com.merlottv.kotlin.data.parser.M3uParser
 import com.merlottv.kotlin.domain.model.Channel
 import com.merlottv.kotlin.domain.model.ChannelGroup
@@ -14,6 +15,8 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -97,14 +100,18 @@ class ChannelRepositoryImpl @Inject constructor(
                 playlistUrls.map { url ->
                     async {
                         try {
-                            val request = Request.Builder().url(url).build()
-                            val response = playlistClient.newCall(request).execute()
-                            response.use { resp ->
-                                val body = resp.body
-                                if (body != null) {
-                                    m3uParser.parseStream(body.byteStream())
-                                } else {
-                                    emptyList()
+                            if (url.startsWith("xtream://")) {
+                                loadXtreamApiChannels(url)
+                            } else {
+                                val request = Request.Builder().url(url).build()
+                                val response = playlistClient.newCall(request).execute()
+                                response.use { resp ->
+                                    val body = resp.body
+                                    if (body != null) {
+                                        m3uParser.parseStream(body.byteStream())
+                                    } else {
+                                        emptyList()
+                                    }
                                 }
                             }
                         } catch (_: Exception) {
@@ -117,6 +124,122 @@ class ChannelRepositoryImpl @Inject constructor(
             _channels.value = deduplicated
             updateCache(playlistUrls, deduplicated)
             deduplicated
+        }
+    }
+
+    override suspend fun loadMultipleChannelsGrouped(playlists: List<Pair<String, String>>): List<Channel> {
+        val urls = playlists.map { it.second }
+        if (isCacheValid(urls)) {
+            _channels.value = cachedChannels
+            return cachedChannels
+        }
+
+        return withContext(boundedIo) {
+            val allChannels = supervisorScope {
+                playlists.map { (playlistName, url) ->
+                    async {
+                        try {
+                            val channels = if (url.startsWith("xtream://")) {
+                                loadXtreamApiChannels(url)
+                            } else {
+                                val request = Request.Builder().url(url).build()
+                                val response = playlistClient.newCall(request).execute()
+                                response.use { resp ->
+                                    val body = resp.body
+                                    if (body != null) m3uParser.parseStream(body.byteStream())
+                                    else emptyList()
+                                }
+                            }
+                            // Prefix group with playlist name for multi-source grouping
+                            if (playlists.size > 1) {
+                                channels.map { ch ->
+                                    ch.copy(group = "$playlistName: ${ch.group}")
+                                }
+                            } else {
+                                channels
+                            }
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                }.awaitAll().flatten()
+            }
+            val deduplicated = allChannels.distinctBy { it.streamUrl }
+            _channels.value = deduplicated
+            updateCache(urls, deduplicated)
+            deduplicated
+        }
+    }
+
+    /**
+     * Load channels from an Xtream Codes API server.
+     * URL format: xtream://host:port/username/password
+     * Fetches categories + live streams, builds Channel objects with proper stream URLs.
+     */
+    private fun loadXtreamApiChannels(xtreamUrl: String): List<Channel> {
+        // Parse: xtream://host:port/username/password
+        val parts = xtreamUrl.removePrefix("xtream://")
+        val segments = parts.split("/")
+        if (segments.size < 3) return emptyList()
+        val hostPort = segments[0] // e.g. pianopride.com:8080
+        val username = segments[1]
+        val password = segments[2]
+        val baseUrl = "http://$hostPort"
+
+        try {
+            // Fetch categories
+            val catRequest = Request.Builder()
+                .url("$baseUrl/player_api.php?username=$username&password=$password&action=get_live_categories")
+                .build()
+            val catMap = mutableMapOf<String, String>() // category_id → category_name
+            playlistClient.newCall(catRequest).execute().use { resp ->
+                val body = resp.body?.string() ?: return emptyList()
+                val catArray = JSONArray(body)
+                for (i in 0 until catArray.length()) {
+                    val cat = catArray.getJSONObject(i)
+                    catMap[cat.optString("category_id")] = cat.optString("category_name", "Uncategorized")
+                }
+            }
+
+            // Fetch live streams
+            val streamRequest = Request.Builder()
+                .url("$baseUrl/player_api.php?username=$username&password=$password&action=get_live_streams")
+                .build()
+            val channels = mutableListOf<Channel>()
+            playlistClient.newCall(streamRequest).execute().use { resp ->
+                val body = resp.body?.string() ?: return emptyList()
+                val streamArray = JSONArray(body)
+                for (i in 0 until streamArray.length()) {
+                    val stream = streamArray.getJSONObject(i)
+                    val streamId = stream.optInt("stream_id", 0)
+                    val name = stream.optString("name", "")
+                    val categoryId = stream.optString("category_id", "")
+                    val group = catMap[categoryId] ?: "Uncategorized"
+                    val logo = stream.optString("stream_icon", "")
+                    val epgId = stream.optString("epg_channel_id", "")
+
+                    // Build stream URL: http://host:port/live/username/password/stream_id.m3u8
+                    val streamUrl = "$baseUrl/live/$username/$password/$streamId.m3u8"
+
+                    channels.add(
+                        Channel(
+                            id = epgId.ifEmpty { "xtream_$streamId" },
+                            name = name,
+                            group = group,
+                            logoUrl = logo,
+                            streamUrl = streamUrl,
+                            epgId = epgId,
+                            number = i + 1
+                        )
+                    )
+                }
+            }
+
+            Log.d("ChannelRepo", "Xtream API loaded ${channels.size} channels from $hostPort")
+            return channels
+        } catch (e: Exception) {
+            Log.e("ChannelRepo", "Xtream API load failed for $hostPort", e)
+            return emptyList()
         }
     }
 

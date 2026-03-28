@@ -968,7 +968,7 @@ fun SettingsScreen(
                 Text("Add multiple playlists. All enabled playlists load in Live TV.", color = MerlotColors.TextMuted, fontSize = 11.sp)
                 Spacer(modifier = Modifier.height(8.dp))
                 uiState.playlists.forEachIndexed { index, playlist ->
-                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).dpadFocusable().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface2, RoundedCornerShape(8.dp)).dpadFocusable(onClick = { viewModel.togglePlaylist(index) }).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) { Text(playlist.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); Text(playlist.url, color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1) }
                         Switch(checked = playlist.enabled, onCheckedChange = { viewModel.togglePlaylist(index) }, colors = SwitchDefaults.colors(checkedThumbColor = MerlotColors.Accent, checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)), modifier = Modifier.height(24.dp))
                         IconButton(onClick = { viewModel.removePlaylist(index) }) { Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp)) }
@@ -1130,6 +1130,62 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     DpadButton(onClick = { viewModel.addBackupSource(backupName, backupUrl); backupName = ""; backupUrl = "" }, enabled = backupUrl.isNotBlank()) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                }
+            }
+        }
+
+        // ═══ Xtreme Backup Servers ═══ [Sources]
+        if (selectedTab == "Sources") {
+            SettingsSection(title = "Xtreme Backup Servers", icon = { Icon(Icons.Default.Refresh, null, tint = MerlotColors.Accent) }) {
+                Text("Add Xtream Codes servers. Browse their channels from the Xtreme Backup sidebar.", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                uiState.xtremeServers.forEachIndexed { index, server ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .dpadFocusable()
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(server.name, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("${server.serverUrl}  ·  ${server.username}", color = MerlotColors.TextMuted, fontSize = 9.sp, maxLines = 1)
+                        }
+                        Switch(
+                            checked = server.enabled,
+                            onCheckedChange = { viewModel.toggleXtremeServer(index) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = MerlotColors.Accent, checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)),
+                            modifier = Modifier.height(24.dp)
+                        )
+                        IconButton(onClick = { viewModel.removeXtremeServer(index) }) {
+                            Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                var xtremeName by remember { mutableStateOf("") }
+                var xtremeServer by remember { mutableStateOf("") }
+                var xtremeUser by remember { mutableStateOf("") }
+                var xtremePass by remember { mutableStateOf("") }
+                Column {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        DpadTextField(value = xtremeName, onValueChange = { xtremeName = it }, placeholder = "Server name", modifier = Modifier.weight(1f))
+                        DpadTextField(value = xtremeServer, onValueChange = { xtremeServer = it }, placeholder = "http://server.com:8080", modifier = Modifier.weight(1.5f))
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        DpadTextField(value = xtremeUser, onValueChange = { xtremeUser = it }, placeholder = "Username", modifier = Modifier.weight(1f))
+                        DpadTextField(value = xtremePass, onValueChange = { xtremePass = it }, placeholder = "Password", modifier = Modifier.weight(1f))
+                        DpadButton(
+                            onClick = {
+                                viewModel.addXtremeServer(xtremeName, xtremeServer, xtremeUser, xtremePass)
+                                xtremeName = ""; xtremeServer = ""; xtremeUser = ""; xtremePass = ""
+                            },
+                            enabled = xtremeServer.isNotBlank() && xtremeUser.isNotBlank() && xtremePass.isNotBlank()
+                        ) { Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+                    }
                 }
             }
         }

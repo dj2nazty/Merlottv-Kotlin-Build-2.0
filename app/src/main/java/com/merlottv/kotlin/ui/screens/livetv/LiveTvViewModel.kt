@@ -157,6 +157,9 @@ class LiveTvViewModel @Inject constructor(
     // Track playlist names for source display
     private var playlistNames: Map<String, String> = emptyMap() // url → name
 
+    // Track which playlist URLs were last loaded so we can detect config changes
+    @Volatile private var lastLoadedPlaylistKey: String = ""
+
     // Cached EPG lookup map for search — maps channel name/id (lowercase) to EpgChannel
     private var epgLookupMap: Map<String, EpgChannel> = emptyMap()
 
@@ -875,22 +878,29 @@ class LiveTvViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
 
+            // One-time migration: inject Xtreme Backup playlist if not present
+            settingsDataStore.migrateXtremeBackup()
+
             // Launch EPG loading concurrently
             val epgJob = launch { loadEpgInternal() }
 
             try {
                 val playlists = settingsDataStore.playlists.first()
                 val enabledPlaylists = playlists.filter { it.enabled }
-                val enabledUrls = enabledPlaylists.map { it.url }
+
+                // Record the loaded playlist key so we can detect changes later
+                lastLoadedPlaylistKey = enabledPlaylists.map { it.url }.sorted().joinToString("|")
 
                 // Build playlist name map for source tracking
                 playlistNames = enabledPlaylists.associate { it.url to it.name }
 
                 val channels = withContext(Dispatchers.IO) {
-                    if (enabledUrls.size == 1) {
-                        channelRepository.loadChannels(enabledUrls.first())
-                    } else if (enabledUrls.isNotEmpty()) {
-                        channelRepository.loadMultipleChannels(enabledUrls)
+                    if (enabledPlaylists.size == 1) {
+                        channelRepository.loadChannels(enabledPlaylists.first().url)
+                    } else if (enabledPlaylists.isNotEmpty()) {
+                        channelRepository.loadMultipleChannelsGrouped(
+                            enabledPlaylists.map { it.name to it.url }
+                        )
                     } else {
                         emptyList()
                     }
@@ -1647,6 +1657,22 @@ class LiveTvViewModel @Inject constructor(
                 player.play()
             }
         } catch (_: Exception) {}
+        // Check if playlist config changed while we were away (e.g. user toggled a playlist)
+        refreshIfPlaylistsChanged()
+    }
+
+    private fun refreshIfPlaylistsChanged() {
+        viewModelScope.launch {
+            try {
+                val playlists = settingsDataStore.playlists.first()
+                val enabledPlaylists = playlists.filter { it.enabled }
+                val currentKey = enabledPlaylists.map { it.url }.sorted().joinToString("|")
+                if (currentKey != lastLoadedPlaylistKey) {
+                    // Playlist config changed — reload channels
+                    loadChannelsAndEpgParallel()
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     fun toggleFavorite(channelId: String) {
