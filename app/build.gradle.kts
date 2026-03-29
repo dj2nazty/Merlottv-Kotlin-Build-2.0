@@ -14,8 +14,8 @@ android {
         applicationId = "com.merlottv.kotlin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 114
-        versionName = "2.86"
+        versionCode = 115
+        versionName = "2.87"
 
         // TMDB API key for trailer discovery (free tier — get yours at themoviedb.org/settings/api)
         buildConfigField("String", "TMDB_API_KEY", "\"5f35ed9740b3aca008e2b9349f5f6393\"")
@@ -25,6 +25,10 @@ android {
 
         vectorDrawables {
             useSupportLibrary = true
+        }
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86")
         }
 
     }

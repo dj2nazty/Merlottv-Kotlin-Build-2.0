@@ -514,11 +514,21 @@ private fun QuickMenuOverlay(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            // Stream source + player engine indicator
+            // Stream source + player engine + format indicator
+            val streamFormat = when {
+                currentChannel?.streamUrl?.endsWith(".ts") == true -> "MPEG-TS"
+                currentChannel?.streamUrl?.endsWith(".m3u8") == true -> "HLS"
+                currentChannel?.streamUrl?.contains(".ts?") == true -> "MPEG-TS"
+                currentChannel?.streamUrl?.contains(".m3u8?") == true -> "HLS"
+                currentChannel?.streamUrl?.contains("output=ts") == true -> "MPEG-TS"
+                currentChannel?.streamUrl?.contains("output=m3u8") == true -> "HLS"
+                else -> null
+            }
             val sourceText = buildString {
                 if (uiState.streamSource.isNotEmpty()) append("Source: ${uiState.streamSource}")
                 if (isNotEmpty()) append(" • ")
                 append("Engine: ${if (uiState.isUsingVlc) "VLC" else "ExoPlayer"}")
+                if (streamFormat != null) append(" • Format: $streamFormat")
             }
             Text(
                 text = sourceText,

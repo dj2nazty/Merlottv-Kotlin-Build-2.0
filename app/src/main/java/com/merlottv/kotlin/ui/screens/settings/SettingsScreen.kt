@@ -864,6 +864,63 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ Stream Format (HLS vs MPEG-TS) ═══ [Playback]
+        if (selectedTab == "Playback") {
+            SettingsSection(
+                title = "Stream Format",
+                icon = { Text("\uD83D\uDCE1", fontSize = 18.sp) }
+            ) {
+                Text(
+                    "Switch Xtream Codes streams between HLS and MPEG-TS. MPEG-TS can reduce buffering on some providers; HLS adapts better to variable connections.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val formats = listOf("m3u8" to "HLS (m3u8)", "ts" to "MPEG-TS (ts)")
+                formats.forEach { (format, label) ->
+                    val isSelected = uiState.xtreamOutputFormat == format
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isSelected) MerlotColors.Accent.copy(alpha = 0.15f) else MerlotColors.Surface2,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DpadButton(
+                            onClick = { viewModel.setXtreamOutputFormat(format) }
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (isSelected) "●" else "○",
+                                    color = if (isSelected) MerlotColors.Accent else MerlotColors.TextMuted,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    label,
+                                    color = if (isSelected) MerlotColors.Accent else MerlotColors.TextPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Changes take effect on next channel load. Current: ${if (uiState.xtreamOutputFormat == "ts") "MPEG-TS" else "HLS"}",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 9.sp
+                )
+            }
+        }
+
         // ═══ Weather Alerts ═══ [General]
         if (selectedTab == "General") {
             SettingsSection(

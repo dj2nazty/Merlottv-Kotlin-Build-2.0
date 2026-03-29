@@ -44,9 +44,9 @@ data class XtremeServerEntry(
     val enabled: Boolean = true
 ) {
     /** Build full Xtream Codes M3U playlist URL */
-    fun buildM3uUrl(): String {
+    fun buildM3uUrl(outputFormat: String = "m3u8"): String {
         val base = serverUrl.trimEnd('/')
-        return "$base/get.php?username=$username&password=$password&type=m3u_plus"
+        return "$base/get.php?username=$username&password=$password&type=m3u_plus&output=$outputFormat"
     }
 }
 
@@ -111,6 +111,9 @@ class SettingsDataStore(private val context: Context) {
         // Bitrate checker — show video/audio bitrate info in Live TV Quick Menu
         val BITRATE_CHECKER_ENABLED = booleanPreferencesKey("bitrate_checker_enabled")
         val NEXT_EPISODE_THRESHOLD_PERCENT = intPreferencesKey("next_episode_threshold_percent") // 90-99
+
+        // Xtream Codes stream output format — "m3u8" (HLS) or "ts" (MPEG-TS)
+        val XTREAM_OUTPUT_FORMAT = stringPreferencesKey("xtream_output_format")
 
         const val DEFAULT_PLAYLIST = "https://x-api.uk/get.php?username=MetrlotBackup&password=2813308004&type=m3u_plus"
         const val XTREME_BACKUP_PLAYLIST = "xtream://pianopride.com:8080/h7z2NejYf7/0859309752"
@@ -478,6 +481,15 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setNextEpisodeThresholdPercent(percent: Int) {
         context.settingsDataStore.edit { it[NEXT_EPISODE_THRESHOLD_PERCENT] = percent.coerceIn(85, 99) }
+    }
+
+    // ─── Xtream Output Format (HLS vs MPEG-TS) ───
+    val xtreamOutputFormat: Flow<String> = context.settingsDataStore.data.map { prefs ->
+        prefs[XTREAM_OUTPUT_FORMAT] ?: "m3u8" // Default to HLS
+    }
+
+    suspend fun setXtreamOutputFormat(format: String) {
+        context.settingsDataStore.edit { it[XTREAM_OUTPUT_FORMAT] = format }
     }
 
     // ─── Bitrate Checker Toggle ───

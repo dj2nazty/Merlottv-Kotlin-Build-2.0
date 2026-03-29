@@ -18,13 +18,16 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import com.merlottv.kotlin.data.local.SettingsDataStore
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class ChannelRepositoryImpl @Inject constructor(
     private val m3uParser: M3uParser,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val settingsDataStore: SettingsDataStore
 ) : ChannelRepository {
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
@@ -45,17 +48,31 @@ class ChannelRepositoryImpl @Inject constructor(
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-    private fun isCacheValid(urls: List<String>): Boolean {
-        val key = urls.sorted().joinToString("|")
+    private suspend fun isCacheValid(urls: List<String>): Boolean {
+        val fmt = try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" }
+        val key = urls.sorted().joinToString("|") + "|fmt=$fmt"
         return cachedChannels.isNotEmpty() &&
                 key == cacheKey &&
                 (System.currentTimeMillis() - cacheTimestamp) < cacheDuration
     }
 
-    private fun updateCache(urls: List<String>, channels: List<Channel>) {
+    private suspend fun updateCache(urls: List<String>, channels: List<Channel>) {
+        val fmt = try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" }
         cachedChannels = channels
-        cacheKey = urls.sorted().joinToString("|")
+        cacheKey = urls.sorted().joinToString("|") + "|fmt=$fmt"
         cacheTimestamp = System.currentTimeMillis()
+    }
+
+    /**
+     * Rewrite Xtream Codes M3U URLs to include the user's preferred output format.
+     * URLs containing "get.php" and "type=m3u_plus" are Xtream Codes playlists —
+     * appending &output=ts tells the server to return MPEG-TS stream URLs instead of HLS.
+     */
+    private fun applyOutputFormat(url: String, format: String): String {
+        if (!url.contains("get.php") || !url.contains("type=m3u_plus")) return url
+        // Remove existing &output= param if present, then append the configured one
+        val cleaned = url.replace(Regex("[&?]output=[^&]*"), "")
+        return "$cleaned&output=$format"
     }
 
     override suspend fun loadChannels(playlistUrl: String): List<Channel> {
@@ -65,16 +82,23 @@ class ChannelRepositoryImpl @Inject constructor(
             return cachedChannels
         }
 
+        val outputFormat = try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" }
+
         return withContext(Dispatchers.IO) {
             try {
-                val request = Request.Builder().url(playlistUrl).build()
-                val response = playlistClient.newCall(request).execute()
-                val channels = response.use { resp ->
-                    val body = resp.body
-                    if (body != null) {
-                        m3uParser.parseStream(body.byteStream())
-                    } else {
-                        emptyList()
+                val channels = if (playlistUrl.startsWith("xtream://")) {
+                    loadXtreamApiChannels(playlistUrl, outputFormat)
+                } else {
+                    val finalUrl = applyOutputFormat(playlistUrl, outputFormat)
+                    val request = Request.Builder().url(finalUrl).build()
+                    val response = playlistClient.newCall(request).execute()
+                    response.use { resp ->
+                        val body = resp.body
+                        if (body != null) {
+                            m3uParser.parseStream(body.byteStream())
+                        } else {
+                            emptyList()
+                        }
                     }
                 }
                 _channels.value = channels
@@ -95,15 +119,18 @@ class ChannelRepositoryImpl @Inject constructor(
             return cachedChannels
         }
 
+        val outputFormat = try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" }
+
         return withContext(boundedIo) {
             val allChannels = supervisorScope {
                 playlistUrls.map { url ->
                     async {
                         try {
                             if (url.startsWith("xtream://")) {
-                                loadXtreamApiChannels(url)
+                                loadXtreamApiChannels(url, outputFormat)
                             } else {
-                                val request = Request.Builder().url(url).build()
+                                val finalUrl = applyOutputFormat(url, outputFormat)
+                                val request = Request.Builder().url(finalUrl).build()
                                 val response = playlistClient.newCall(request).execute()
                                 response.use { resp ->
                                     val body = resp.body
@@ -134,15 +161,18 @@ class ChannelRepositoryImpl @Inject constructor(
             return cachedChannels
         }
 
+        val outputFormat = try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" }
+
         return withContext(boundedIo) {
             val allChannels = supervisorScope {
                 playlists.map { (playlistName, url) ->
                     async {
                         try {
                             val channels = if (url.startsWith("xtream://")) {
-                                loadXtreamApiChannels(url)
+                                loadXtreamApiChannels(url, outputFormat)
                             } else {
-                                val request = Request.Builder().url(url).build()
+                                val finalUrl = applyOutputFormat(url, outputFormat)
+                                val request = Request.Builder().url(finalUrl).build()
                                 val response = playlistClient.newCall(request).execute()
                                 response.use { resp ->
                                     val body = resp.body
@@ -176,7 +206,7 @@ class ChannelRepositoryImpl @Inject constructor(
      * URL format: xtream://host:port/username/password
      * Fetches categories + live streams, builds Channel objects with proper stream URLs.
      */
-    private fun loadXtreamApiChannels(xtreamUrl: String): List<Channel> {
+    private fun loadXtreamApiChannels(xtreamUrl: String, outputFormat: String = "m3u8"): List<Channel> {
         // Parse: xtream://host:port/username/password
         val parts = xtreamUrl.removePrefix("xtream://")
         val segments = parts.split("/")
@@ -218,8 +248,8 @@ class ChannelRepositoryImpl @Inject constructor(
                     val logo = stream.optString("stream_icon", "")
                     val epgId = stream.optString("epg_channel_id", "")
 
-                    // Build stream URL: http://host:port/live/username/password/stream_id.m3u8
-                    val streamUrl = "$baseUrl/live/$username/$password/$streamId.m3u8"
+                    // Build stream URL using configured format (HLS .m3u8 or MPEG-TS .ts)
+                    val streamUrl = "$baseUrl/live/$username/$password/$streamId.$outputFormat"
 
                     channels.add(
                         Channel(

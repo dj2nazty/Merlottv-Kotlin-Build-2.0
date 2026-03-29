@@ -101,11 +101,14 @@ class XtremeBackupViewModel @Inject constructor(
     }
 
     fun refresh() {
-        val index = _uiState.value.selectedServerIndex
-        val servers = _uiState.value.servers
-        if (index in servers.indices) {
-            channelCache.remove(servers[index].buildM3uUrl())
-            loadChannelsForServer(index)
+        viewModelScope.launch {
+            val index = _uiState.value.selectedServerIndex
+            val servers = _uiState.value.servers
+            val fmt = try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" }
+            if (index in servers.indices) {
+                channelCache.remove(servers[index].buildM3uUrl(fmt))
+                loadChannelsForServer(index)
+            }
         }
     }
 
@@ -131,7 +134,8 @@ class XtremeBackupViewModel @Inject constructor(
         val servers = _uiState.value.servers
         if (index !in servers.indices) return
         val server = servers[index]
-        val url = server.buildM3uUrl()
+        val fmt = kotlinx.coroutines.runBlocking { try { settingsDataStore.xtreamOutputFormat.first() } catch (_: Exception) { "m3u8" } }
+        val url = server.buildM3uUrl(fmt)
 
         // Check cache
         val cached = channelCache[url]

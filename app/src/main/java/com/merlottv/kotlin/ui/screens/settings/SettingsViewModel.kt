@@ -84,6 +84,8 @@ data class SettingsUiState(
     // Next episode auto-play
     val nextEpisodeAutoPlay: Boolean = true,
     val nextEpisodeThresholdPercent: Int = 95,
+    // Xtream stream format
+    val xtreamOutputFormat: String = "m3u8", // "m3u8" (HLS) or "ts" (MPEG-TS)
     // Bitrate checker in Live TV Quick Menu
     val bitrateCheckerEnabled: Boolean = false,
     // Disabled addons (URLs)
@@ -149,6 +151,7 @@ class SettingsViewModel @Inject constructor(
             val nextEpAutoPlay = settingsDataStore.nextEpisodeAutoPlay.first()
             val nextEpThreshold = settingsDataStore.nextEpisodeThresholdPercent.first()
             val bitrateCheckerOn = settingsDataStore.bitrateCheckerEnabled.first()
+            val xtreamFormat = settingsDataStore.xtreamOutputFormat.first()
             val disabledAddonUrls = settingsDataStore.disabledAddons.first()
             val customYtChannels = settingsDataStore.customYouTubeChannels.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
@@ -170,6 +173,7 @@ class SettingsViewModel @Inject constructor(
                 nextEpisodeAutoPlay = nextEpAutoPlay,
                 nextEpisodeThresholdPercent = nextEpThreshold,
                 bitrateCheckerEnabled = bitrateCheckerOn,
+                xtreamOutputFormat = xtreamFormat,
                 disabledAddons = disabledAddonUrls,
                 customYouTubeChannels = customYtChannels
             )
@@ -711,6 +715,15 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(frameRateMatching = mode)
         viewModelScope.launch {
             settingsDataStore.setFrameRateMatching(mode)
+            cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    // ─── Xtream Output Format ───
+    fun setXtreamOutputFormat(format: String) {
+        _uiState.value = _uiState.value.copy(xtreamOutputFormat = format)
+        viewModelScope.launch {
+            settingsDataStore.setXtreamOutputFormat(format)
             cloudSyncManager.notifySettingsChanged()
         }
     }
