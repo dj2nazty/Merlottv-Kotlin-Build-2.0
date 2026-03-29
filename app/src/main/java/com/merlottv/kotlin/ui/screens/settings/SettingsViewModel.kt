@@ -6,14 +6,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.merlottv.kotlin.BuildConfig
 import com.merlottv.kotlin.data.local.BackupSourceEntry
+import com.merlottv.kotlin.data.local.CustomYouTubeChannelEntry
 import com.merlottv.kotlin.data.local.EpgSourceEntry
 import com.merlottv.kotlin.data.local.PlaylistEntry
 import com.merlottv.kotlin.data.local.XtremeServerEntry
 import com.merlottv.kotlin.data.local.ProfileDataStore
 import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.data.local.UserProfile
+import com.merlottv.kotlin.data.repository.YouTubeRepository
 import com.merlottv.kotlin.domain.model.Addon
 import com.merlottv.kotlin.domain.model.DefaultData
+import com.merlottv.kotlin.domain.model.YouTubeChannel
 import com.merlottv.kotlin.data.sync.CloudSyncManager
 import com.merlottv.kotlin.domain.repository.AddonRepository
 import com.merlottv.kotlin.domain.repository.ChannelRepository
@@ -56,6 +59,10 @@ data class SettingsUiState(
     val latestVersion: String = "",
     val updateUrl: String = "",
     val isCheckingUpdate: Boolean = false,
+    // In-app APK download
+    val isDownloadingUpdate: Boolean = false,
+    val downloadProgress: Int = 0, // 0-100
+    val downloadError: String? = null,
     // Backup stream sources
     val backupSources: List<BackupSourceEntry> = emptyList(),
     // Xtreme Backup servers
@@ -91,7 +98,13 @@ data class SettingsUiState(
     val vodCategoryItems: List<CategoryItem> = emptyList(),
     val isLoadingVodCategories: Boolean = false,
     val activeCategoryTab: String = "Home",
-    val reorderMode: Boolean = false
+    val reorderMode: Boolean = false,
+    // Custom YouTube Channels
+    val customYouTubeChannels: List<CustomYouTubeChannelEntry> = emptyList(),
+    val youtubeHandleInput: String = "",
+    val youtubeSearching: Boolean = false,
+    val youtubeSearchResult: YouTubeChannel? = null,
+    val youtubeSearchError: String? = null
 )
 
 data class CategoryItem(
@@ -107,7 +120,8 @@ class SettingsViewModel @Inject constructor(
     private val addonRepository: AddonRepository,
     private val profileDataStore: ProfileDataStore,
     private val channelRepository: ChannelRepository,
-    private val cloudSyncManager: CloudSyncManager
+    private val cloudSyncManager: CloudSyncManager,
+    private val youtubeRepository: YouTubeRepository
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -136,6 +150,7 @@ class SettingsViewModel @Inject constructor(
             val nextEpThreshold = settingsDataStore.nextEpisodeThresholdPercent.first()
             val bitrateCheckerOn = settingsDataStore.bitrateCheckerEnabled.first()
             val disabledAddonUrls = settingsDataStore.disabledAddons.first()
+            val customYtChannels = settingsDataStore.customYouTubeChannels.first()
             val defaultEpg = DefaultData.EPG_SOURCES.map {
                 EpgSourceEntry(it.name, it.url, isDefault = true, enabled = true)
             }
@@ -155,7 +170,8 @@ class SettingsViewModel @Inject constructor(
                 nextEpisodeAutoPlay = nextEpAutoPlay,
                 nextEpisodeThresholdPercent = nextEpThreshold,
                 bitrateCheckerEnabled = bitrateCheckerOn,
-                disabledAddons = disabledAddonUrls
+                disabledAddons = disabledAddonUrls,
+                customYouTubeChannels = customYtChannels
             )
         }
     }
@@ -370,6 +386,75 @@ class SettingsViewModel @Inject constructor(
             }
         } catch (_: Exception) {}
         return false
+    }
+
+    // ─── In-App APK Download & Install ───
+    fun downloadUpdate() {
+        val url = _uiState.value.updateUrl
+        if (url.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isDownloadingUpdate = true,
+                downloadProgress = 0,
+                downloadError = null
+            )
+            try {
+                val apkFile = withContext(Dispatchers.IO) {
+                    val client = OkHttpClient.Builder()
+                        .connectTimeout(30, TimeUnit.SECONDS)
+                        .readTimeout(60, TimeUnit.SECONDS)
+                        .followRedirects(true)
+                        .build()
+                    val request = Request.Builder().url(url).build()
+                    val response = client.newCall(request).execute()
+                    if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
+
+                    val body = response.body ?: throw Exception("Empty response")
+                    val contentLength = body.contentLength()
+                    val cacheDir = getApplication<Application>().cacheDir
+                    val apkFile = java.io.File(cacheDir, "merlottv_update.apk")
+
+                    apkFile.outputStream().use { output ->
+                        body.byteStream().use { input ->
+                            val buffer = ByteArray(8192)
+                            var bytesRead: Long = 0
+                            var read: Int
+                            while (input.read(buffer).also { read = it } != -1) {
+                                output.write(buffer, 0, read)
+                                bytesRead += read
+                                if (contentLength > 0) {
+                                    val progress = (bytesRead * 100 / contentLength).toInt()
+                                    _uiState.value = _uiState.value.copy(downloadProgress = progress)
+                                }
+                            }
+                        }
+                    }
+                    apkFile
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    isDownloadingUpdate = false,
+                    downloadProgress = 100
+                )
+
+                // Trigger install via FileProvider
+                val context = getApplication<Application>()
+                val authority = "${context.packageName}.fileprovider"
+                val apkUri = androidx.core.content.FileProvider.getUriForFile(context, authority, apkFile)
+                val installIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(installIntent)
+
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isDownloadingUpdate = false,
+                    downloadError = e.message ?: "Download failed"
+                )
+            }
+        }
     }
 
     // ─── Release Notes ───
@@ -962,6 +1047,105 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.setVodHiddenCategories(emptySet())
             loadVodCategories()
             cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    // ─── Custom YouTube Channels ───
+    fun onYouTubeHandleInputChanged(input: String) {
+        _uiState.value = _uiState.value.copy(youtubeHandleInput = input)
+    }
+
+    fun searchYouTubeChannel() {
+        val handle = _uiState.value.youtubeHandleInput.trim()
+        if (handle.isBlank()) return
+        _uiState.value = _uiState.value.copy(
+            youtubeSearching = true,
+            youtubeSearchResult = null,
+            youtubeSearchError = null
+        )
+        viewModelScope.launch {
+            try {
+                val channel = youtubeRepository.resolveChannelByHandle(handle)
+                if (channel != null) {
+                    _uiState.value = _uiState.value.copy(
+                        youtubeSearching = false,
+                        youtubeSearchResult = channel
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        youtubeSearching = false,
+                        youtubeSearchError = "Channel not found for \"$handle\""
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    youtubeSearching = false,
+                    youtubeSearchError = "Search failed: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun confirmAddYouTubeChannel() {
+        val result = _uiState.value.youtubeSearchResult ?: return
+        viewModelScope.launch {
+            val current = _uiState.value.customYouTubeChannels.toMutableList()
+            // Avoid duplicates
+            if (current.any { it.channelId == result.channelId }) {
+                _uiState.value = _uiState.value.copy(
+                    youtubeSearchResult = null,
+                    youtubeHandleInput = "",
+                    youtubeSearchError = "${result.channelName} is already added"
+                )
+                return@launch
+            }
+            current.add(
+                CustomYouTubeChannelEntry(
+                    channelId = result.channelId,
+                    channelName = result.channelName,
+                    handle = result.handle,
+                    avatarUrl = result.avatarUrl
+                )
+            )
+            settingsDataStore.setCustomYouTubeChannels(current)
+            youtubeRepository.invalidateCache()
+            _uiState.value = _uiState.value.copy(
+                customYouTubeChannels = current,
+                youtubeSearchResult = null,
+                youtubeHandleInput = "",
+                youtubeSearchError = null
+            )
+        }
+    }
+
+    fun dismissYouTubeSearch() {
+        _uiState.value = _uiState.value.copy(
+            youtubeSearchResult = null,
+            youtubeSearchError = null
+        )
+    }
+
+    fun removeCustomYouTubeChannel(index: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value.customYouTubeChannels.toMutableList()
+            if (index in current.indices) {
+                current.removeAt(index)
+                settingsDataStore.setCustomYouTubeChannels(current)
+                youtubeRepository.invalidateCache()
+                _uiState.value = _uiState.value.copy(customYouTubeChannels = current)
+            }
+        }
+    }
+
+    fun toggleCustomYouTubeChannel(index: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value.customYouTubeChannels.toMutableList()
+            if (index in current.indices) {
+                current[index] = current[index].copy(enabled = !current[index].enabled)
+                settingsDataStore.setCustomYouTubeChannels(current)
+                youtubeRepository.invalidateCache()
+                _uiState.value = _uiState.value.copy(customYouTubeChannels = current)
+            }
         }
     }
 }

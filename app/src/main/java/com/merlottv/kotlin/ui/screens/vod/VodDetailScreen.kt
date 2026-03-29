@@ -88,7 +88,8 @@ fun VodDetailScreen(
     type: String,
     id: String,
     onBack: () -> Unit,
-    onPlay: (streamUrl: String, title: String, contentId: String, poster: String, contentType: String) -> Unit,
+    onPlay: (streamUrl: String, title: String, contentId: String, poster: String, contentType: String,
+             nextEpId: String, nextEpSeason: String, nextEpEpisode: String, nextEpTitle: String, nextEpThumbnail: String) -> Unit,
     onNavigateToDetail: ((String, String) -> Unit)? = null,
     onNavigateToActor: ((Int, String) -> Unit)? = null,
     viewModel: VodDetailViewModel = hiltViewModel()
@@ -109,12 +110,48 @@ fun VodDetailScreen(
             val meta = uiState.meta
             val episode = uiState.selectedEpisode
             val contentId = if (episode != null) episode.id else (meta?.id ?: id)
+
+            // Determine next episode info for auto-play chaining
+            var nextEpId = ""
+            var nextEpSeason = ""
+            var nextEpEpisode = ""
+            var nextEpTitle = ""
+            var nextEpThumbnail = ""
+            if (episode != null && type == "series" && meta != null) {
+                val allVideos = meta.videos
+                val currentIndex = allVideos.indexOfFirst { it.id == episode.id }
+                if (currentIndex >= 0 && currentIndex < allVideos.size - 1) {
+                    // Next episode is right after in the full video list
+                    val nextEp = allVideos[currentIndex + 1]
+                    nextEpId = nextEp.id
+                    nextEpSeason = nextEp.season.toString()
+                    nextEpEpisode = nextEp.episode.toString()
+                    nextEpTitle = nextEp.title
+                    nextEpThumbnail = nextEp.thumbnail
+                } else if (currentIndex >= 0) {
+                    // Check if there's a next season
+                    val currentSeasonEps = allVideos.filter { it.season == episode.season }
+                    val isLastInSeason = currentSeasonEps.lastOrNull()?.id == episode.id
+                    if (isLastInSeason) {
+                        val nextSeasonEp = allVideos.firstOrNull { it.season == episode.season + 1 }
+                        if (nextSeasonEp != null) {
+                            nextEpId = nextSeasonEp.id
+                            nextEpSeason = nextSeasonEp.season.toString()
+                            nextEpEpisode = nextSeasonEp.episode.toString()
+                            nextEpTitle = nextSeasonEp.title
+                            nextEpThumbnail = nextSeasonEp.thumbnail
+                        }
+                    }
+                }
+            }
+
             onPlay(
                 uiState.selectedStreamUrl ?: return@LaunchedEffect,
                 uiState.selectedStreamTitle ?: "",
                 contentId,
                 meta?.poster ?: "",
-                type
+                type,
+                nextEpId, nextEpSeason, nextEpEpisode, nextEpTitle, nextEpThumbnail
             )
             viewModel.clearPlayback()
         }

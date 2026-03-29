@@ -102,6 +102,12 @@ interface PlayerSyncEntryPoint {
 
 private val FocusedGrey = Color(0xFF666666)
 
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface PlayerAddonEntryPoint {
+    fun addonRepository(): com.merlottv.kotlin.domain.repository.AddonRepository
+}
+
 @Composable
 fun PlayerScreen(
     streamUrl: String,
@@ -109,6 +115,11 @@ fun PlayerScreen(
     contentId: String = "",
     poster: String = "",
     contentType: String = "movie",
+    nextEpId: String = "",
+    nextEpSeason: Int = 0,
+    nextEpEpisode: Int = 0,
+    nextEpTitle: String = "",
+    nextEpThumbnail: String = "",
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -126,6 +137,7 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(true) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
+    var currentTitle by remember { mutableStateOf(title) }
 
     // Intro video overlay — shown until the stream is actually ready to play
     var playerReady by remember { mutableStateOf(false) }
@@ -154,6 +166,19 @@ fun PlayerScreen(
     var nextEpisodeAutoPlayEnabled by remember { mutableStateOf(true) }
     var nextEpisodeThreshold by remember { mutableStateOf(95) }
 
+    // Populate next episode info from nav args
+    LaunchedEffect(nextEpId) {
+        if (nextEpId.isNotEmpty()) {
+            nextEpisodeInfo = NextEpisodeInfo(
+                contentId = nextEpId,
+                season = nextEpSeason,
+                episode = nextEpEpisode,
+                title = nextEpTitle,
+                thumbnail = nextEpThumbnail.ifEmpty { null }
+            )
+        }
+    }
+
     // Skip intro state
     var skipIntervals by remember { mutableStateOf<List<SkipInterval>>(emptyList()) }
     var activeSkipInterval by remember { mutableStateOf<SkipInterval?>(null) }
@@ -169,11 +194,24 @@ fun PlayerScreen(
     val syncEntryPoint = remember {
         try { EntryPointAccessors.fromApplication(context.applicationContext, PlayerSyncEntryPoint::class.java) } catch (_: Exception) { null }
     }
+    val addonEntryPoint = remember {
+        try { EntryPointAccessors.fromApplication(context.applicationContext, PlayerAddonEntryPoint::class.java) } catch (_: Exception) { null }
+    }
     val subtitleRepo = remember { SubtitleRepository(
         okhttp3.OkHttpClient.Builder().build(),
         com.squareup.moshi.Moshi.Builder().build()
     ) }
     val skipIntroRepo = remember { SkipIntroRepository(context.applicationContext) }
+
+    // Read next episode auto-play settings
+    LaunchedEffect(Unit) {
+        try {
+            val enabled = settingsStore?.nextEpisodeAutoPlay?.first() ?: true
+            val threshold = settingsStore?.nextEpisodeThresholdPercent?.first() ?: 95
+            nextEpisodeAutoPlayEnabled = enabled
+            nextEpisodeThreshold = threshold
+        } catch (_: Exception) {}
+    }
 
     // Auto frame rate matching — detect video fps and switch display refresh rate
     val frameRateMode = remember { mutableStateOf("off") }
@@ -332,12 +370,15 @@ fun PlayerScreen(
             val seriesId = parts.getOrNull(0) ?: contentId
             val season = parts.getOrNull(1)?.toIntOrNull() ?: 1
             val episode = parts.getOrNull(2)?.toIntOrNull() ?: 1
-            skipIntervals = skipIntroRepo.getSkipIntervals(
+            val intervals = skipIntroRepo.getSkipIntervals(
                 seriesId = seriesId,
                 season = season,
                 episode = episode,
                 totalDurationMs = totalDuration
             )
+            // Filter out intervals whose window has already passed
+            val pos = try { player.currentPosition } catch (_: Exception) { 0L }
+            skipIntervals = intervals.filter { it.endMs > pos }
         }
     }
 
@@ -377,8 +418,8 @@ fun PlayerScreen(
                             showNextEpisode = true
                         }
                     }
-                    // Check skip intro intervals
-                    if (skipIntervals.isNotEmpty()) {
+                    // Check skip intro intervals (don't show if Next Episode overlay is active)
+                    if (skipIntervals.isNotEmpty() && !showNextEpisode) {
                         val matchingInterval = skipIntervals.firstOrNull { interval ->
                             currentPosition in interval.startMs..interval.endMs &&
                                 interval.type !in dismissedSkipTypes
@@ -390,6 +431,10 @@ fun PlayerScreen(
                             showSkipButton = false
                             activeSkipInterval = null
                         }
+                    } else if (showNextEpisode && showSkipButton) {
+                        // Hide skip button if next episode overlay just appeared
+                        showSkipButton = false
+                        activeSkipInterval = null
                     }
                     // Save progress every ~30 seconds (10 cycles × 3s)
                     saveCounter++
@@ -484,13 +529,89 @@ fun PlayerScreen(
                     } else {
                         when (event.key) {
                             Key.DirectionCenter, Key.Enter -> {
-                                if (player.isPlaying) player.pause() else player.play()
-                                showControls = true
-                                true
+                                when {
+                                    // Skip Intro/Outro/Recap — handle directly
+                                    showSkipButton && activeSkipInterval != null -> {
+                                        val endMs = activeSkipInterval!!.endMs
+                                        showSkipButton = false
+                                        dismissedSkipTypes = dismissedSkipTypes + (activeSkipInterval?.type ?: SkipType.INTRO)
+                                        activeSkipInterval = null
+                                        player.seekTo(endMs)
+                                        true
+                                    }
+                                    // Next Episode — handle directly
+                                    showNextEpisode && nextEpisodeInfo != null -> {
+                                        showNextEpisode = false
+                                        val epInfo = nextEpisodeInfo!!
+                                        // Save current progress
+                                        val pId = contentId.ifEmpty { streamUrl.hashCode().toString() }
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                watchProgressStore?.saveProgress(
+                                                    pId, player.currentPosition,
+                                                    player.duration.coerceAtLeast(0),
+                                                    currentTitle, poster, contentType
+                                                )
+                                            } catch (_: Exception) {}
+                                        }
+                                        // Update title immediately
+                                        currentTitle = "S${epInfo.season}E${epInfo.episode} - ${epInfo.title}"
+                                        // Fetch streams and play next episode
+                                        scope.launch {
+                                            try {
+                                                val addonRepo = addonEntryPoint?.addonRepository()
+                                                if (addonRepo != null) {
+                                                    val streams = withContext(Dispatchers.IO) {
+                                                        addonRepo.getStreams(contentType, epInfo.contentId)
+                                                    }
+                                                    val bestStream = streams.firstOrNull { s ->
+                                                        val sUrl = s.url.ifEmpty { s.externalUrl }
+                                                        sUrl.isNotEmpty() &&
+                                                        (sUrl.startsWith("http://") || sUrl.startsWith("https://")) &&
+                                                        !sUrl.contains("magnet:") &&
+                                                        !sUrl.endsWith(".torrent") &&
+                                                        !s.name.contains("\uD83D\uDEAB") &&
+                                                        !s.title.contains("Filtered by your configuration")
+                                                    }
+                                                    val nextUrl = bestStream?.url?.ifEmpty { bestStream.externalUrl } ?: ""
+                                                    if (nextUrl.isNotEmpty()) {
+                                                        withContext(Dispatchers.Main) {
+                                                            player.stop()
+                                                            val mediaItem = MediaItem.fromUri(Uri.parse(nextUrl))
+                                                            player.setMediaItem(mediaItem)
+                                                            player.prepare()
+                                                            player.play()
+                                                            currentStreamUrl = nextUrl
+                                                            nextEpisodeInfo = null
+                                                        }
+                                                    }
+                                                }
+                                            } catch (_: Exception) {}
+                                        }
+                                        true
+                                    }
+                                    // Normal play/pause
+                                    else -> {
+                                        if (player.isPlaying) player.pause() else player.play()
+                                        showControls = true
+                                        true
+                                    }
+                                }
                             }
                             Key.Back -> {
-                                onBack()
-                                true
+                                // Dismiss overlays with Back before exiting player
+                                if (showSkipButton) {
+                                    showSkipButton = false
+                                    dismissedSkipTypes = dismissedSkipTypes + (activeSkipInterval?.type ?: SkipType.INTRO)
+                                    activeSkipInterval = null
+                                    true
+                                } else if (showNextEpisode) {
+                                    showNextEpisode = false
+                                    true
+                                } else {
+                                    onBack()
+                                    true
+                                }
                             }
                             Key.DirectionLeft -> {
                                 player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0))
@@ -652,9 +773,9 @@ fun PlayerScreen(
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = MerlotColors.White, modifier = Modifier.size(28.dp))
                 }
-                if (title.isNotEmpty()) {
+                if (currentTitle.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(title, color = MerlotColors.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(currentTitle, color = MerlotColors.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 } else {
                     Spacer(modifier = Modifier.weight(1f))
                 }
@@ -839,24 +960,52 @@ fun PlayerScreen(
                 episodeInfo = nextEpisodeInfo,
                 onPlayNow = {
                     showNextEpisode = false
-                    // Navigate to next episode — save current progress first
+                    val epInfo = nextEpisodeInfo ?: return@NextEpisodeCardOverlay
+                    // Save current progress first
                     val id = contentId.ifEmpty { streamUrl.hashCode().toString() }
                     scope.launch(Dispatchers.IO) {
                         try {
                             watchProgressStore?.saveProgress(
                                 id, player.currentPosition,
                                 player.duration.coerceAtLeast(0),
-                                title, poster, contentType
+                                currentTitle, poster, contentType
                             )
                         } catch (_: Exception) {}
                     }
-                    // Play next episode URL if available
-                    nextEpisodeInfo?.streamUrl?.let { nextUrl ->
-                        player.stop()
-                        val mediaItem = MediaItem.fromUri(Uri.parse(nextUrl))
-                        player.setMediaItem(mediaItem)
-                        player.prepare()
-                        player.play()
+                    // Update title immediately
+                    currentTitle = "S${epInfo.season}E${epInfo.episode} - ${epInfo.title}"
+                    // Fetch streams for next episode and play
+                    scope.launch {
+                        try {
+                            val addonRepo = addonEntryPoint?.addonRepository()
+                            if (addonRepo != null) {
+                                val streams = withContext(Dispatchers.IO) {
+                                    addonRepo.getStreams(contentType, epInfo.contentId)
+                                }
+                                val bestStream = streams.firstOrNull { s ->
+                                    val url = s.url.ifEmpty { s.externalUrl }
+                                    url.isNotEmpty() &&
+                                    (url.startsWith("http://") || url.startsWith("https://")) &&
+                                    !url.contains("magnet:") &&
+                                    !url.endsWith(".torrent") &&
+                                    !s.name.contains("\uD83D\uDEAB") &&
+                                    !s.title.contains("Filtered by your configuration")
+                                }
+                                val nextUrl = bestStream?.url?.ifEmpty { bestStream.externalUrl } ?: ""
+                                if (nextUrl.isNotEmpty()) {
+                                    withContext(Dispatchers.Main) {
+                                        player.stop()
+                                        val mediaItem = MediaItem.fromUri(Uri.parse(nextUrl))
+                                        player.setMediaItem(mediaItem)
+                                        player.prepare()
+                                        player.play()
+                                        currentStreamUrl = nextUrl
+                                        showNextEpisode = false
+                                        nextEpisodeInfo = null
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
                 },
                 onDismiss = { showNextEpisode = false }

@@ -34,14 +34,12 @@ class YouTubeViewModel @Inject constructor(
     fun loadIfNeeded() {
         if (hasLoaded) return
         hasLoaded = true
-        _uiState.value = _uiState.value.copy(channelsWithAvatars = youtubeRepository.getChannelsWithAvatars())
-        loadVideos()
-    }
-
-    private fun loadVideos(forceRefresh: Boolean = false) {
-        _uiState.value = _uiState.value.copy(isLoading = true)
         viewModelScope.launch {
-            val videos = youtubeRepository.fetchAllVideos(forceRefresh)
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            val allChannels = youtubeRepository.getAllChannels()
+            _uiState.value = _uiState.value.copy(channelsWithAvatars = allChannels)
+
+            val videos = youtubeRepository.fetchAllVideos()
             val channel = _uiState.value.selectedChannel
             val filtered = if (channel == "All") videos else videos.filter { it.channelName == channel }
             _uiState.value = _uiState.value.copy(
@@ -62,6 +60,15 @@ class YouTubeViewModel @Inject constructor(
     }
 
     fun getChannelNames(): List<String> {
-        return listOf("All") + youtubeRepository.channels.map { it.channelName }
+        return listOf("All") + _uiState.value.channelsWithAvatars.map { it.channelName }
+    }
+
+    /**
+     * Force refresh — clears hasLoaded so next navigation to YouTube reloads everything,
+     * including any newly added custom channels.
+     */
+    fun refresh() {
+        hasLoaded = false
+        loadIfNeeded()
     }
 }

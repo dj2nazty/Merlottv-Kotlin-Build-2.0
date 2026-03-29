@@ -48,14 +48,27 @@ sealed class Screen(
         }
     }
 
-    data object Player : Screen("player/{url}?title={title}&contentId={contentId}&poster={poster}&contentType={contentType}", "Player", Icons.Default.LiveTv) {
+    data object Player : Screen(
+        "player/{url}?title={title}&contentId={contentId}&poster={poster}&contentType={contentType}" +
+            "&nextEpId={nextEpId}&nextEpSeason={nextEpSeason}&nextEpEpisode={nextEpEpisode}" +
+            "&nextEpTitle={nextEpTitle}&nextEpThumbnail={nextEpThumbnail}",
+        "Player",
+        Icons.Default.LiveTv
+    ) {
         fun createRoute(
             url: String,
             title: String = "",
             contentId: String = "",
             poster: String = "",
-            contentType: String = "movie"
-        ) = "player/$url?title=$title&contentId=$contentId&poster=$poster&contentType=$contentType"
+            contentType: String = "movie",
+            nextEpId: String = "",
+            nextEpSeason: String = "",
+            nextEpEpisode: String = "",
+            nextEpTitle: String = "",
+            nextEpThumbnail: String = ""
+        ) = "player/$url?title=$title&contentId=$contentId&poster=$poster&contentType=$contentType" +
+            "&nextEpId=$nextEpId&nextEpSeason=$nextEpSeason&nextEpEpisode=$nextEpEpisode" +
+            "&nextEpTitle=$nextEpTitle&nextEpThumbnail=$nextEpThumbnail"
     }
 
     companion object {

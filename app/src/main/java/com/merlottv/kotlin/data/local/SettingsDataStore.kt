@@ -50,6 +50,14 @@ data class XtremeServerEntry(
     }
 }
 
+data class CustomYouTubeChannelEntry(
+    val channelId: String,
+    val channelName: String,
+    val handle: String,
+    val avatarUrl: String = "",
+    val enabled: Boolean = true
+)
+
 class SettingsDataStore(private val context: Context) {
 
     companion object {
@@ -59,6 +67,7 @@ class SettingsDataStore(private val context: Context) {
         val CUSTOM_EPG_SOURCES = stringPreferencesKey("custom_epg_sources")
         val BACKUP_SOURCES = stringPreferencesKey("backup_sources_json")
         val XTREME_SERVERS = stringPreferencesKey("xtreme_servers_json")
+        val CUSTOM_YOUTUBE_CHANNELS = stringPreferencesKey("custom_youtube_channels_json")
         val LAST_WATCHED_CHANNEL_ID = stringPreferencesKey("last_watched_channel_id")
         val TORBOX_KEY = stringPreferencesKey("torbox_key")
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
@@ -303,6 +312,44 @@ class SettingsDataStore(private val context: Context) {
                     serverUrl = obj.optString("serverUrl", ""),
                     username = obj.optString("username", ""),
                     password = obj.optString("password", ""),
+                    enabled = obj.optBoolean("enabled", true)
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // ─── Custom YouTube Channels ───
+    val customYouTubeChannels: Flow<List<CustomYouTubeChannelEntry>> = context.settingsDataStore.data.map { prefs ->
+        val json = prefs[CUSTOM_YOUTUBE_CHANNELS]
+        if (json != null) parseCustomYouTubeChannelsJson(json) else emptyList()
+    }
+
+    suspend fun setCustomYouTubeChannels(entries: List<CustomYouTubeChannelEntry>) {
+        val jsonArray = JSONArray()
+        entries.forEach { entry ->
+            val obj = JSONObject()
+            obj.put("channelId", entry.channelId)
+            obj.put("channelName", entry.channelName)
+            obj.put("handle", entry.handle)
+            obj.put("avatarUrl", entry.avatarUrl)
+            obj.put("enabled", entry.enabled)
+            jsonArray.put(obj)
+        }
+        context.settingsDataStore.edit { it[CUSTOM_YOUTUBE_CHANNELS] = jsonArray.toString() }
+    }
+
+    private fun parseCustomYouTubeChannelsJson(json: String): List<CustomYouTubeChannelEntry> {
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                CustomYouTubeChannelEntry(
+                    channelId = obj.optString("channelId", ""),
+                    channelName = obj.optString("channelName", "Channel ${i + 1}"),
+                    handle = obj.optString("handle", ""),
+                    avatarUrl = obj.optString("avatarUrl", ""),
                     enabled = obj.optBoolean("enabled", true)
                 )
             }

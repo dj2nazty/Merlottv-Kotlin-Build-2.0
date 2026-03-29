@@ -222,7 +222,8 @@ fun MerlotNavHost(
                 type = type,
                 id = id,
                 onBack = { navController.popBackStack() },
-                onPlay = { streamUrl, title, contentId, poster, contentType ->
+                onPlay = { streamUrl, title, contentId, poster, contentType,
+                           nextEpId, nextEpSeason, nextEpEpisode, nextEpTitle, nextEpThumbnail ->
                     val encodedUrl = URLEncoder.encode(streamUrl, "UTF-8")
                     val encodedTitle = URLEncoder.encode(title, "UTF-8")
                     val encodedContentId = URLEncoder.encode(contentId, "UTF-8")
@@ -233,7 +234,12 @@ fun MerlotNavHost(
                             title = encodedTitle,
                             contentId = encodedContentId,
                             poster = encodedPoster,
-                            contentType = contentType
+                            contentType = contentType,
+                            nextEpId = URLEncoder.encode(nextEpId, "UTF-8"),
+                            nextEpSeason = nextEpSeason,
+                            nextEpEpisode = nextEpEpisode,
+                            nextEpTitle = URLEncoder.encode(nextEpTitle, "UTF-8"),
+                            nextEpThumbnail = URLEncoder.encode(nextEpThumbnail, "UTF-8")
                         )
                     )
                 },
@@ -271,7 +277,12 @@ fun MerlotNavHost(
                 navArgument("title") { type = NavType.StringType; defaultValue = "" },
                 navArgument("contentId") { type = NavType.StringType; defaultValue = "" },
                 navArgument("poster") { type = NavType.StringType; defaultValue = "" },
-                navArgument("contentType") { type = NavType.StringType; defaultValue = "movie" }
+                navArgument("contentType") { type = NavType.StringType; defaultValue = "movie" },
+                navArgument("nextEpId") { type = NavType.StringType; defaultValue = "" },
+                navArgument("nextEpSeason") { type = NavType.StringType; defaultValue = "" },
+                navArgument("nextEpEpisode") { type = NavType.StringType; defaultValue = "" },
+                navArgument("nextEpTitle") { type = NavType.StringType; defaultValue = "" },
+                navArgument("nextEpThumbnail") { type = NavType.StringType; defaultValue = "" }
             )
         ) { backStackEntry ->
             onLiveTvFullscreenChanged(false)
@@ -280,12 +291,22 @@ fun MerlotNavHost(
             val contentId = URLDecoder.decode(backStackEntry.arguments?.getString("contentId") ?: "", "UTF-8")
             val poster = URLDecoder.decode(backStackEntry.arguments?.getString("poster") ?: "", "UTF-8")
             val contentType = backStackEntry.arguments?.getString("contentType") ?: "movie"
+            val nextEpId = URLDecoder.decode(backStackEntry.arguments?.getString("nextEpId") ?: "", "UTF-8")
+            val nextEpSeason = backStackEntry.arguments?.getString("nextEpSeason") ?: ""
+            val nextEpEpisode = backStackEntry.arguments?.getString("nextEpEpisode") ?: ""
+            val nextEpTitle = URLDecoder.decode(backStackEntry.arguments?.getString("nextEpTitle") ?: "", "UTF-8")
+            val nextEpThumbnail = URLDecoder.decode(backStackEntry.arguments?.getString("nextEpThumbnail") ?: "", "UTF-8")
             PlayerScreen(
                 streamUrl = url,
                 title = title,
                 contentId = contentId,
                 poster = poster,
                 contentType = contentType,
+                nextEpId = nextEpId,
+                nextEpSeason = nextEpSeason.toIntOrNull() ?: 0,
+                nextEpEpisode = nextEpEpisode.toIntOrNull() ?: 0,
+                nextEpTitle = nextEpTitle,
+                nextEpThumbnail = nextEpThumbnail,
                 onBack = { navController.popBackStack() }
             )
         }

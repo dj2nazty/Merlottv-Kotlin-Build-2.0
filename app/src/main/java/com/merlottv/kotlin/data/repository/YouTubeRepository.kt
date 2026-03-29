@@ -1,9 +1,11 @@
 package com.merlottv.kotlin.data.repository
 
 import android.util.Log
+import com.merlottv.kotlin.data.local.SettingsDataStore
 import com.merlottv.kotlin.domain.model.YouTubeChannel
 import com.merlottv.kotlin.domain.model.YouTubeVideo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -25,7 +27,8 @@ import javax.inject.Singleton
 
 @Singleton
 class YouTubeRepository @Inject constructor(
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
         private const val TAG = "YouTubeRepository"
@@ -89,6 +92,186 @@ class YouTubeRepository @Inject constructor(
      */
     fun getChannelsWithAvatars(): List<YouTubeChannel> {
         return channels // avatarUrl is already hardcoded in each channel
+    }
+
+    /**
+     * Get all channels: hardcoded + enabled custom channels from DataStore.
+     */
+    suspend fun getAllChannels(): List<YouTubeChannel> {
+        val custom = settingsDataStore.customYouTubeChannels.first()
+        val enabledCustom = custom.filter { it.enabled }.map { entry ->
+            YouTubeChannel(
+                channelId = entry.channelId,
+                channelName = entry.channelName,
+                handle = entry.handle,
+                avatarUrl = entry.avatarUrl
+            )
+        }
+        return channels + enabledCustom
+    }
+
+    /**
+     * Resolve a YouTube channel by its handle (e.g. "@ShawnRyanShow") using Innertube resolve_url API.
+     * Returns the channel info or null if not found.
+     */
+    suspend fun resolveChannelByHandle(handle: String): YouTubeChannel? = withContext(Dispatchers.IO) {
+        try {
+            val cleanHandle = if (handle.startsWith("@")) handle else "@$handle"
+
+            // Step 1: Try resolve_url first for exact handle match
+            var channelId: String? = null
+            val resolveBody = """
+                {
+                    "context": {
+                        "client": {
+                            "clientName": "WEB",
+                            "clientVersion": "2.20240101.00.00",
+                            "hl": "en",
+                            "gl": "US"
+                        }
+                    },
+                    "url": "https://www.youtube.com/$cleanHandle"
+                }
+            """.trimIndent()
+
+            val resolveRequest = Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/navigation/resolve_url?prettyPrint=false")
+                .post(resolveBody.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Content-Type", "application/json")
+                .build()
+
+            val resolveResponse = okHttpClient.newCall(resolveRequest).execute()
+            val resolveJson = resolveResponse.body?.string() ?: ""
+
+            val browseIdMatch = Regex(""""browseId"\s*:\s*"(UC[a-zA-Z0-9_-]+)"""").find(resolveJson)
+            channelId = browseIdMatch?.groupValues?.get(1)
+
+            // Step 2: If resolve_url failed, try YouTube search as fallback
+            if (channelId == null) {
+                Log.d(TAG, "resolve_url failed for $cleanHandle, trying search fallback")
+                channelId = searchChannelId(cleanHandle.removePrefix("@"))
+            }
+
+            if (channelId == null) {
+                Log.e(TAG, "Could not find channel ID for $cleanHandle")
+                return@withContext null
+            }
+
+            // Step 3: Browse the channel to get name, avatar, and canonical handle
+            val browseBody = """
+                {
+                    "context": {
+                        "client": {
+                            "clientName": "WEB",
+                            "clientVersion": "2.20240101.00.00",
+                            "hl": "en",
+                            "gl": "US"
+                        }
+                    },
+                    "browseId": "$channelId"
+                }
+            """.trimIndent()
+
+            val browseRequest = Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .post(browseBody.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Content-Type", "application/json")
+                .build()
+
+            val browseResponse = okHttpClient.newCall(browseRequest).execute()
+            val browseJson = browseResponse.body?.string() ?: return@withContext null
+
+            // Extract channel name from channelMetadataRenderer
+            val channelName: String
+            val metadataIdx = browseJson.indexOf("channelMetadataRenderer")
+            if (metadataIdx >= 0) {
+                val metadataSection = browseJson.substring(metadataIdx, (metadataIdx + 1000).coerceAtMost(browseJson.length))
+                val titleMatch = Regex(""""title"\s*:\s*"((?:[^"\\]|\\.)*)"""").find(metadataSection)
+                channelName = titleMatch?.groupValues?.get(1)
+                    ?.replace("\\\"", "\"")
+                    ?.replace("\\\\", "\\")
+                    ?: cleanHandle.removePrefix("@")
+            } else {
+                channelName = cleanHandle.removePrefix("@")
+            }
+
+            // Extract canonical vanityUrl/handle from channelMetadataRenderer
+            val actualHandle: String
+            if (metadataIdx >= 0) {
+                val metadataSection = browseJson.substring(metadataIdx, (metadataIdx + 1000).coerceAtMost(browseJson.length))
+                val vanityMatch = Regex(""""vanityChannelUrl"\s*:\s*"http[s]?://www\.youtube\.com/(@[^"]+)"""").find(metadataSection)
+                actualHandle = vanityMatch?.groupValues?.get(1) ?: cleanHandle
+            } else {
+                actualHandle = cleanHandle
+            }
+
+            // Extract avatar URL
+            val avatarRegex = Regex(""""url"\s*:\s*"(https://yt3\.googleusercontent\.com/[^"]+)"""")
+            val avatarMatch = avatarRegex.find(browseJson)
+            var avatarUrl = avatarMatch?.groupValues?.get(1) ?: ""
+            if (avatarUrl.isNotEmpty()) {
+                avatarUrl = avatarUrl.replace(Regex("=s\\d+"), "=s176")
+                if (!avatarUrl.contains("=s")) avatarUrl += "=s176"
+            }
+
+            Log.d(TAG, "Resolved $cleanHandle → $channelId ($channelName) handle=$actualHandle, avatar: ${avatarUrl.take(60)}...")
+            YouTubeChannel(channelId, channelName, actualHandle, avatarUrl)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resolve channel handle: $handle", e)
+            null
+        }
+    }
+
+    /**
+     * Search YouTube for a channel by name/handle as fallback when resolve_url fails.
+     * Returns the channel ID of the first channel result.
+     */
+    private fun searchChannelId(query: String): String? {
+        try {
+            val searchBody = """
+                {
+                    "context": {
+                        "client": {
+                            "clientName": "WEB",
+                            "clientVersion": "2.20240101.00.00",
+                            "hl": "en",
+                            "gl": "US"
+                        }
+                    },
+                    "query": "$query",
+                    "params": "EgIQAg%3D%3D"
+                }
+            """.trimIndent()
+
+            val request = Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+                .post(searchBody.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Content-Type", "application/json")
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            val json = response.body?.string() ?: return null
+
+            // Find first channelRenderer with a channelId
+            val channelIdMatch = Regex(""""channelRenderer".*?"channelId"\s*:\s*"(UC[a-zA-Z0-9_-]+)"""").find(json)
+            val id = channelIdMatch?.groupValues?.get(1)
+            Log.d(TAG, "Search fallback for '$query' found: $id")
+            return id
+        } catch (e: Exception) {
+            Log.e(TAG, "Search fallback failed for '$query'", e)
+            return null
+        }
+    }
+
+    /**
+     * Invalidate the cached videos so next fetchAllVideos() re-fetches everything.
+     */
+    fun invalidateCache() {
+        cachedVideos = emptyList()
+        cacheTimestamp = 0L
     }
 
     private suspend fun fetchChannelAvatars() = withContext(Dispatchers.IO) {
@@ -159,8 +342,9 @@ class YouTubeRepository @Inject constructor(
         }
 
         try {
+            val allChannels = getAllChannels()
             val allVideos = coroutineScope {
-                channels.map { channel ->
+                allChannels.map { channel ->
                     async {
                         try {
                             fetchChannelVideosInnertube(channel)
@@ -172,7 +356,7 @@ class YouTubeRepository @Inject constructor(
                 }.awaitAll().flatten()
             }
 
-            Log.d(TAG, "Fetched ${allVideos.size} total videos across ${channels.size} channels")
+            Log.d(TAG, "Fetched ${allVideos.size} total videos across ${allChannels.size} channels")
 
             // Sort by published date descending (newest first)
             val sorted = allVideos.sortedByDescending { it.publishedDate }

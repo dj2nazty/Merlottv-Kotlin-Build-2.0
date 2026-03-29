@@ -8,6 +8,9 @@ import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -330,7 +333,7 @@ fun SettingsScreen(
 
         // ═══ About ═══ [General]
         if (selectedTab == "General") {
-            SettingsSection(title = "About", icon = { Icon(Icons.Default.Info, null, tint = MerlotColors.Accent) }) {
+            SettingsSection(title = "About", icon = { Icon(Icons.Default.Info, null, tint = MerlotColors.Accent) }, startExpanded = true) {
                 Text("Merlot TV", color = MerlotColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Text("Kotlin Build 2.0", color = MerlotColors.Accent, fontSize = 12.sp)
                 Text("Version ${uiState.appVersion} (Build ${com.merlottv.kotlin.BuildConfig.VERSION_CODE})", color = MerlotColors.TextMuted, fontSize = 11.sp)
@@ -385,10 +388,32 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Update Available!", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             Text("Version ${uiState.latestVersion}", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                            if (uiState.isDownloadingUpdate) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                // Progress bar
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(MerlotColors.Surface2)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(uiState.downloadProgress / 100f)
+                                            .height(6.dp)
+                                            .background(MerlotColors.Accent)
+                                    )
+                                }
+                                Text("Downloading... ${uiState.downloadProgress}%", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                            }
+                            if (uiState.downloadError != null) {
+                                Text("Error: ${uiState.downloadError}", color = Color.Red, fontSize = 10.sp)
+                            }
                         }
-                        if (uiState.updateUrl.isNotEmpty()) {
+                        if (uiState.updateUrl.isNotEmpty() && !uiState.isDownloadingUpdate) {
                             DpadButton(
-                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uiState.updateUrl))) },
+                                onClick = { viewModel.downloadUpdate() },
                                 modifier = Modifier.focusRequester(downloadFocus)
                             ) { Text("Download", fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                         }
@@ -1190,6 +1215,117 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ YouTube Channels ═══ [Sources]
+        if (selectedTab == "Sources") {
+            SettingsSection(title = "YouTube Channels", icon = { Icon(Icons.Default.PlayArrow, null, tint = MerlotColors.Accent) }) {
+                Text("Add custom YouTube channels by handle. They appear alongside built-in channels.", color = MerlotColors.TextMuted, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Existing custom channels list
+                uiState.customYouTubeChannels.forEachIndexed { index, channel ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Surface2, RoundedCornerShape(8.dp))
+                            .dpadFocusable(onClick = { viewModel.toggleCustomYouTubeChannel(index) })
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Avatar
+                        if (channel.avatarUrl.isNotEmpty()) {
+                            coil.compose.AsyncImage(
+                                model = channel.avatarUrl,
+                                contentDescription = channel.channelName,
+                                modifier = Modifier.size(32.dp).clip(CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(channel.channelName, color = MerlotColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(channel.handle, color = MerlotColors.TextMuted, fontSize = 9.sp)
+                        }
+                        Switch(
+                            checked = channel.enabled,
+                            onCheckedChange = { viewModel.toggleCustomYouTubeChannel(index) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = MerlotColors.Accent, checkedTrackColor = MerlotColors.Accent.copy(alpha = 0.3f)),
+                            modifier = Modifier.height(24.dp)
+                        )
+                        IconButton(onClick = { viewModel.removeCustomYouTubeChannel(index) }) {
+                            Icon(Icons.Default.Close, null, tint = MerlotColors.TextMuted, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                // Search confirmation card
+                uiState.youtubeSearchResult?.let { result ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                            .border(1.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (result.avatarUrl.isNotEmpty()) {
+                            coil.compose.AsyncImage(
+                                model = result.avatarUrl,
+                                contentDescription = result.channelName,
+                                modifier = Modifier.size(40.dp).clip(CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Is this the right channel?", color = MerlotColors.TextMuted, fontSize = 10.sp)
+                            Text(result.channelName, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(result.handle, color = MerlotColors.TextMuted, fontSize = 11.sp)
+                        }
+                        DpadButton(onClick = { viewModel.confirmAddYouTubeChannel() }) {
+                            Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        DpadButton(onClick = { viewModel.dismissYouTubeSearch() }) {
+                            Icon(Icons.Default.Close, null, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+
+                // Error message
+                uiState.youtubeSearchError?.let { error ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(error, color = Color(0xFFFF6B6B), fontSize = 11.sp)
+                }
+
+                // Handle input + search button
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DpadTextField(
+                        value = uiState.youtubeHandleInput,
+                        onValueChange = { viewModel.onYouTubeHandleInputChanged(it) },
+                        placeholder = "@ShawnRyanShow",
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (uiState.youtubeSearching) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MerlotColors.Accent,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        DpadButton(
+                            onClick = { viewModel.searchYouTubeChannel() },
+                            enabled = uiState.youtubeHandleInput.isNotBlank()
+                        ) {
+                            Text("Search", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // ═══ Torbox ═══ [Sources]
         if (selectedTab == "Sources") {
             SettingsSection(title = "Torbox", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
@@ -1442,15 +1578,36 @@ fun SettingsScreen(
 private fun SettingsSection(
     title: String,
     icon: @Composable () -> Unit = {},
+    startExpanded: Boolean = false,
     content: @Composable () -> Unit
 ) {
+    var expanded by remember { mutableStateOf(startExpanded) }
     Column(modifier = Modifier.fillMaxWidth().background(MerlotColors.Surface, RoundedCornerShape(12.dp)).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .dpadFocusable(onClick = { expanded = !expanded })
+        ) {
             icon()
             Spacer(modifier = Modifier.width(8.dp))
-            Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = MerlotColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Icon(
+                imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = MerlotColors.TextMuted,
+                modifier = Modifier.size(20.dp)
+            )
         }
-        content()
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Column(modifier = Modifier.padding(top = 10.dp)) {
+                content()
+            }
+        }
     }
 }
 

@@ -109,7 +109,7 @@ fun YouTubeScreen(
             val avatarMap = remember(uiState.channelsWithAvatars) {
                 uiState.channelsWithAvatars.associate { it.channelName to it.avatarUrl }
             }
-            val channelChipFocusRequesters = remember { List(channelNames.size) { FocusRequester() } }
+            val channelChipFocusRequesters = remember(channelNames.size) { List(channelNames.size) { FocusRequester() } }
             val channelListState = rememberLazyListState()
             val channelScope = rememberCoroutineScope()
             LazyRow(
@@ -119,6 +119,7 @@ fun YouTubeScreen(
                 contentPadding = PaddingValues(end = 16.dp)
             ) {
                 itemsIndexed(channelNames) { index, name ->
+                    if (index >= channelChipFocusRequesters.size) return@itemsIndexed
                     val isSelected = uiState.selectedChannel == name
                     var isFocused by remember { mutableStateOf(false) }
                     val avatarUrl = avatarMap[name]
@@ -239,8 +240,9 @@ fun YouTubeScreen(
                 else -> {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val gridColumns = ((maxWidth - 32.dp) / (180.dp + 10.dp)).toInt().coerceAtLeast(1)
-                        val cardFocusRequesters = remember(uiState.filteredVideos.size) {
-                            List(uiState.filteredVideos.size) { FocusRequester() }
+                        val videoCount = uiState.filteredVideos.size
+                        val cardFocusRequesters = remember(videoCount) {
+                            List(videoCount) { FocusRequester() }
                         }
                         LaunchedEffect(uiState.filteredVideos.isNotEmpty()) {
                             if (uiState.filteredVideos.isNotEmpty()) {
@@ -260,21 +262,22 @@ fun YouTubeScreen(
                                 key = { _, video -> video.videoId },
                                 contentType = { _, _ -> "ytcard" }
                             ) { index, video ->
+                                if (index >= cardFocusRequesters.size) return@itemsIndexed
                                 val isLeftEdge = index % gridColumns == 0
                                 val isRightEdge = index % gridColumns == gridColumns - 1 || index == uiState.filteredVideos.size - 1
                                 YouTubeVideoCard(
                                     video = video,
-                                    focusRequester = cardFocusRequesters.getOrNull(index) ?: remember { FocusRequester() },
+                                    focusRequester = cardFocusRequesters[index],
                                     isFirstCard = index == 0,
                                     onClick = { playingYtVideoId = video.videoId },
                                     onLeft = {
                                         if (!isLeftEdge && index > 0) {
-                                            try { cardFocusRequesters[index - 1].requestFocus() } catch (_: Exception) {}
+                                            try { cardFocusRequesters.getOrNull(index - 1)?.requestFocus() } catch (_: Exception) {}
                                         }
                                     },
                                     onRight = {
                                         if (!isRightEdge && index < uiState.filteredVideos.size - 1) {
-                                            try { cardFocusRequesters[index + 1].requestFocus() } catch (_: Exception) {}
+                                            try { cardFocusRequesters.getOrNull(index + 1)?.requestFocus() } catch (_: Exception) {}
                                         }
                                     }
                                 )

@@ -83,16 +83,7 @@ class SkipIntroRepository(private val context: Context) {
             )
         }
 
-        // Outro heuristic: last 2 minutes for episodes > 30 min
-        if (totalDurationMs > 1_800_000) {
-            intervals.add(
-                SkipInterval(
-                    type = SkipType.OUTRO,
-                    startMs = totalDurationMs - OUTRO_BEFORE_END_MS,
-                    endMs = totalDurationMs
-                )
-            )
-        }
+        // No outro heuristic — the Next Episode auto-play overlay handles end-of-episode
 
         return intervals
     }
