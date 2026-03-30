@@ -73,8 +73,9 @@ class SettingsDataStore(private val context: Context) {
         val CUSTOM_ADDONS = stringPreferencesKey("custom_addons")
         val DISABLED_ADDONS = stringSetPreferencesKey("disabled_addons")
 
-        // Live TV category order
+        // Live TV category order and hidden categories
         val CATEGORY_ORDER = stringPreferencesKey("live_tv_category_order")
+        val LIVE_TV_HIDDEN_CATEGORIES = stringPreferencesKey("live_tv_hidden_categories")
 
         // VOD Category System — order and visibility for Home and VOD screens
         val HOME_CATEGORY_ORDER = stringPreferencesKey("home_category_order")
@@ -602,4 +603,11 @@ class SettingsDataStore(private val context: Context) {
     suspend fun setHomeHiddenCategories(hidden: Set<String>) = writeJsonStringList(HOME_HIDDEN_CATEGORIES, hidden.toList())
     suspend fun setVodCategoryOrder(order: List<String>) = writeJsonStringList(VOD_CATEGORY_ORDER, order)
     suspend fun setVodHiddenCategories(hidden: Set<String>) = writeJsonStringList(VOD_HIDDEN_CATEGORIES, hidden.toList())
+
+    // ─── Live TV Hidden Categories ───
+    val liveTvHiddenCategories: Flow<Set<String>> = context.settingsDataStore.data.map { prefs ->
+        readJsonStringList(prefs, LIVE_TV_HIDDEN_CATEGORIES).toSet()
+    }
+
+    suspend fun setLiveTvHiddenCategories(hidden: Set<String>) = writeJsonStringList(LIVE_TV_HIDDEN_CATEGORIES, hidden.toList())
 }

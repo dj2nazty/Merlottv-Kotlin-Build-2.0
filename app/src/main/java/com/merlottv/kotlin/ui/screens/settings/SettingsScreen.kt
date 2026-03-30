@@ -88,6 +88,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -1607,6 +1608,75 @@ fun SettingsScreen(
                     }
                 }
             }
+
+        // ═══ Hidden Categories ═══ [Advanced]
+        if (selectedTab == "Advanced") {
+            SettingsSection(title = "Hidden Categories", icon = { Icon(Icons.Default.Close, null, tint = Color(0xFFFF6B6B)) }) {
+                if (uiState.liveTvHiddenCategories.isEmpty()) {
+                    Text(
+                        text = "No hidden categories. Long-press a category in Live TV to hide it, or use the Manage button.",
+                        color = MerlotColors.TextMuted,
+                        fontSize = 11.sp
+                    )
+                } else {
+                    Text(
+                        text = "${uiState.liveTvHiddenCategories.size} categories hidden. Tap to unhide.",
+                        color = Color(0xFFFF6B6B),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    uiState.liveTvHiddenCategories.sorted().forEach { group ->
+                        var isFocused by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .background(
+                                    Color(0xFF8B0000).copy(alpha = 0.15f),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .then(
+                                    if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                    else Modifier.border(1.dp, Color(0xFFFF6B6B).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .clickable { viewModel.toggleHiddenCategory(group) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "X",
+                                color = Color(0xFFFF6B6B),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.width(24.dp)
+                            )
+                            Text(
+                                text = group,
+                                color = Color(0xFFFF6B6B).copy(alpha = 0.7f),
+                                fontSize = 12.sp,
+                                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (isFocused) "TAP TO UNHIDE" else "HIDDEN",
+                                color = if (isFocused) MerlotColors.Accent else Color(0xFFFF6B6B),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DpadButton(onClick = { viewModel.unhideAllCategories() }) {
+                        Text("Unhide All", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MerlotColors.Accent)
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
         }  // end scrollable Column

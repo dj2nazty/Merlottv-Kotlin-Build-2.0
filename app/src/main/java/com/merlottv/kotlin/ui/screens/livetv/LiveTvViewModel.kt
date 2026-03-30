@@ -125,7 +125,20 @@ data class LiveTvUiState(
     val epgSelectedIndex: Int = 0,
     val epgScrollRequest: Int = 0,  // incremented/decremented to trigger scroll
     val showEpgCategoryPicker: Boolean = false,
-    val epgTimelineAtStart: Boolean = true  // true when timeline scroll is at or near position 0
+    val epgTimelineAtStart: Boolean = true,  // true when timeline scroll is at or near position 0
+    // Category reorder mode
+    val isReorderMode: Boolean = false,
+    val reorderMovingIndex: Int = -1,  // -1 = not moving any item
+    val reorderGroups: List<String> = emptyList(),  // working copy during reorder
+    // Channel reorder mode
+    val isChannelReorderMode: Boolean = false,
+    val channelReorderMovingIndex: Int = -1,
+    val reorderChannels: List<Channel> = emptyList(),  // working copy during channel reorder
+    // Hidden categories
+    val hiddenCategories: Set<String> = emptySet(),
+    // Category management popup (long-press on category)
+    val showCategoryPopup: Boolean = false,
+    val categoryPopupTarget: String? = null  // which category the popup is for
 ) {
     /** Returns filtered channels if a filter is active, otherwise the full channel list */
     val filteredChannels: List<Channel> get() = _filteredChannels ?: channels
@@ -865,6 +878,13 @@ class LiveTvViewModel @Inject constructor(
             } catch (_: Exception) {}
         }
 
+        // Observe hidden categories
+        viewModelScope.launch {
+            settingsDataStore.liveTvHiddenCategories.collect { hidden ->
+                _uiState.value = _uiState.value.copy(hiddenCategories = hidden)
+            }
+        }
+
         // Launch channels + EPG + backup pre-warm ALL in parallel for fastest startup
         loadChannelsAndEpgParallel()
         observeFavorites()
@@ -910,13 +930,14 @@ class LiveTvViewModel @Inject constructor(
                 for (ch in channels) { groupSet.add(ch.group) }
 
                 val customOrder = settingsDataStore.categoryOrder.first()
+                val hiddenCats = try { settingsDataStore.liveTvHiddenCategories.first() } catch (_: Exception) { emptySet() }
 
                 val sortedGroups = if (customOrder.isNotEmpty()) {
-                    val ordered = customOrder.filter { groupSet.contains(it) }.toMutableList()
-                    val remaining = groupSet.filter { it !in ordered }.sortedBy { it.lowercase() }
+                    val ordered = customOrder.filter { groupSet.contains(it) && it !in hiddenCats }.toMutableList()
+                    val remaining = groupSet.filter { it !in ordered && it !in hiddenCats }.sortedBy { it.lowercase() }
                     ordered + remaining
                 } else {
-                    groupSet.sortedWith(
+                    groupSet.filter { it !in hiddenCats }.sortedWith(
                         compareByDescending<String> { group ->
                             val lower = group.lowercase()
                             lower.contains("usa") || lower.contains("us ") ||
@@ -1896,5 +1917,204 @@ class LiveTvViewModel @Inject constructor(
         libVLC = null
         try { player.release() } catch (_: Exception) {}
         try { gentlePlayer.release() } catch (_: Exception) {}
+    }
+
+    // ─── Category Reorder ───
+
+    fun enterReorderMode() {
+        // Copy current groups (skip "★ Favorites" — it stays pinned at top)
+        val movableGroups = _uiState.value.groups.filter { it != "★ Favorites" }
+        _uiState.value = _uiState.value.copy(
+            isReorderMode = true,
+            reorderMovingIndex = -1,
+            reorderGroups = movableGroups
+        )
+    }
+
+    fun exitReorderMode() {
+        _uiState.value = _uiState.value.copy(
+            isReorderMode = false,
+            reorderMovingIndex = -1,
+            reorderGroups = emptyList()
+        )
+    }
+
+    fun toggleReorderMoving(index: Int) {
+        val current = _uiState.value.reorderMovingIndex
+        _uiState.value = _uiState.value.copy(
+            reorderMovingIndex = if (current == index) -1 else index
+        )
+    }
+
+    fun reorderMoveUp(index: Int) {
+        if (index <= 0) return
+        val list = _uiState.value.reorderGroups.toMutableList()
+        if (index in list.indices) {
+            val item = list.removeAt(index)
+            list.add(index - 1, item)
+            _uiState.value = _uiState.value.copy(
+                reorderGroups = list,
+                reorderMovingIndex = index - 1
+            )
+        }
+    }
+
+    fun reorderMoveDown(index: Int) {
+        val list = _uiState.value.reorderGroups.toMutableList()
+        if (index in list.indices && index < list.size - 1) {
+            val item = list.removeAt(index)
+            list.add(index + 1, item)
+            _uiState.value = _uiState.value.copy(
+                reorderGroups = list,
+                reorderMovingIndex = index + 1
+            )
+        }
+    }
+
+    fun saveReorder() {
+        val reordered = _uiState.value.reorderGroups
+        // Save to settings (without "★ Favorites" — it's always prepended automatically)
+        viewModelScope.launch {
+            settingsDataStore.setCategoryOrder(reordered)
+        }
+        // Apply to live groups: "★ Favorites" + reordered list
+        val newGroups = listOf("★ Favorites") + reordered
+        _uiState.value = _uiState.value.copy(
+            groups = newGroups,
+            isReorderMode = false,
+            reorderMovingIndex = -1,
+            reorderGroups = emptyList()
+        )
+    }
+
+    // ─── Channel Reorder ───
+
+    fun enterChannelReorderMode() {
+        val channels = _uiState.value.filteredChannels
+        _uiState.value = _uiState.value.copy(
+            isChannelReorderMode = true,
+            channelReorderMovingIndex = -1,
+            reorderChannels = channels
+        )
+    }
+
+    fun exitChannelReorderMode() {
+        _uiState.value = _uiState.value.copy(
+            isChannelReorderMode = false,
+            channelReorderMovingIndex = -1,
+            reorderChannels = emptyList()
+        )
+    }
+
+    fun toggleChannelReorderMoving(index: Int) {
+        val current = _uiState.value.channelReorderMovingIndex
+        _uiState.value = _uiState.value.copy(
+            channelReorderMovingIndex = if (current == index) -1 else index
+        )
+    }
+
+    fun channelReorderMoveUp(index: Int) {
+        if (index <= 0) return
+        val list = _uiState.value.reorderChannels.toMutableList()
+        if (index in list.indices) {
+            val item = list.removeAt(index)
+            list.add(index - 1, item)
+            _uiState.value = _uiState.value.copy(
+                reorderChannels = list,
+                channelReorderMovingIndex = index - 1
+            )
+        }
+    }
+
+    fun channelReorderMoveDown(index: Int) {
+        val list = _uiState.value.reorderChannels.toMutableList()
+        if (index in list.indices && index < list.size - 1) {
+            val item = list.removeAt(index)
+            list.add(index + 1, item)
+            _uiState.value = _uiState.value.copy(
+                reorderChannels = list,
+                channelReorderMovingIndex = index + 1
+            )
+        }
+    }
+
+    fun saveChannelReorder() {
+        val reordered = _uiState.value.reorderChannels
+        // Apply the reordered channels to the current view
+        _uiState.value = _uiState.value.copy(
+            channels = if (_uiState.value.selectedGroup == null) {
+                // All Channels view — replace all
+                reordered
+            } else {
+                // Category view — replace channels in this group, keep others
+                val group = _uiState.value.selectedGroup
+                val otherChannels = _uiState.value.channels.filter { it.group != group }
+                reordered + otherChannels
+            },
+            isChannelReorderMode = false,
+            channelReorderMovingIndex = -1,
+            reorderChannels = emptyList()
+        ).withFilteredChannels(reordered)
+    }
+
+    // ─── Category Management Popup ───
+
+    fun showCategoryPopup(group: String) {
+        _uiState.value = _uiState.value.copy(
+            showCategoryPopup = true,
+            categoryPopupTarget = group
+        )
+    }
+
+    fun dismissCategoryPopup() {
+        _uiState.value = _uiState.value.copy(
+            showCategoryPopup = false,
+            categoryPopupTarget = null
+        )
+    }
+
+    fun hideCategory(group: String) {
+        viewModelScope.launch {
+            val current = _uiState.value.hiddenCategories.toMutableSet()
+            current.add(group)
+            settingsDataStore.setLiveTvHiddenCategories(current)
+            // Remove from visible groups immediately
+            val newGroups = _uiState.value.groups.filter { it != group }
+            _uiState.value = _uiState.value.copy(
+                groups = newGroups,
+                hiddenCategories = current,
+                showCategoryPopup = false,
+                categoryPopupTarget = null,
+                // If the hidden category was selected, reset to all channels
+                selectedGroup = if (_uiState.value.selectedGroup == group) null else _uiState.value.selectedGroup
+            )
+            if (_uiState.value.selectedGroup == null) {
+                applyFilters()
+            }
+        }
+    }
+
+    fun unhideCategory(group: String) {
+        viewModelScope.launch {
+            val current = _uiState.value.hiddenCategories.toMutableSet()
+            current.remove(group)
+            settingsDataStore.setLiveTvHiddenCategories(current)
+            // Re-add to groups (at the end)
+            val newGroups = _uiState.value.groups.toMutableList()
+            if (group !in newGroups) {
+                newGroups.add(group)
+            }
+            _uiState.value = _uiState.value.copy(
+                groups = newGroups,
+                hiddenCategories = current
+            )
+        }
+    }
+
+    /** Returns all categories (including hidden ones) for the manage popup */
+    fun getAllCategories(): List<String> {
+        val visibleGroups = _uiState.value.groups.filter { it != "★ Favorites" }
+        val hidden = _uiState.value.hiddenCategories
+        return (visibleGroups + hidden).distinct().sorted()
     }
 }

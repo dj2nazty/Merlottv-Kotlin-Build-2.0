@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -1362,13 +1364,44 @@ private fun ChannelListView(
                     .padding(vertical = 8.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when (event.key) {
-                            Key.DirectionRight, Key.Back -> {
-                                // Go back to channel list
-                                viewModel.hideCategories()
-                                true
+                        // Reorder mode: intercept all navigation at parent level
+                        if (uiState.isReorderMode) {
+                            when (event.key) {
+                                Key.DirectionUp -> {
+                                    if (uiState.reorderMovingIndex >= 0) {
+                                        viewModel.reorderMoveUp(uiState.reorderMovingIndex)
+                                        true
+                                    } else false
+                                }
+                                Key.DirectionDown -> {
+                                    if (uiState.reorderMovingIndex >= 0) {
+                                        viewModel.reorderMoveDown(uiState.reorderMovingIndex)
+                                        true
+                                    } else false
+                                }
+                                Key.DirectionCenter, Key.Enter -> {
+                                    // Toggle move mode on focused item — handled per-item below
+                                    false
+                                }
+                                Key.Back -> {
+                                    if (uiState.reorderMovingIndex >= 0) {
+                                        viewModel.toggleReorderMoving(uiState.reorderMovingIndex)
+                                    } else {
+                                        viewModel.exitReorderMode()
+                                    }
+                                    true
+                                }
+                                Key.DirectionRight -> true // block right nav in reorder mode
+                                else -> false
                             }
-                            else -> false
+                        } else {
+                            when (event.key) {
+                                Key.DirectionRight, Key.Back -> {
+                                    viewModel.hideCategories()
+                                    true
+                                }
+                                else -> false
+                            }
                         }
                     }
             ) {
@@ -1496,26 +1529,154 @@ private fun ChannelListView(
                         }
                     }
 
-                    LazyColumn(
-                        state = categoryListState,
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp)
-                    ) {
-                        item(key = "all_channels") {
-                            CategoryItem(
-                                label = "All Channels (${uiState.totalChannels})",
-                                isSelected = uiState.selectedGroup == null,
-                                onClick = { viewModel.onGroupSelected(null) },
-                                focusRequester = if (uiState.selectedGroup == null) categoryFocusRequester else null
-                            )
+                    if (uiState.isReorderMode) {
+                        // ── Reorder Mode Header ──
+                        Text(
+                            text = if (uiState.reorderMovingIndex >= 0) "⬆⬇ D-pad to move, OK to place"
+                                   else "Select a category, press OK to move it",
+                            color = if (uiState.reorderMovingIndex >= 0) MerlotColors.Accent else MerlotColors.TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = if (uiState.reorderMovingIndex >= 0) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+
+                        LazyColumn(
+                            state = categoryListState,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            itemsIndexed(uiState.reorderGroups, key = { _, g -> "reorder_$g" }) { index, group ->
+                                val isMoving = uiState.reorderMovingIndex == index
+                                var isFocused by remember { mutableStateOf(false) }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                        .background(
+                                            if (isMoving) MerlotColors.Accent.copy(alpha = 0.2f)
+                                            else if (isFocused) MerlotColors.Surface2.copy(alpha = 0.8f)
+                                            else MerlotColors.Surface2,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .then(
+                                            if (isMoving) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                            else if (isFocused) Modifier.border(2.dp, Color(0xFF888888), RoundedCornerShape(8.dp))
+                                            else Modifier
+                                        )
+                                        .onFocusChanged { isFocused = it.isFocused }
+                                        .focusable()
+                                        .clickable { viewModel.toggleReorderMoving(index) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "${index + 1}.",
+                                        color = MerlotColors.TextMuted,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.width(24.dp)
+                                    )
+                                    Text(
+                                        group,
+                                        color = if (isMoving) MerlotColors.Accent else MerlotColors.TextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isMoving) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        if (isMoving) "▲▼" else if (isFocused) "●" else "",
+                                        color = if (isMoving) MerlotColors.Accent else MerlotColors.TextMuted,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
                         }
-                        items(uiState.groups, key = { it }) { group ->
-                            CategoryItem(
-                                label = group,
-                                isSelected = uiState.selectedGroup == group,
-                                onClick = { viewModel.onGroupSelected(group) },
-                                focusRequester = if (uiState.selectedGroup == group) categoryFocusRequester else null
-                            )
+
+                        // Save / Cancel buttons
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            var saveFocused by remember { mutableStateOf(false) }
+                            Button(
+                                onClick = { viewModel.saveReorder() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .onFocusChanged { saveFocused = it.isFocused }
+                                    .then(if (saveFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                            ) {
+                                Text("Save", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MerlotColors.Accent)
+                            }
+                            var cancelFocused by remember { mutableStateOf(false) }
+                            Button(
+                                onClick = { viewModel.exitReorderMode() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .onFocusChanged { cancelFocused = it.isFocused }
+                                    .then(if (cancelFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                            ) {
+                                Text("Cancel", fontSize = 11.sp, color = MerlotColors.TextMuted)
+                            }
+                        }
+                    } else {
+                        // ── Normal Category List ──
+                        LazyColumn(
+                            state = categoryListState,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            item(key = "all_channels") {
+                                CategoryItem(
+                                    label = "All Channels (${uiState.totalChannels})",
+                                    isSelected = uiState.selectedGroup == null,
+                                    onClick = { viewModel.onGroupSelected(null) },
+                                    focusRequester = if (uiState.selectedGroup == null) categoryFocusRequester else null
+                                )
+                            }
+                            items(uiState.groups, key = { it }) { group ->
+                                CategoryItem(
+                                    label = group,
+                                    isSelected = uiState.selectedGroup == group,
+                                    onClick = { viewModel.onGroupSelected(group) },
+                                    onLongPress = if (group != "★ Favorites") {{ viewModel.showCategoryPopup(group) }} else null,
+                                    focusRequester = if (uiState.selectedGroup == group) categoryFocusRequester else null
+                                )
+                            }
+                        }
+
+                        // Reorder & Manage buttons
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            var reorderFocused by remember { mutableStateOf(false) }
+                            Button(
+                                onClick = { viewModel.enterReorderMode() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .onFocusChanged { reorderFocused = it.isFocused }
+                                    .then(if (reorderFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                            ) {
+                                Text("↕ Reorder", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MerlotColors.Accent)
+                            }
+                            var manageFocused by remember { mutableStateOf(false) }
+                            Button(
+                                onClick = { viewModel.showCategoryPopup("__manage__") },
+                                colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .onFocusChanged { manageFocused = it.isFocused }
+                                    .then(if (manageFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                            ) {
+                                Text("👁 Manage", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MerlotColors.Accent)
+                            }
                         }
                     }
                 }
@@ -1536,29 +1697,56 @@ private fun ChannelListView(
                     .background(MerlotColors.Black.copy(alpha = 0.75f))
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when (event.key) {
-                            Key.DirectionLeft -> {
-                                viewModel.onSearchChanged("")
-                                viewModel.showCategories()
-                                true
-                            }
-                            Key.DirectionRight, Key.Back -> {
-                                if (event.key == Key.Back) {
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastBackPressTime < 1500L) {
-                                        onNavigateToHome()
-                                        return@onPreviewKeyEvent true
+                        // Channel reorder mode: intercept D-pad at parent level
+                        if (uiState.isChannelReorderMode) {
+                            when (event.key) {
+                                Key.DirectionUp -> {
+                                    if (uiState.channelReorderMovingIndex >= 0) {
+                                        viewModel.channelReorderMoveUp(uiState.channelReorderMovingIndex)
+                                        true
+                                    } else false
+                                }
+                                Key.DirectionDown -> {
+                                    if (uiState.channelReorderMovingIndex >= 0) {
+                                        viewModel.channelReorderMoveDown(uiState.channelReorderMovingIndex)
+                                        true
+                                    } else false
+                                }
+                                Key.Back -> {
+                                    if (uiState.channelReorderMovingIndex >= 0) {
+                                        viewModel.toggleChannelReorderMoving(uiState.channelReorderMovingIndex)
+                                    } else {
+                                        viewModel.exitChannelReorderMode()
                                     }
-                                    onBackPressed(now)
+                                    true
                                 }
-                                // Go back to fullscreen (only if a channel is playing)
-                                if (uiState.selectedChannel != null) {
-                                    viewModel.hideChannelList()
-                                    viewModel.enterFullscreen()
-                                }
-                                true
+                                Key.DirectionLeft, Key.DirectionRight -> true // block nav in reorder
+                                else -> false
                             }
-                            else -> false
+                        } else {
+                            when (event.key) {
+                                Key.DirectionLeft -> {
+                                    viewModel.onSearchChanged("")
+                                    viewModel.showCategories()
+                                    true
+                                }
+                                Key.DirectionRight, Key.Back -> {
+                                    if (event.key == Key.Back) {
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastBackPressTime < 1500L) {
+                                            onNavigateToHome()
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        onBackPressed(now)
+                                    }
+                                    if (uiState.selectedChannel != null) {
+                                        viewModel.hideChannelList()
+                                        viewModel.enterFullscreen()
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
                         }
                     }
             ) {
@@ -1571,7 +1759,8 @@ private fun ChannelListView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (uiState.searchQuery.isNotBlank()) "Search: \"${uiState.searchQuery}\""
+                        text = if (uiState.isChannelReorderMode) "Reorder Channels"
+                               else if (uiState.searchQuery.isNotBlank()) "Search: \"${uiState.searchQuery}\""
                                else uiState.selectedGroup ?: "All Channels",
                         color = MerlotColors.Accent,
                         fontSize = 13.sp,
@@ -1585,42 +1774,170 @@ private fun ChannelListView(
                     )
                 }
 
-                // Channel list — use itemsIndexed for O(1) index access
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    val focusTargetIndex = run {
-                        val idx = uiState.filteredChannels.indexOfFirst { it.id == uiState.selectedChannel?.id }
-                        if (idx >= 0) idx else 0
-                    }
-                    itemsIndexed(uiState.filteredChannels, key = { index, ch -> "${index}_${ch.id}" }) { index, channel ->
-                        ChannelItem(
-                            channel = channel,
-                            isSelected = channel.id == uiState.selectedChannel?.id,
-                            isFavorite = uiState.favoriteIds.contains(channel.id),
-                            onClick = { viewModel.onChannelSelected(channel) },
-                            onToggleFavorite = { viewModel.toggleFavorite(channel.id) },
-                            focusRequester = if (index == focusTargetIndex) channelFocusRequester else null
-                        )
-                    }
-                }
-
-                // Hint bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MerlotColors.Black.copy(alpha = 0.9f))
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.Center
-                ) {
+                if (uiState.isChannelReorderMode) {
+                    // ── Channel Reorder Mode ──
                     Text(
-                        text = "\u25C0 Categories  \u25B6 Hide  \u25CF Select",
-                        color = MerlotColors.TextMuted.copy(alpha = 0.6f),
-                        fontSize = 9.sp
+                        text = if (uiState.channelReorderMovingIndex >= 0) "⬆⬇ D-pad to move, OK to place"
+                               else "Select a channel, press OK to move it",
+                        color = if (uiState.channelReorderMovingIndex >= 0) MerlotColors.Accent else MerlotColors.TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = if (uiState.channelReorderMovingIndex >= 0) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                     )
+
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        itemsIndexed(uiState.reorderChannels, key = { index, ch -> "chreorder_${index}_${ch.id}" }) { index, channel ->
+                            val isMoving = uiState.channelReorderMovingIndex == index
+                            var isFocused by remember { mutableStateOf(false) }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    .background(
+                                        if (isMoving) MerlotColors.Accent.copy(alpha = 0.2f)
+                                        else if (isFocused) MerlotColors.Surface2.copy(alpha = 0.8f)
+                                        else MerlotColors.Surface2,
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .then(
+                                        if (isMoving) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(6.dp))
+                                        else if (isFocused) Modifier.border(1.dp, Color(0xFF888888), RoundedCornerShape(6.dp))
+                                        else Modifier
+                                    )
+                                    .onFocusChanged { isFocused = it.isFocused }
+                                    .focusable()
+                                    .clickable { viewModel.toggleChannelReorderMoving(index) }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${index + 1}.",
+                                    color = MerlotColors.TextMuted,
+                                    fontSize = 9.sp,
+                                    modifier = Modifier.width(28.dp)
+                                )
+                                if (channel.logoUrl.isNotEmpty()) {
+                                    AsyncImage(
+                                        model = channel.logoUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text(
+                                    channel.name,
+                                    color = if (isMoving) MerlotColors.Accent else MerlotColors.TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isMoving) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1
+                                )
+                                if (isMoving) {
+                                    Text("▲▼", color = MerlotColors.Accent, fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    // Save / Cancel
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Black.copy(alpha = 0.9f))
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                    ) {
+                        var chSaveFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = { viewModel.saveChannelReorder() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .onFocusChanged { chSaveFocused = it.isFocused }
+                                .then(if (chSaveFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                        ) {
+                            Text("Save", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MerlotColors.Accent)
+                        }
+                        var chCancelFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = { viewModel.exitChannelReorderMode() },
+                            colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .onFocusChanged { chCancelFocused = it.isFocused }
+                                .then(if (chCancelFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                        ) {
+                            Text("Cancel", fontSize = 11.sp, color = MerlotColors.TextMuted)
+                        }
+                    }
+                } else {
+                    // ── Normal Channel List ──
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        val focusTargetIndex = run {
+                            val idx = uiState.filteredChannels.indexOfFirst { it.id == uiState.selectedChannel?.id }
+                            if (idx >= 0) idx else 0
+                        }
+                        itemsIndexed(uiState.filteredChannels, key = { index, ch -> "${index}_${ch.id}" }) { index, channel ->
+                            ChannelItem(
+                                channel = channel,
+                                isSelected = channel.id == uiState.selectedChannel?.id,
+                                isFavorite = uiState.favoriteIds.contains(channel.id),
+                                onClick = { viewModel.onChannelSelected(channel) },
+                                onToggleFavorite = { viewModel.toggleFavorite(channel.id) },
+                                focusRequester = if (index == focusTargetIndex) channelFocusRequester else null
+                            )
+                        }
+                    }
+
+                    // Hint bar with reorder button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MerlotColors.Black.copy(alpha = 0.9f))
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "\u25C0 Categories  \u25B6 Hide  \u25CF Select",
+                            color = MerlotColors.TextMuted.copy(alpha = 0.6f),
+                            fontSize = 9.sp
+                        )
+                        var chReorderFocused by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = { viewModel.enterChannelReorderMode() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .onFocusChanged { chReorderFocused = it.isFocused }
+                                .then(if (chReorderFocused) Modifier.border(1.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("↕ Reorder", fontSize = 9.sp, color = MerlotColors.Accent)
+                        }
+                    }
                 }
             }
+        }
+
+        // ── Category Management Popup ──
+        if (uiState.showCategoryPopup) {
+            CategoryManagementPopup(
+                targetCategory = uiState.categoryPopupTarget,
+                hiddenCategories = uiState.hiddenCategories,
+                allCategories = viewModel.getAllCategories(),
+                onHide = { group -> viewModel.hideCategory(group) },
+                onUnhide = { group -> viewModel.unhideCategory(group) },
+                onDismiss = { viewModel.dismissCategoryPopup() }
+            )
         }
 
         // Bottom bar showing current channel info
@@ -1659,9 +1976,13 @@ private fun CategoryItem(
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    // Long-press detection: track when OK/Center is pressed down
+    var okDownTime by remember { mutableLongStateOf(0L) }
+    val longPressThreshold = 600L // ms
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1684,11 +2005,20 @@ private fun CategoryItem(
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
-                ) {
-                    onClick()
-                    true
+                if (event.key == Key.DirectionCenter || event.key == Key.Enter) {
+                    if (event.type == KeyEventType.KeyDown) {
+                        if (okDownTime == 0L) okDownTime = System.currentTimeMillis()
+                        true
+                    } else { // KeyUp
+                        val held = System.currentTimeMillis() - okDownTime
+                        okDownTime = 0L
+                        if (held >= longPressThreshold && onLongPress != null) {
+                            onLongPress()
+                        } else {
+                            onClick()
+                        }
+                        true
+                    }
                 } else false
             }
             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -2467,6 +2797,199 @@ private fun EpgCategoryPicker(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Category Management Popup — hide/unhide categories
+// ═══════════════════════════════════════════════════════════════════
+
+@Composable
+private fun CategoryManagementPopup(
+    targetCategory: String?,
+    hiddenCategories: Set<String>,
+    allCategories: List<String>,
+    onHide: (String) -> Unit,
+    onUnhide: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .width(340.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MerlotColors.Surface)
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                        onDismiss()
+                        true
+                    } else false
+                }
+        ) {
+            // Header
+            Text(
+                text = if (targetCategory == "__manage__") "Manage Categories" else "Category Options",
+                color = MerlotColors.Accent,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(16.dp)
+            )
+            Spacer(modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MerlotColors.Border))
+
+            if (targetCategory != null && targetCategory != "__manage__") {
+                // ── Single category popup (long-press on a specific category) ──
+                val isHidden = hiddenCategories.contains(targetCategory)
+                Text(
+                    text = targetCategory,
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+
+                // Hide/Show button
+                var hideFocused by remember { mutableStateOf(false) }
+                Button(
+                    onClick = {
+                        if (isHidden) onUnhide(targetCategory) else onHide(targetCategory)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isHidden) MerlotColors.Accent.copy(alpha = 0.2f) else Color(0xFF8B0000).copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .onFocusChanged { hideFocused = it.isFocused }
+                        .then(if (hideFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                ) {
+                    Text(
+                        if (isHidden) "Show Category" else "Hide Category",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isHidden) MerlotColors.Accent else Color(0xFFFF6B6B)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Close button
+                var closeFocused by remember { mutableStateOf(false) }
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .onFocusChanged { closeFocused = it.isFocused }
+                        .then(if (closeFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                ) {
+                    Text("Close", fontSize = 13.sp, color = MerlotColors.TextMuted)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            } else {
+                // ── Full manage view (from "Manage" button) ──
+                Text(
+                    text = "Toggle visibility of categories. Hidden categories won't appear in the sidebar.",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+                if (hiddenCategories.isNotEmpty()) {
+                    Text(
+                        text = "${hiddenCategories.size} hidden",
+                        color = Color(0xFFFF6B6B),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth()
+                        .height(350.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    items(allCategories) { group ->
+                        val isHidden = hiddenCategories.contains(group)
+                        var isFocused by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isHidden) Color(0xFF8B0000).copy(alpha = 0.15f)
+                                    else if (isFocused) MerlotColors.Surface2.copy(alpha = 0.8f)
+                                    else MerlotColors.Surface2
+                                )
+                                .then(
+                                    if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+                                    else if (isHidden) Modifier.border(1.dp, Color(0xFFFF6B6B).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    else Modifier
+                                )
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .clickable {
+                                    if (isHidden) onUnhide(group) else onHide(group)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Visibility icon
+                            Text(
+                                text = if (isHidden) "X" else "O",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isHidden) Color(0xFFFF6B6B) else MerlotColors.Accent,
+                                modifier = Modifier.width(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = group,
+                                color = if (isHidden) Color(0xFFFF6B6B).copy(alpha = 0.6f) else MerlotColors.TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = if (isHidden) "HIDDEN" else "VISIBLE",
+                                color = if (isHidden) Color(0xFFFF6B6B) else MerlotColors.Accent,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Done button
+                var doneFocused by remember { mutableStateOf(false) }
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = MerlotColors.Surface2),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .onFocusChanged { doneFocused = it.isFocused }
+                        .then(if (doneFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
+                ) {
+                    Text("Done", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MerlotColors.Accent)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }

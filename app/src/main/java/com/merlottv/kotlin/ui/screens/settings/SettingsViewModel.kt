@@ -73,6 +73,8 @@ data class SettingsUiState(
     // Live TV category order
     val categoryOrder: List<String> = emptyList(),
     val availableCategories: List<String> = emptyList(),
+    // Live TV hidden categories
+    val liveTvHiddenCategories: Set<String> = emptySet(),
     // Live TV buffer duration (ms) — adjustable 300–3000 in 100ms steps
     val bufferDurationMs: Int = 800,
     // Buffer Automatic Backup Scan — auto-failover to backup M3U on rebuffer
@@ -759,7 +761,8 @@ class SettingsViewModel @Inject constructor(
     private fun loadCategoryOrder() {
         viewModelScope.launch {
             val savedOrder = settingsDataStore.categoryOrder.first()
-            _uiState.value = _uiState.value.copy(categoryOrder = savedOrder)
+            val hiddenCats = try { settingsDataStore.liveTvHiddenCategories.first() } catch (_: Exception) { emptySet() }
+            _uiState.value = _uiState.value.copy(categoryOrder = savedOrder, liveTvHiddenCategories = hiddenCats)
 
             // Load available categories from playlists
             try {
@@ -819,6 +822,24 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.setCategoryOrder(emptyList())
             _uiState.value = _uiState.value.copy(categoryOrder = _uiState.value.availableCategories)
             cloudSyncManager.notifySettingsChanged()
+        }
+    }
+
+    // ─── Live TV Hidden Categories ───
+
+    fun toggleHiddenCategory(group: String) {
+        viewModelScope.launch {
+            val current = _uiState.value.liveTvHiddenCategories.toMutableSet()
+            if (current.contains(group)) current.remove(group) else current.add(group)
+            settingsDataStore.setLiveTvHiddenCategories(current)
+            _uiState.value = _uiState.value.copy(liveTvHiddenCategories = current)
+        }
+    }
+
+    fun unhideAllCategories() {
+        viewModelScope.launch {
+            settingsDataStore.setLiveTvHiddenCategories(emptySet())
+            _uiState.value = _uiState.value.copy(liveTvHiddenCategories = emptySet())
         }
     }
 

@@ -168,6 +168,7 @@ class ChannelRepositoryImpl @Inject constructor(
                 playlists.map { (playlistName, url) ->
                     async {
                         try {
+                            Log.d("ChannelRepo", "Loading playlist '$playlistName': ${url.take(60)}...")
                             val channels = if (url.startsWith("xtream://")) {
                                 loadXtreamApiChannels(url, outputFormat)
                             } else {
@@ -180,6 +181,7 @@ class ChannelRepositoryImpl @Inject constructor(
                                     else emptyList()
                                 }
                             }
+                            Log.d("ChannelRepo", "Loaded ${channels.size} channels from '$playlistName'")
                             // Prefix group with playlist name for multi-source grouping
                             if (playlists.size > 1) {
                                 channels.map { ch ->
@@ -188,7 +190,8 @@ class ChannelRepositoryImpl @Inject constructor(
                             } else {
                                 channels
                             }
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            Log.e("ChannelRepo", "Failed to load '$playlistName': ${e.message}", e)
                             emptyList()
                         }
                     }
@@ -210,59 +213,87 @@ class ChannelRepositoryImpl @Inject constructor(
         // Parse: xtream://host:port/username/password
         val parts = xtreamUrl.removePrefix("xtream://")
         val segments = parts.split("/")
-        if (segments.size < 3) return emptyList()
+        if (segments.size < 3) {
+            Log.e("ChannelRepo", "Xtream URL parse failed, segments=${segments.size}: $xtreamUrl")
+            return emptyList()
+        }
         val hostPort = segments[0] // e.g. pianopride.com:8080
         val username = segments[1]
         val password = segments[2]
         val baseUrl = "http://$hostPort"
+        Log.d("ChannelRepo", "Xtream API: host=$hostPort, user=$username, format=$outputFormat")
 
         try {
+            // Helper: fetch JSON array with 1 retry on parse failure
+            fun fetchJsonArray(url: String, label: String): JSONArray? {
+                for (attempt in 1..2) {
+                    try {
+                        val request = Request.Builder().url(url).build()
+                        val body = playlistClient.newCall(request).execute().use { resp ->
+                            resp.body?.string()
+                        }
+                        if (body.isNullOrBlank()) {
+                            Log.w("ChannelRepo", "Xtream $label attempt $attempt: empty body")
+                            continue
+                        }
+                        val trimmed = body.trim()
+                        if (!trimmed.startsWith("[")) {
+                            Log.w("ChannelRepo", "Xtream $label attempt $attempt: not JSON array, starts with '${trimmed.take(20)}'")
+                            if (attempt == 1) { Thread.sleep(500); continue }
+                            return null
+                        }
+                        return JSONArray(trimmed)
+                    } catch (e: Exception) {
+                        Log.w("ChannelRepo", "Xtream $label attempt $attempt failed: ${e.message}")
+                        if (attempt == 1) { Thread.sleep(500) }
+                    }
+                }
+                return null
+            }
+
             // Fetch categories
-            val catRequest = Request.Builder()
-                .url("$baseUrl/player_api.php?username=$username&password=$password&action=get_live_categories")
-                .build()
+            val catUrl = "$baseUrl/player_api.php?username=$username&password=$password&action=get_live_categories"
             val catMap = mutableMapOf<String, String>() // category_id → category_name
-            playlistClient.newCall(catRequest).execute().use { resp ->
-                val body = resp.body?.string() ?: return emptyList()
-                val catArray = JSONArray(body)
+            val catArray = fetchJsonArray(catUrl, "categories")
+            if (catArray != null) {
                 for (i in 0 until catArray.length()) {
                     val cat = catArray.getJSONObject(i)
                     catMap[cat.optString("category_id")] = cat.optString("category_name", "Uncategorized")
                 }
             }
+            Log.d("ChannelRepo", "Xtream loaded ${catMap.size} categories from $hostPort")
 
             // Fetch live streams
-            val streamRequest = Request.Builder()
-                .url("$baseUrl/player_api.php?username=$username&password=$password&action=get_live_streams")
-                .build()
+            val streamUrl = "$baseUrl/player_api.php?username=$username&password=$password&action=get_live_streams"
             val channels = mutableListOf<Channel>()
-            playlistClient.newCall(streamRequest).execute().use { resp ->
-                val body = resp.body?.string() ?: return emptyList()
-                val streamArray = JSONArray(body)
-                for (i in 0 until streamArray.length()) {
-                    val stream = streamArray.getJSONObject(i)
-                    val streamId = stream.optInt("stream_id", 0)
-                    val name = stream.optString("name", "")
-                    val categoryId = stream.optString("category_id", "")
-                    val group = catMap[categoryId] ?: "Uncategorized"
-                    val logo = stream.optString("stream_icon", "")
-                    val epgId = stream.optString("epg_channel_id", "")
+            val streamArray = fetchJsonArray(streamUrl, "streams")
+            if (streamArray == null) {
+                Log.e("ChannelRepo", "Xtream API: failed to load streams from $hostPort after retries")
+                return emptyList()
+            }
+            for (i in 0 until streamArray.length()) {
+                val stream = streamArray.getJSONObject(i)
+                val streamId = stream.optInt("stream_id", 0)
+                val name = stream.optString("name", "")
+                val categoryId = stream.optString("category_id", "")
+                val group = catMap[categoryId] ?: "Uncategorized"
+                val logo = stream.optString("stream_icon", "")
+                val epgId = stream.optString("epg_channel_id", "")
 
-                    // Build stream URL using configured format (HLS .m3u8 or MPEG-TS .ts)
-                    val streamUrl = "$baseUrl/live/$username/$password/$streamId.$outputFormat"
+                // Build stream URL using configured format (HLS .m3u8 or MPEG-TS .ts)
+                val chStreamUrl = "$baseUrl/live/$username/$password/$streamId.$outputFormat"
 
-                    channels.add(
-                        Channel(
-                            id = epgId.ifEmpty { "xtream_$streamId" },
-                            name = name,
-                            group = group,
-                            logoUrl = logo,
-                            streamUrl = streamUrl,
-                            epgId = epgId,
-                            number = i + 1
-                        )
+                channels.add(
+                    Channel(
+                        id = epgId.ifEmpty { "xtream_$streamId" },
+                        name = name,
+                        group = group,
+                        logoUrl = logo,
+                        streamUrl = chStreamUrl,
+                        epgId = epgId,
+                        number = i + 1
                     )
-                }
+                )
             }
 
             Log.d("ChannelRepo", "Xtream API loaded ${channels.size} channels from $hostPort")

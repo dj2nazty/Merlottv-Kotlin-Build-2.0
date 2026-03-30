@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -287,16 +288,22 @@ private fun ExitConfirmationDialog(
         try { noFocusRequester.requestFocus() } catch (_: Exception) {}
     }
 
-    // Full-screen semi-transparent backdrop
+    // Full-screen semi-transparent backdrop — block all input from reaching content behind
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.7f))
-            .onPreviewKeyEvent { event ->
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null
+            ) { /* consume clicks on backdrop */ }
+            .onKeyEvent { event ->
+                // Bubble phase: consume any key events that weren't handled by the dialog buttons
+                // This prevents D-pad from reaching Settings/content behind the dialog
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                     onDismiss()
-                    true
-                } else false
+                }
+                true // consume ALL unhandled key events
             },
         contentAlignment = Alignment.Center
     ) {
