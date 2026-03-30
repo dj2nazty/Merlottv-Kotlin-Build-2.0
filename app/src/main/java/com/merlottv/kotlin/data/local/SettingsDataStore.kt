@@ -133,11 +133,11 @@ class SettingsDataStore(private val context: Context) {
         if (json != null) {
             parsePlaylistsJson(json)
         } else {
-            // First launch / migration — include Xtreme Backup by default
+            // First launch / migration — Merlot TV on, Xtreme Backup off by default
             val singleUrl = prefs[PLAYLIST_URL] ?: DEFAULT_PLAYLIST
             listOf(
                 PlaylistEntry("Merlot TV", singleUrl, true),
-                PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, true)
+                PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, false)
             )
         }
     }
@@ -152,7 +152,7 @@ class SettingsDataStore(private val context: Context) {
                 if (list.none { it.url == XTREME_BACKUP_PLAYLIST }) {
                     val merlot = list.firstOrNull()
                     val rest = list.drop(1)
-                    val updated = listOfNotNull(merlot) + PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, true) + rest
+                    val updated = listOfNotNull(merlot) + PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, false) + rest
                     val jsonArray = JSONArray()
                     updated.forEach { entry ->
                         val obj = JSONObject()
