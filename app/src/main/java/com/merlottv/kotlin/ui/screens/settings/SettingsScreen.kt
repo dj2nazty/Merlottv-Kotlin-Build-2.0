@@ -110,21 +110,23 @@ private fun Modifier.dpadFocusable(
     var isFocused by remember { mutableStateOf(false) }
     return this
         .onFocusChanged { isFocused = it.isFocused }
+        .onPreviewKeyEvent { event ->
+            if (event.type == KeyEventType.KeyDown &&
+                (event.key == Key.DirectionCenter || event.key == Key.Enter ||
+                 event.key == Key.NumPadEnter)
+            ) {
+                onClick()
+                true
+            } else false
+        }
         .focusable()
+        .clickable { onClick() }
         .then(
             if (isFocused) Modifier
                 .border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
                 .background(MerlotColors.Accent.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
             else Modifier.border(2.dp, Color.Transparent, RoundedCornerShape(8.dp))
         )
-        .onPreviewKeyEvent { event ->
-            if (event.type == KeyEventType.KeyDown &&
-                (event.key == Key.DirectionCenter || event.key == Key.Enter)
-            ) {
-                onClick()
-                true
-            } else false
-        }
 }
 
 /**
