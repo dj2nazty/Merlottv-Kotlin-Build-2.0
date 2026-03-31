@@ -135,6 +135,18 @@ class SettingsViewModel @Inject constructor(
         loadSettings()
         loadProfiles()
         loadCategoryOrder()
+        cleanupOldUpdateApk()
+    }
+
+    /** Delete any leftover update APK from a previous download to free storage */
+    private fun cleanupOldUpdateApk() {
+        try {
+            val apkFile = java.io.File(getApplication<Application>().cacheDir, "merlottv_update.apk")
+            if (apkFile.exists()) {
+                apkFile.delete()
+                android.util.Log.d("Settings", "Cleaned up old update APK (${apkFile.length() / 1024 / 1024}MB freed)")
+            }
+        } catch (_: Exception) {}
     }
 
     private fun loadSettings() {
@@ -453,6 +465,15 @@ class SettingsViewModel @Inject constructor(
                     addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(installIntent)
+
+                // Clean up the downloaded APK after a short delay
+                // (give the installer time to read the file first)
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(10_000) // 10 seconds
+                    try {
+                        if (apkFile.exists()) apkFile.delete()
+                    } catch (_: Exception) {}
+                }
 
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

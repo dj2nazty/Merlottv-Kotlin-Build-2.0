@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -31,6 +33,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,15 +49,21 @@ import com.merlottv.kotlin.domain.model.BackupTvChannel
 import com.merlottv.kotlin.ui.components.MerlotChip
 import com.merlottv.kotlin.ui.theme.MerlotColors
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun ChannelBackupScreen(
     viewModel: ChannelBackupViewModel = hiltViewModel(),
     onStreamSelected: (streamUrl: String, channelName: String, logoUrl: String) -> Unit = { _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val focusManager = LocalFocusManager.current
 
     // Track which channel's stream picker is open (USA TV only)
     var selectedChannel by remember { mutableStateOf<BackupTvChannel?>(null) }
+
+    // Focus requesters for cross-section D-pad navigation
+    val genreChipsFocusRequester = remember { FocusRequester() }
+    val tabsFocusRequester = remember { FocusRequester() }
 
     // Lazy load — only fetch data when this screen is first composed
     LaunchedEffect(Unit) { viewModel.onScreenVisible() }
@@ -104,6 +113,12 @@ fun ChannelBackupScreen(
                 onClick = { viewModel.refresh() },
                 modifier = Modifier
                     .size(36.dp)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                            focusManager.moveFocus(FocusDirection.Left)
+                            true
+                        } else false
+                    }
                     .onFocusChanged { refreshFocused = it.isFocused }
                     .focusable()
                     .then(
@@ -127,11 +142,7 @@ fun ChannelBackupScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .onKeyEvent { event ->
-                    // Consume LEFT to prevent sidebar opening from tab area
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) true
-                    else false
-                }
+                .focusRequester(tabsFocusRequester)
         ) {
             TabButton(
                 label = "USA TV",
@@ -153,7 +164,9 @@ fun ChannelBackupScreen(
         if (activeGenres.isNotEmpty()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(genreChipsFocusRequester)
             ) {
                 itemsIndexed(activeGenres) { index, genre ->
                     GenreChip(
@@ -199,6 +212,12 @@ fun ChannelBackupScreen(
                                 contentColor = if (retryFocused) MerlotColors.Black else MerlotColors.TextPrimary
                             ),
                             modifier = Modifier
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                                        focusManager.moveFocus(FocusDirection.Left)
+                                        true
+                                    } else false
+                                }
                                 .onFocusChanged { retryFocused = it.isFocused }
                                 .focusable()
                         ) {
@@ -218,6 +237,7 @@ fun ChannelBackupScreen(
                     ChannelGrid(
                         channels = activeChannels,
                         showProgramInfo = !isUsaTv, // Show current program for TV Pass
+                        genreChipsFocusRequester = genreChipsFocusRequester,
                         onChannelClick = { channel ->
                             if (isUsaTv) {
                                 // USA TV: show stream picker if multiple streams
@@ -286,6 +306,8 @@ private fun TabButton(
         else -> Modifier
     }
 
+    val tabFocusManager = LocalFocusManager.current
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -293,10 +315,17 @@ private fun TabButton(
             .background(bgColor)
             .then(borderMod)
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
-                ) {
-                    onClick(); true
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            onClick(); true
+                        }
+                        Key.DirectionLeft -> {
+                            tabFocusManager.moveFocus(FocusDirection.Left)
+                            true // Always consume to prevent sidebar
+                        }
+                        else -> false
+                    }
                 } else false
             }
             .onFocusChanged { isFocused = it.isFocused }
@@ -531,13 +560,29 @@ private fun StreamItem(
 private fun ChannelGrid(
     channels: List<BackupTvChannel>,
     showProgramInfo: Boolean = false,
+    genreChipsFocusRequester: FocusRequester,
     onChannelClick: (BackupTvChannel) -> Unit
 ) {
+    val gridState = rememberLazyGridState()
+
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Adaptive(minSize = 140.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(bottom = 16.dp),
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            // When at top of grid and UP pressed, move focus to genre chips
+            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
+                val firstVisible = gridState.firstVisibleItemIndex
+                val offset = gridState.firstVisibleItemScrollOffset
+                if (firstVisible == 0 && offset == 0) {
+                    try { genreChipsFocusRequester.requestFocus() } catch (_: Exception) {}
+                    return@onPreviewKeyEvent true
+                }
+            }
+            false
+        }
     ) {
         items(channels, key = { it.id }) { channel ->
             ChannelCard(
@@ -557,6 +602,7 @@ private fun ChannelCard(
     showProgramInfo: Boolean = false,
     onClick: () -> Unit
 ) {
+    val cardFocusManager = LocalFocusManager.current
     var isFocused by remember { mutableStateOf(false) }
 
     Column(
@@ -568,15 +614,22 @@ private fun ChannelCard(
                 if (isFocused) Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(10.dp))
                 else Modifier.border(1.dp, MerlotColors.Border, RoundedCornerShape(10.dp))
             )
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
-                ) {
-                    onClick(); true
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            onClick(); true
+                        }
+                        Key.DirectionLeft -> {
+                            cardFocusManager.moveFocus(FocusDirection.Left)
+                            true // Always consume to prevent sidebar
+                        }
+                        else -> false
+                    }
                 } else false
             }
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
             .padding(12.dp)
     ) {
         // Channel logo
@@ -662,12 +715,14 @@ private fun GenreChip(
     onClick: () -> Unit,
     itemIndex: Int = 0
 ) {
+    val chipFocusManager = LocalFocusManager.current
     Box(
-        modifier = Modifier.onKeyEvent { event ->
-            // Consume LEFT to prevent sidebar opening from genre chip area
-            if (event.type == KeyEventType.KeyDown &&
-                event.key == Key.DirectionLeft
-            ) true else false
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            // Capture phase: intercept LEFT, move focus manually, always consume
+            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
+                chipFocusManager.moveFocus(FocusDirection.Left)
+                true
+            } else false
         }
     ) {
         MerlotChip(
