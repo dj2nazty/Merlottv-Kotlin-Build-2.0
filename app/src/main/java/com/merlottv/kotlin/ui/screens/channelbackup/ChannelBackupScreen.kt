@@ -53,11 +53,19 @@ fun ChannelBackupScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Track which channel's stream picker is open
+    // Track which channel's stream picker is open (USA TV only)
     var selectedChannel by remember { mutableStateOf<BackupTvChannel?>(null) }
 
     // Lazy load — only fetch data when this screen is first composed
     LaunchedEffect(Unit) { viewModel.onScreenVisible() }
+
+    // Resolve active tab state
+    val isUsaTv = uiState.activeTab == BackupTab.USA_TV
+    val activeLoading = if (isUsaTv) uiState.isLoading else uiState.tvPassLoading
+    val activeError = if (isUsaTv) uiState.error else uiState.tvPassError
+    val activeChannels = if (isUsaTv) uiState.filteredChannels else uiState.tvPassFilteredChannels
+    val activeGenres = if (isUsaTv) uiState.genres else uiState.tvPassGenres
+    val activeSelectedGenre = if (isUsaTv) uiState.selectedGenre else uiState.tvPassSelectedGenre
 
     Column(
         modifier = Modifier
@@ -78,9 +86,9 @@ fun ChannelBackupScreen(
             )
             Spacer(Modifier.width(8.dp))
             // Channel count badge
-            if (uiState.filteredChannels.isNotEmpty()) {
+            if (activeChannels.isNotEmpty()) {
                 Text(
-                    "${uiState.filteredChannels.size}",
+                    "${activeChannels.size}",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = MerlotColors.Accent,
@@ -114,17 +122,47 @@ fun ChannelBackupScreen(
 
         Spacer(Modifier.height(8.dp))
 
+        // ─── Tab Row ───
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onKeyEvent { event ->
+                    // Consume LEFT to prevent sidebar opening from tab area
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) true
+                    else false
+                }
+        ) {
+            TabButton(
+                label = "USA TV",
+                isActive = uiState.activeTab == BackupTab.USA_TV,
+                onClick = { viewModel.switchTab(BackupTab.USA_TV) },
+                tabIndex = 0
+            )
+            TabButton(
+                label = "TV Pass",
+                isActive = uiState.activeTab == BackupTab.TV_PASS,
+                onClick = { viewModel.switchTab(BackupTab.TV_PASS) },
+                tabIndex = 1
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
         // ─── Genre filter chips ───
-        if (uiState.genres.isNotEmpty()) {
+        if (activeGenres.isNotEmpty()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                itemsIndexed(uiState.genres) { index, genre ->
+                itemsIndexed(activeGenres) { index, genre ->
                     GenreChip(
                         label = genre,
-                        selected = uiState.selectedGenre == genre,
-                        onClick = { viewModel.selectGenre(genre) },
+                        selected = activeSelectedGenre == genre,
+                        onClick = {
+                            if (isUsaTv) viewModel.selectGenre(genre)
+                            else viewModel.selectTvPassGenre(genre)
+                        },
                         itemIndex = index
                     )
                 }
@@ -136,19 +174,19 @@ fun ChannelBackupScreen(
         // ─── Content Area ───
         Box(modifier = Modifier.fillMaxSize()) {
             when {
-                uiState.isLoading -> {
+                activeLoading -> {
                     CircularProgressIndicator(
                         color = MerlotColors.Accent,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
-                uiState.error != null && uiState.filteredChannels.isEmpty() -> {
+                activeError != null && activeChannels.isEmpty() -> {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.align(Alignment.Center)
                     ) {
                         Text(
-                            uiState.error ?: "Error",
+                            activeError ?: "Error",
                             color = MerlotColors.TextMuted,
                             fontSize = 14.sp,
                             modifier = Modifier.padding(bottom = 12.dp)
@@ -168,7 +206,7 @@ fun ChannelBackupScreen(
                         }
                     }
                 }
-                uiState.filteredChannels.isEmpty() -> {
+                activeChannels.isEmpty() -> {
                     Text(
                         "No channels found",
                         color = MerlotColors.TextMuted,
@@ -178,15 +216,38 @@ fun ChannelBackupScreen(
                 }
                 else -> {
                     ChannelGrid(
-                        channels = uiState.filteredChannels,
-                        onChannelClick = { channel -> selectedChannel = channel }
+                        channels = activeChannels,
+                        showProgramInfo = !isUsaTv, // Show current program for TV Pass
+                        onChannelClick = { channel ->
+                            if (isUsaTv) {
+                                // USA TV: show stream picker if multiple streams
+                                if (channel.streams.size > 1) {
+                                    selectedChannel = channel
+                                } else if (channel.streams.isNotEmpty()) {
+                                    onStreamSelected(
+                                        channel.streams.first().url,
+                                        channel.name,
+                                        channel.logoUrl
+                                    )
+                                }
+                            } else {
+                                // TV Pass: play directly (single stream per channel)
+                                if (channel.streams.isNotEmpty()) {
+                                    onStreamSelected(
+                                        channel.streams.first().url,
+                                        channel.name,
+                                        channel.logoUrl
+                                    )
+                                }
+                            }
+                        }
                     )
                 }
             }
         }
     }
 
-    // ─── Stream Picker Dialog ───
+    // ─── Stream Picker Dialog (USA TV only) ───
     selectedChannel?.let { channel ->
         StreamPickerDialog(
             channel = channel,
@@ -195,6 +256,58 @@ fun ChannelBackupScreen(
                 onStreamSelected(stream.url, channel.name, channel.logoUrl)
             },
             onDismiss = { selectedChannel = null }
+        )
+    }
+}
+
+// ─── Tab Button ──────────────────────────────────────────────────────
+
+@Composable
+private fun TabButton(
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    tabIndex: Int = 0
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    val bgColor = when {
+        isActive -> MerlotColors.Accent
+        isFocused -> MerlotColors.Hover
+        else -> MerlotColors.Surface2
+    }
+    val textColor = when {
+        isActive -> MerlotColors.Black
+        isFocused -> MerlotColors.Accent
+        else -> MerlotColors.TextMuted
+    }
+    val borderMod = when {
+        isFocused && !isActive -> Modifier.border(2.dp, MerlotColors.Accent, RoundedCornerShape(8.dp))
+        else -> Modifier
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .then(borderMod)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
+                ) {
+                    onClick(); true
+                } else false
+            }
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = textColor
         )
     }
 }
@@ -417,6 +530,7 @@ private fun StreamItem(
 @Composable
 private fun ChannelGrid(
     channels: List<BackupTvChannel>,
+    showProgramInfo: Boolean = false,
     onChannelClick: (BackupTvChannel) -> Unit
 ) {
     LazyVerticalGrid(
@@ -426,7 +540,11 @@ private fun ChannelGrid(
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
         items(channels, key = { it.id }) { channel ->
-            ChannelCard(channel = channel, onClick = { onChannelClick(channel) })
+            ChannelCard(
+                channel = channel,
+                showProgramInfo = showProgramInfo,
+                onClick = { onChannelClick(channel) }
+            )
         }
     }
 }
@@ -434,7 +552,11 @@ private fun ChannelGrid(
 // ─── Channel Card ─────────────────────────────────────────────────────
 
 @Composable
-private fun ChannelCard(channel: BackupTvChannel, onClick: () -> Unit) {
+private fun ChannelCard(
+    channel: BackupTvChannel,
+    showProgramInfo: Boolean = false,
+    onClick: () -> Unit
+) {
     var isFocused by remember { mutableStateOf(false) }
 
     Column(
@@ -450,7 +572,7 @@ private fun ChannelCard(channel: BackupTvChannel, onClick: () -> Unit) {
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter)
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
                 ) {
                     onClick(); true
                 } else false
@@ -507,8 +629,20 @@ private fun ChannelCard(channel: BackupTvChannel, onClick: () -> Unit) {
             maxLines = 1
         )
 
-        // Stream count indicator
-        if (channel.streams.size > 1) {
+        // Current program (TV Pass) or stream count (USA TV)
+        if (showProgramInfo) {
+            val program = channel.streams.firstOrNull()?.description
+            if (!program.isNullOrEmpty()) {
+                Text(
+                    program,
+                    fontSize = 9.sp,
+                    color = MerlotColors.Accent,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        } else if (channel.streams.size > 1) {
             Text(
                 "${channel.streams.size} streams",
                 fontSize = 8.sp,
@@ -530,9 +664,9 @@ private fun GenreChip(
 ) {
     Box(
         modifier = Modifier.onKeyEvent { event ->
-            // Consume LEFT after focus move to prevent sidebar opening
+            // Consume LEFT to prevent sidebar opening from genre chip area
             if (event.type == KeyEventType.KeyDown &&
-                event.key == Key.DirectionLeft && itemIndex > 0
+                event.key == Key.DirectionLeft
             ) true else false
         }
     ) {
