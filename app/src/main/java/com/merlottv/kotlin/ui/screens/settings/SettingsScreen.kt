@@ -334,6 +334,27 @@ fun SettingsScreen(
                 .focusable()
         )
 
+        // ═══ About These Settings ═══ [General]
+        if (selectedTab == "General") {
+            SettingsSection(
+                title = "About These Settings",
+                icon = { Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = MerlotColors.Accent) },
+                startExpanded = false
+            ) {
+                Text("About", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Shows app version, build number, and release notes. Check for updates here.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Internet Speed Test", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Tests your network download/upload speed to help diagnose streaming issues.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Weather Alerts", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Shows scrolling NWS weather alerts on Live TV and VOD screens when active alerts exist for your area.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Profiles", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Create up to 6 profiles, each with its own favorites and watch history. Tap to switch, long-press to delete.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+            }
+        }
+
         // ═══ About ═══ [General]
         if (selectedTab == "General") {
             SettingsSection(title = "About", icon = { Icon(Icons.Default.Info, null, tint = MerlotColors.Accent) }, startExpanded = true) {
@@ -466,6 +487,36 @@ fun SettingsScreen(
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(6.dp)); Text("Run Speed Test", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
+            }
+        }
+
+        // ═══ About These Settings ═══ [Playback]
+        if (selectedTab == "Playback") {
+            SettingsSection(
+                title = "About These Settings",
+                icon = { Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = MerlotColors.Accent) },
+                startExpanded = false
+            ) {
+                Text("Live TV Buffer", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Controls how much video is buffered before playback starts. Lower values mean faster channel switching but more buffering on slow connections. Default is 0.8 seconds.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Buffer Automatic Backup Scan", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("When enabled, automatically switches to a backup stream after 2 rebuffers so your channels keep playing without manual intervention.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Home & VOD Categories", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Customize which catalog rows appear on Home and VOD screens. Reorder or hide categories you don't want.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Bitrate Checker", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Shows real-time video/audio bitrate, codec info, and network throughput in the Live TV Quick Menu overlay.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Frame Rate Matching", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Matches your display refresh rate to the video frame rate to eliminate judder, especially on 24fps cinema content.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Next Episode Auto-Play", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Automatically plays the next episode when the current one nears completion. Shows a countdown card before switching.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Stream Format", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Switches Xtream Codes streams between HLS (adaptive, better for variable connections) and MPEG-TS (lower latency, can reduce buffering on some providers).", color = MerlotColors.TextMuted, fontSize = 12.sp)
             }
         }
 
@@ -1047,6 +1098,33 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ About These Settings ═══ [Sources]
+        if (selectedTab == "Sources") {
+            SettingsSection(
+                title = "About These Settings",
+                icon = { Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = MerlotColors.Accent) },
+                startExpanded = false
+            ) {
+                Text("Playlists / M3U", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Add M3U playlist URLs for Live TV channels. Enable or disable individual playlists. All enabled playlists load together in Live TV.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("EPG Sources", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Electronic Program Guide data for TV listings. Default sources are built-in. Add custom EPG XML URLs for additional program data.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Backup Stream Sources", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Backup M3U playlists used as failover. When a live stream fails, the app searches these for a working alternative automatically.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Xtreme Backup Servers", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Xtream Codes API servers for additional channel sources. Add server URL, username, and password to browse their channel catalog.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("YouTube Channels", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Add custom YouTube channels by handle (@username). They appear alongside the built-in channels in the YouTube section.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Torbox", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Enter your Torbox API key to enable torrent-based streaming for VOD content.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+            }
+        }
+
         // ═══ Playlists / M3U ═══ [Sources]
         if (selectedTab == "Sources") {
             SettingsSection(title = "Playlists / M3U", icon = { Icon(Icons.Default.Settings, null, tint = MerlotColors.Accent) }) {
@@ -1401,6 +1479,18 @@ fun SettingsScreen(
             }
         }
 
+        // ═══ About These Settings ═══ [Addons]
+        if (selectedTab == "Addons") {
+            SettingsSection(
+                title = "About These Settings",
+                icon = { Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = MerlotColors.Accent) },
+                startExpanded = false
+            ) {
+                Text("Stremio Addons", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Addons extend Merlot TV with additional streaming sources for movies and TV shows. Default addons are built-in. Add custom addon manifest URLs to expand your content library.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+            }
+        }
+
         // ═══ Stremio Addons ═══ [Addons]
         if (selectedTab == "Addons") {
             SettingsSection(title = "Stremio Addons", icon = { Icon(Icons.Default.Add, null, tint = MerlotColors.Accent) }) {
@@ -1479,6 +1569,21 @@ fun SettingsScreen(
         }
 
         // ═══ VOD Category System ═══ [moved to Playback tab below]
+
+        // ═══ About These Settings ═══ [Advanced]
+        if (selectedTab == "Advanced") {
+            SettingsSection(
+                title = "About These Settings",
+                icon = { Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = MerlotColors.Accent) },
+                startExpanded = false
+            ) {
+                Text("Live TV Categories", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Reorder the category list in the Live TV sidebar. Select a category and use D-pad Up/Down to move it, press OK to confirm the new position.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Hidden Categories", color = MerlotColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Shows categories you've hidden from Live TV. Tap a hidden category to unhide it, or use \"Unhide All\" to restore everything.", color = MerlotColors.TextMuted, fontSize = 12.sp)
+            }
+        }
 
         // ═══ Live TV Category Order ═══ [Advanced]
         if (selectedTab == "Advanced" && uiState.categoryOrder.isNotEmpty()) {
