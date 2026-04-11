@@ -56,6 +56,7 @@ import com.merlottv.kotlin.ui.theme.MerlotColors
 import com.merlottv.kotlin.ui.components.VideoSplashScreen
 import com.merlottv.kotlin.ui.theme.MerlotTVTheme
 import com.merlottv.kotlin.ui.viewmodels.AlertsViewModel
+import com.merlottv.kotlin.ui.viewmodels.AutoUpdateViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -177,6 +178,10 @@ fun MerlotApp() {
     val showAlertBanner by alertsViewModel.showBanner.collectAsState()
     val alertsEnabled by alertsViewModel.alertsEnabled.collectAsState()
 
+    // Auto-update — checks GitHub on launch, downloads in background
+    val autoUpdateViewModel: AutoUpdateViewModel = hiltViewModel()
+    val updateState by autoUpdateViewModel.state.collectAsState()
+
     // Always start at ProfilePicker — it auto-redirects to Home if a profile is already set
     // This avoids creating a duplicate ProfileDataStore outside of Hilt
     val startDestination = Screen.ProfilePicker.route
@@ -268,6 +273,31 @@ fun MerlotApp() {
             visible = showAlertBanner && showTickerOnScreen && alertsEnabled,
             modifier = Modifier.align(Alignment.TopCenter)
         )
+
+        // Auto-update dialog — shows after download completes
+        if (!showSplash && updateState.updateReady && !updateState.dismissed) {
+            UpdateReadyDialog(
+                version = updateState.latestVersion,
+                onInstall = { autoUpdateViewModel.installNow() },
+                onDismiss = { autoUpdateViewModel.dismiss() }
+            )
+        }
+
+        // Subtle download progress indicator (top bar while downloading)
+        if (!showSplash && updateState.isDownloading) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 4.dp)
+            ) {
+                Text(
+                    text = "Downloading update… ${updateState.downloadProgress}%",
+                    color = MerlotColors.Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
 
         // Video splash overlay — covers everything while app loads underneath
         if (showSplash) {
@@ -405,5 +435,84 @@ private fun ExitDialogButton(
             fontWeight = FontWeight.SemiBold,
             fontSize = 15.sp
         )
+    }
+}
+
+@Composable
+private fun UpdateReadyDialog(
+    version: String,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val installFocusRequester = remember { FocusRequester() }
+
+    // Auto-focus "Install Now" button
+    LaunchedEffect(Unit) {
+        try { installFocusRequester.requestFocus() } catch (_: Exception) {}
+    }
+
+    // Full-screen semi-transparent backdrop
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.7f))
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null
+            ) { /* consume backdrop clicks */ }
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                    onDismiss()
+                }
+                true
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(MerlotColors.Surface2)
+                .border(1.dp, MerlotColors.Border, RoundedCornerShape(16.dp))
+                .padding(32.dp)
+        ) {
+            androidx.compose.foundation.layout.Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Update Available",
+                    color = MerlotColors.TextPrimary,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Merlot TV v$version is ready to install",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Current: v${com.merlottv.kotlin.BuildConfig.VERSION_NAME}",
+                    color = MerlotColors.TextMuted,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    ExitDialogButton(
+                        text = "Install Now",
+                        onClick = onInstall,
+                        isPrimary = true,
+                        focusRequester = installFocusRequester
+                    )
+                    ExitDialogButton(
+                        text = "Later",
+                        onClick = onDismiss,
+                        isPrimary = false
+                    )
+                }
+            }
+        }
     }
 }
