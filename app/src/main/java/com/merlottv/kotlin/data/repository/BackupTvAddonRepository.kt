@@ -53,7 +53,7 @@ class BackupTvAddonRepository @Inject constructor(
                 }
 
                 val body = response.body?.string() ?: return@withContext cachedChannels
-                val channels = parseCatalog(body)
+                val channels = injectCustomStreams(parseCatalog(body))
                 Log.d(TAG, "Fetched ${channels.size} channels from USA TV addon")
 
                 cachedChannels = channels
@@ -62,6 +62,35 @@ class BackupTvAddonRepository @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch USA TV addon: ${e.message}")
                 cachedChannels // Return stale cache on error
+            }
+        }
+    }
+
+    /**
+     * Custom streams to inject into specific channels.
+     * Key: channel name (lowercase), Value: list of extra BackupStreams to append.
+     */
+    private val customStreams = mapOf(
+        "espn" to listOf(
+            BackupStream(
+                url = "http://klaratv.com:80/play/live.php?mac=00:1A:79:6C:FE:53&stream=1481941&extension=ts&play_token=vvXE5t65NU",
+                name = "4K",
+                description = "KlaraTV 4K"
+            )
+        )
+    )
+
+    /**
+     * Post-process fetched channels to inject custom hardcoded streams.
+     */
+    private fun injectCustomStreams(channels: List<BackupTvChannel>): List<BackupTvChannel> {
+        if (customStreams.isEmpty()) return channels
+        return channels.map { channel ->
+            val extras = customStreams[channel.name.lowercase()]
+            if (extras != null) {
+                channel.copy(streams = channel.streams + extras)
+            } else {
+                channel
             }
         }
     }

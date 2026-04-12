@@ -265,8 +265,17 @@ fun PlayerScreen(
                 // URLs like "https://a1xs.vip/300003" have no extension, so ExoPlayer
                 // defaults to progressive extraction which fails for HLS/DASH streams.
                 // For live TV streams (contentType="tv") or .m3u8 URLs, hint HLS.
+                // For raw MPEG-TS streams (extension=ts or .ts URLs), hint TS.
                 val uri = Uri.parse(streamUrl)
-                val mediaItem = if (
+                val isTsStream = streamUrl.contains("extension=ts", ignoreCase = true) ||
+                    streamUrl.contains(".ts", ignoreCase = true) ||
+                    streamUrl.contains("output=ts", ignoreCase = true)
+                val mediaItem = if (isTsStream) {
+                    MediaItem.Builder()
+                        .setUri(uri)
+                        .setMimeType(MimeTypes.VIDEO_MP2T)
+                        .build()
+                } else if (
                     contentType == "tv" ||
                     streamUrl.contains(".m3u8", ignoreCase = true) ||
                     (!streamUrl.contains(".mp4", ignoreCase = true) &&
