@@ -245,14 +245,14 @@ class LiveTvViewModel @Inject constructor(
         val gentleLoadControl = DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, 65_536))
             .setBufferDurationsMs(
-                50_000,  // 50s min buffer — TiviMate proven
-                50_000,  // 50s max buffer
+                120_000, // 2 min min buffer — TiviMate-competitive
+                120_000, // 2 min max buffer
                 userBufferMs.coerceAtLeast(500), // Slider controls startup
-                2_000    // 2s rebuffer resume
+                1_500    // 1.5s rebuffer resume — fast recovery
             )
-            .setPrioritizeTimeOverSizeThresholds(true) // Time first — gentle on servers
-            .setTargetBufferBytes(60 * 1024 * 1024)    // 60MB cap — plenty for 50s
-            .setBackBuffer(20_000, true)                // 20s back-buffer
+            .setPrioritizeTimeOverSizeThresholds(false) // Size first — fill buffer aggressively
+            .setTargetBufferBytes(120 * 1024 * 1024)    // 120MB cap — plenty for 2 min
+            .setBackBuffer(30_000, true)                 // 30s back-buffer
             .build()
 
         val httpFactory = DefaultHttpDataSource.Factory()
@@ -288,7 +288,7 @@ class LiveTvViewModel @Inject constructor(
             .build()
             .apply {
                 playWhenReady = true
-                Log.d("LiveTvVM", "Gentle player created for local affiliates (50s buffer, 60MB cap)")
+                Log.d("LiveTvVM", "Gentle player created for local affiliates (2-min buffer, 120MB cap)")
 
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -1181,7 +1181,7 @@ class LiveTvViewModel @Inject constructor(
         val activePlayer = if (isGentle) gentlePlayer else player
 
         if (isGentle) {
-            Log.d("LiveTvVM", "Local affiliate detected: '${channel.name}' → using gentle player (50s buffer)")
+            Log.d("LiveTvVM", "Local affiliate detected: '${channel.name}' → using gentle player (2-min buffer)")
         } else {
             Log.d("LiveTvVM", "Normal channel: '${channel.name}' → using Apollo player (10-min buffer)")
         }
@@ -1223,8 +1223,8 @@ class LiveTvViewModel @Inject constructor(
             totalRebufferMs = 0L,
             // Buffer config info for Quick Menu
             bufferConfigLabel = if (usingGentlePlayer) "Gentle (Local)" else "Apollo",
-            bufferSizeSec = if (usingGentlePlayer) 50 else 600,
-            bufferMemoryCapMb = if (usingGentlePlayer) 60
+            bufferSizeSec = if (usingGentlePlayer) 120 else 600,
+            bufferMemoryCapMb = if (usingGentlePlayer) 120
                 else (Runtime.getRuntime().maxMemory() / 2 / 1024 / 1024).toInt(),
             liveOffsetMs = if (usingGentlePlayer) 10_000 else 5_000
         )
@@ -1693,11 +1693,41 @@ class LiveTvViewModel @Inject constructor(
 
     fun resumePlayback() {
         if (isPlayerReleased) return
-        try {
-            if (_uiState.value.selectedChannel != null && !player.isPlaying) {
-                player.play()
+        val channel = _uiState.value.selectedChannel
+        if (channel != null) {
+            try {
+                val activePlayer = getActivePlayer()
+                // After sleep/background, the stream connection is dead.
+                // Re-prepare from scratch to reconnect (like initial channel selection).
+                activePlayer.stop()
+                activePlayer.clearMediaItems()
+
+                val isGentle = isLocalAffiliate(channel)
+                val targetOffset = if (isGentle) 10_000L else 8_000L
+                val minOffset = if (isGentle) 5_000L else 3_000L
+                val maxOffset = if (isGentle) 60_000L else 45_000L
+
+                val mediaItem = MediaItem.Builder()
+                    .setUri(channel.streamUrl)
+                    .setLiveConfiguration(
+                        MediaItem.LiveConfiguration.Builder()
+                            .setMaxPlaybackSpeed(1.04f)
+                            .setMinPlaybackSpeed(0.96f)
+                            .setTargetOffsetMs(targetOffset)
+                            .setMinOffsetMs(minOffset)
+                            .setMaxOffsetMs(maxOffset)
+                            .build()
+                    )
+                    .build()
+                activePlayer.setMediaItem(mediaItem)
+                activePlayer.prepare()
+                activePlayer.play()
+                Log.d("LiveTvVM", "Resumed playback: '${channel.name}' (re-prepared stream)")
+            } catch (e: Exception) {
+                Log.e("LiveTvVM", "Resume failed, falling back to safePlayChannel", e)
+                safePlayChannel(channel)
             }
-        } catch (_: Exception) {}
+        }
         // Check if playlist config changed while we were away (e.g. user toggled a playlist)
         refreshIfPlaylistsChanged()
     }
