@@ -885,6 +885,23 @@ class LiveTvViewModel @Inject constructor(
             }
         }
 
+        // Observe playlist changes reactively — reload channels when playlists are added/removed/toggled
+        viewModelScope.launch {
+            var isFirstEmission = true
+            settingsDataStore.playlists.collect { playlists ->
+                if (isFirstEmission) {
+                    isFirstEmission = false
+                    return@collect // skip first emission, handled by loadChannelsAndEpgParallel below
+                }
+                val enabledPlaylists = playlists.filter { it.enabled }
+                val currentKey = enabledPlaylists.map { it.url }.sorted().joinToString("|")
+                if (currentKey != lastLoadedPlaylistKey) {
+                    Log.d("LiveTvVM", "Playlists changed — reloading channels")
+                    loadChannelsAndEpgParallel()
+                }
+            }
+        }
+
         // Launch channels + EPG + backup pre-warm ALL in parallel for fastest startup
         loadChannelsAndEpgParallel()
         observeFavorites()
@@ -898,8 +915,9 @@ class LiveTvViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
 
-            // One-time migration: inject Xtreme Backup playlist if not present
+            // One-time migrations: inject default playlists if not present
             settingsDataStore.migrateXtremeBackup()
+            settingsDataStore.migratePianoMan()
 
             // Launch EPG loading concurrently
             val epgJob = launch { loadEpgInternal() }
@@ -907,6 +925,8 @@ class LiveTvViewModel @Inject constructor(
             try {
                 val playlists = settingsDataStore.playlists.first()
                 val enabledPlaylists = playlists.filter { it.enabled }
+                Log.d("LiveTvVM", "All playlists: ${playlists.size}, enabled: ${enabledPlaylists.size}")
+                enabledPlaylists.forEach { Log.d("LiveTvVM", "  → '${it.name}' url=${it.url.take(80)}") }
 
                 // Record the loaded playlist key so we can detect changes later
                 lastLoadedPlaylistKey = enabledPlaylists.map { it.url }.sorted().joinToString("|")
@@ -1682,7 +1702,7 @@ class LiveTvViewModel @Inject constructor(
         refreshIfPlaylistsChanged()
     }
 
-    private fun refreshIfPlaylistsChanged() {
+    fun refreshIfPlaylistsChanged() {
         viewModelScope.launch {
             try {
                 val playlists = settingsDataStore.playlists.first()

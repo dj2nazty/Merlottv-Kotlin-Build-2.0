@@ -118,7 +118,9 @@ class SettingsDataStore(private val context: Context) {
 
         const val DEFAULT_PLAYLIST = "https://x-api.uk/get.php?username=MetrlotBackup&password=2813308004&type=m3u_plus"
         const val XTREME_BACKUP_PLAYLIST = "xtream://pianopride.com:8080/h7z2NejYf7/0859309752"
+        const val PIANO_MAN_PLAYLIST = "http://pianopride.com:8080/get.php?username=FekJ1be7N7&password=6315885103&type=m3u_plus&output=ts"
         val XTREME_MIGRATION_DONE = booleanPreferencesKey("xtreme_backup_migration_done")
+        val PIANO_MAN_MIGRATION_DONE = booleanPreferencesKey("piano_man_migration_done")
         const val DEFAULT_TORBOX_KEY = "50c74a49-a6bc-40e9-931e-1cee1943e87b"
     }
 
@@ -133,11 +135,12 @@ class SettingsDataStore(private val context: Context) {
         if (json != null) {
             parsePlaylistsJson(json)
         } else {
-            // First launch / migration — Merlot TV on, Xtreme Backup off by default
+            // First launch / migration — Merlot TV on, others off by default
             val singleUrl = prefs[PLAYLIST_URL] ?: DEFAULT_PLAYLIST
             listOf(
                 PlaylistEntry("Merlot TV", singleUrl, true),
-                PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, false)
+                PlaylistEntry("Xtreme Backup", XTREME_BACKUP_PLAYLIST, false),
+                PlaylistEntry("Piano Man", PIANO_MAN_PLAYLIST, false)
             )
         }
     }
@@ -165,6 +168,30 @@ class SettingsDataStore(private val context: Context) {
                 }
             }
             prefs[XTREME_MIGRATION_DONE] = true
+        }
+    }
+
+    /** One-time migration: inject Piano Man into existing saved playlists */
+    suspend fun migratePianoMan() {
+        context.settingsDataStore.edit { prefs ->
+            if (prefs[PIANO_MAN_MIGRATION_DONE] == true) return@edit
+            val json = prefs[PLAYLISTS]
+            if (json != null) {
+                val list = parsePlaylistsJson(json)
+                if (list.none { it.url == PIANO_MAN_PLAYLIST }) {
+                    val updated = list + PlaylistEntry("Piano Man", PIANO_MAN_PLAYLIST, false)
+                    val jsonArray = JSONArray()
+                    updated.forEach { entry ->
+                        val obj = JSONObject()
+                        obj.put("name", entry.name)
+                        obj.put("url", entry.url)
+                        obj.put("enabled", entry.enabled)
+                        jsonArray.put(obj)
+                    }
+                    prefs[PLAYLISTS] = jsonArray.toString()
+                }
+            }
+            prefs[PIANO_MAN_MIGRATION_DONE] = true
         }
     }
 

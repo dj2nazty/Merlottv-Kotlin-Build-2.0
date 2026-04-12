@@ -38,17 +38,20 @@ class M3uParser @Inject constructor() {
                     val epgId = extractAttribute(extInf, "tvg-id=\"")
                     val tvgName = extractAttribute(extInf, "tvg-name=\"")
 
-                    channels.add(
-                        Channel(
-                            id = epgId.ifEmpty { "${group}_${name}".hashCode().toString() },
-                            name = name,
-                            group = group,
-                            logoUrl = logo,
-                            streamUrl = url,
-                            epgId = epgId.ifEmpty { tvgName },
-                            number = channelNumber
+                    // Skip VOD content (movies/series) — only keep live TV channels
+                    if (!isVodEntry(group, name, url)) {
+                        channels.add(
+                            Channel(
+                                id = epgId.ifEmpty { "${group}_${name}".hashCode().toString() },
+                                name = name,
+                                group = group,
+                                logoUrl = logo,
+                                streamUrl = url,
+                                epgId = epgId.ifEmpty { tvgName },
+                                number = channelNumber
+                            )
                         )
-                    )
+                    }
                     pendingExtInf = null
                 } else if (trimmed.startsWith("#") || trimmed.isEmpty()) {
                     // Comment or blank line — keep pendingExtInf
@@ -99,7 +102,7 @@ class M3uParser @Inject constructor() {
                     j++
                 }
 
-                if (url.isNotEmpty()) {
+                if (url.isNotEmpty() && !isVodEntry(group, name, url)) {
                     channels.add(
                         Channel(
                             id = epgId.ifEmpty { "${group}_${name}".hashCode().toString() },
@@ -118,6 +121,42 @@ class M3uParser @Inject constructor() {
             i++
         }
         return channels
+    }
+
+    /**
+     * Detects VOD entries (movies/TV series) that should be excluded from Live TV.
+     * Checks group title, channel name, and URL for common VOD patterns.
+     */
+    private fun isVodEntry(group: String, name: String, url: String): Boolean {
+        val groupLower = group.lowercase()
+        val nameLower = name.lowercase()
+        val urlLower = url.lowercase()
+
+        // Group-based VOD detection
+        val vodGroupKeywords = arrayOf(
+            "vod", "movie", "film", "series", "tv show", "tvshow",
+            "on demand", "catch up", "catchup", "ppv", "pay per view",
+            "cinema", "boxset", "box set", "episode"
+        )
+        for (keyword in vodGroupKeywords) {
+            if (groupLower.contains(keyword)) return true
+        }
+
+        // URL-based VOD detection — file extensions typical of VOD content
+        val vodExtensions = arrayOf(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm")
+        for (ext in vodExtensions) {
+            if (urlLower.endsWith(ext) || urlLower.contains("$ext?") || urlLower.contains("$ext&")) return true
+        }
+
+        // URL path patterns common in IPTV providers for VOD
+        if (urlLower.contains("/movie/") || urlLower.contains("/series/") ||
+            urlLower.contains("/vod/") || urlLower.contains("/films/")) return true
+
+        // Name patterns — "S01 E01", "(2024)", year patterns typical of VOD titles
+        if (nameLower.matches(Regex(".*s\\d{1,2}\\s*e\\d{1,2}.*"))) return true
+        if (nameLower.matches(Regex(".*\\(\\d{4}\\).*")) && !groupLower.contains("live") && !groupLower.contains("channel")) return true
+
+        return false
     }
 
     /**

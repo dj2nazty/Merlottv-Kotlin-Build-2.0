@@ -313,8 +313,9 @@ private fun ExitConfirmationDialog(
 ) {
     val noFocusRequester = remember { FocusRequester() }
 
-    // Auto-focus "No" button (safer default)
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    // Auto-focus "No" button (safer default) — delay to ensure layout is ready
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(100)
         try { noFocusRequester.requestFocus() } catch (_: Exception) {}
     }
 
@@ -327,13 +328,21 @@ private fun ExitConfirmationDialog(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null
             ) { /* consume clicks on backdrop */ }
-            .onKeyEvent { event ->
-                // Bubble phase: consume any key events that weren't handled by the dialog buttons
-                // This prevents D-pad from reaching Settings/content behind the dialog
+            .onPreviewKeyEvent { event ->
+                // Capture phase: handle Back to dismiss, let D-pad through for button focus
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                     onDismiss()
+                    return@onPreviewKeyEvent true
                 }
-                true // consume ALL unhandled key events
+                // Let D-pad LEFT/RIGHT/UP/DOWN through so focus can move between buttons
+                if (event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
+                    event.key == Key.DirectionUp || event.key == Key.DirectionDown ||
+                    event.key == Key.DirectionCenter || event.key == Key.Enter ||
+                    event.key == Key.NumPadEnter || event.key == Key.Tab) {
+                    return@onPreviewKeyEvent false // let Compose focus system handle it
+                }
+                // Consume everything else so keys don't leak to content behind
+                event.type == KeyEventType.KeyDown
             },
         contentAlignment = Alignment.Center
     ) {
@@ -446,8 +455,9 @@ private fun UpdateReadyDialog(
 ) {
     val installFocusRequester = remember { FocusRequester() }
 
-    // Auto-focus "Install Now" button
+    // Auto-focus "Install Now" button — delay to ensure layout is ready
     LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(100)
         try { installFocusRequester.requestFocus() } catch (_: Exception) {}
     }
 
@@ -460,11 +470,18 @@ private fun UpdateReadyDialog(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null
             ) { /* consume backdrop clicks */ }
-            .onKeyEvent { event ->
+            .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                     onDismiss()
+                    return@onPreviewKeyEvent true
                 }
-                true
+                if (event.key == Key.DirectionLeft || event.key == Key.DirectionRight ||
+                    event.key == Key.DirectionUp || event.key == Key.DirectionDown ||
+                    event.key == Key.DirectionCenter || event.key == Key.Enter ||
+                    event.key == Key.NumPadEnter || event.key == Key.Tab) {
+                    return@onPreviewKeyEvent false
+                }
+                event.type == KeyEventType.KeyDown
             },
         contentAlignment = Alignment.Center
     ) {
